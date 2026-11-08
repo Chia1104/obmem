@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: b661ace
+verified_commit: e9961bd
 code_refs:
 - src/obsidian.rs#Api
 - src/catalog.rs#Catalog

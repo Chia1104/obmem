@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: db43d63
+verified_commit: e9961bd
 code_refs:
 - src/hooks.rs#changed_since
 - src/hooks.rs#Agent
@@ -14,6 +14,8 @@ code_refs:
 tags:
 - hooks
 - agents
+verified_at: 2026-11-09
+verified_by: agent
 ---
 # Detect unlogged work from git for agents other than Claude Code
 

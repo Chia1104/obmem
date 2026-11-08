@@ -6,13 +6,15 @@ author: agent
 confidence: medium
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: 1865dea
+verified_commit: e9961bd
 code_refs:
 - src/obsidian.rs#vault_id
 tags:
 - obsidian
 - gotcha
 - worktree
+verified_at: 2026-11-09
+verified_by: agent
 ---
 # obmem in a git worktree cannot reach Obsidian
 

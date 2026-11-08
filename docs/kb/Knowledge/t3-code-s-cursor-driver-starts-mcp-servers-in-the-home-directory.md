@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: 1865dea
+verified_commit: e9961bd
 code_refs:
 - src/server.rs#use_project
 - src/store.rs#project_ready
@@ -15,6 +15,8 @@ tags:
 - cursor
 - gotcha
 - mcp
+verified_at: 2026-11-09
+verified_by: agent
 ---
 # T3 Code's Cursor driver starts MCP servers in the home directory
 

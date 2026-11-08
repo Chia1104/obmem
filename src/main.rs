@@ -249,28 +249,18 @@ fn main() -> Result<()> {
         Cmd::Scan { files, staged } => {
             let store = store::Store::open(cfg.clone())?;
             let mut inputs: Vec<(String, String)> = Vec::new();
-            let mut paths = files;
             if staged {
-                let out = std::process::Command::new("git")
-                    .arg("-C").arg(&cfg.project_root)
-                    .args(["diff", "--cached", "--name-only", "--diff-filter=ACM"])
-                    .output()?;
-                for l in String::from_utf8_lossy(&out.stdout).lines() {
-                    let p = cfg.project_root.join(l);
-                    if p.starts_with(&cfg.project_vault) {
-                        paths.push(p);
-                    }
-                }
+                inputs.extend(staged_vault_inputs(&cfg)?);
             }
-            if paths.is_empty() && !staged {
+            if files.is_empty() && !staged {
                 let mut s = String::new();
                 std::io::stdin().read_to_string(&mut s)?;
                 inputs.push(("<stdin>".into(), s));
             }
-            for p in paths {
-                if let Ok(s) = std::fs::read_to_string(&p) {
-                    inputs.push((p.display().to_string(), s));
-                }
+            // Fail closed: a file that cannot be read is an error, not a silent pass.
+            for p in files {
+                let bytes = std::fs::read(&p).map_err(|e| anyhow::anyhow!("cannot scan {}: {e}", p.display()))?;
+                inputs.push((p.display().to_string(), String::from_utf8_lossy(&bytes).into_owned()));
             }
             let mut found = 0;
             for (name, text) in inputs {
@@ -372,6 +362,37 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// The staged files inside the project vault, read from the **index** (exactly what the commit
+/// will contain), not from the working tree: otherwise staging a secret and then cleaning the
+/// working copy would pass the hook. Paths come NUL-separated so quoting of unusual names
+/// (non-ASCII, spaces) cannot make a file unreadable and silently skipped; renames and copies are
+/// included; anything git cannot show is an error (fail closed).
+fn staged_vault_inputs(cfg: &config::Config) -> Result<Vec<(String, String)>> {
+    let git = |args: &[&str]| -> Result<Vec<u8>> {
+        let out = std::process::Command::new("git").arg("-C").arg(&cfg.project_root).args(args).output()?;
+        if !out.status.success() {
+            anyhow::bail!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+        }
+        Ok(out.stdout)
+    };
+    // git prints paths relative to the repository top, which need not be the project root
+    let top = PathBuf::from(String::from_utf8_lossy(&git(&["rev-parse", "--show-toplevel"])?).trim());
+    let top = std::fs::canonicalize(&top).unwrap_or(top);
+    let vault = std::fs::canonicalize(&cfg.project_vault).unwrap_or_else(|_| cfg.project_vault.clone());
+    let listing = git(&["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"])?;
+    let mut inputs = Vec::new();
+    for raw in listing.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        let rel = String::from_utf8(raw.to_vec())
+            .map_err(|_| anyhow::anyhow!("staged path is not UTF-8: {}", String::from_utf8_lossy(raw)))?;
+        if !top.join(&rel).starts_with(&vault) {
+            continue;
+        }
+        let content = git(&["show", &format!(":{rel}")])?;
+        inputs.push((rel, String::from_utf8_lossy(&content).into_owned()));
+    }
+    Ok(inputs)
+}
+
 /// Human-readable audit report (shared by the CLI and the MCP tool).
 pub fn audit_text(
     report: &audit::Audit,
@@ -419,4 +440,59 @@ pub fn audit_text(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_scan_reads_the_index_not_the_working_tree() {
+        let root = std::env::temp_dir().join(format!("obmem-staged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("docs/kb")).unwrap();
+        let g = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        g(&["init", "-q"]);
+        let cfg = config::Config {
+            project_root: root.clone(),
+            project_name: "t".into(),
+            project_vault: root.join("docs/kb"),
+            global_vault: root.join("g"),
+            secrets: Default::default(),
+            audit: Default::default(),
+        };
+        let token = concat!("gh", "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA");
+
+        // 1. stage a secret, then clean the working copy: the index still has it
+        std::fs::write(root.join("docs/kb/note.md"), format!("token {token}\n")).unwrap();
+        // 2. a non-ASCII name (git would quote it without -z)
+        std::fs::write(root.join("docs/kb/筆記 one.md"), format!("also {token}\n")).unwrap();
+        // 3. a file outside the vault is out of scope
+        std::fs::write(root.join("src.rs"), format!("let t = \"{token}\";\n")).unwrap();
+        g(&["add", "-A"]);
+        std::fs::write(root.join("docs/kb/note.md"), "clean now\n").unwrap();
+
+        let got = staged_vault_inputs(&cfg).unwrap();
+        let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"docs/kb/note.md") && names.contains(&"docs/kb/筆記 one.md"), "{names:?}");
+        assert!(!names.contains(&"src.rs"), "{names:?}");
+        assert!(got.iter().all(|(_, text)| text.contains(token)), "staged content, not the cleaned working copy");
+
+        // 4. a rename of a committed vault file is scanned too
+        g(&["commit", "-qm", "c"]);
+        g(&["mv", "docs/kb/筆記 one.md", "docs/kb/renamed.md"]);
+        let got = staged_vault_inputs(&cfg).unwrap();
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].0, "docs/kb/renamed.md");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

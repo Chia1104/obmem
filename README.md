@@ -208,7 +208,7 @@ Each finding's fix names the exact `git diff <commit> HEAD -- <path>` to read. A
 
 Placeholders like `<YOUR_KEY>`, `${VAR}`, `xxxx` are ignored. False positives: copy the `fingerprint` from the error into `_system/secret-allowlist.toml`.
 `mode = "block"` (default) refuses the write and tells the agent to replace the value with a reference; `"redact"` writes `[REDACTED:rule]` instead.
-`obmem scan --staged` works as a git pre-commit hook, so human edits to the vault get checked too. It scans only staged files inside the project vault; source code is out of scope (test fixtures contain fake tokens).
+`obmem scan --staged` works as a git pre-commit hook, so human edits to the vault get checked too. It scans only staged files inside the project vault, and reads them from the index: exactly what the commit will contain, not the working copy. It handles renames and unusual file names, and fails rather than skipping a file it cannot read. Source code is out of scope, because test fixtures contain fake tokens.
 
 The project vault may come from an untrusted clone, so its files can only add to the scanner, never weaken it:
 - Vault rule files cannot override built-in rule ids.

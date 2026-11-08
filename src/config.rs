@@ -40,6 +40,16 @@ impl Default for AuditConfig {
 #[serde(default)]
 pub struct GlobalFile {
     pub vault: Option<String>,
+    pub secrets: GlobalSecrets,
+}
+
+/// Secret-scanning switches that may only come from the user's own config: a repo's
+/// `.obmem.toml` arrives with a clone and must not be able to weaken the scanner.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GlobalSecrets {
+    /// Set to false to stop treating sensitive-looking environment variables as known secrets.
+    pub scan_process_env: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -163,12 +173,13 @@ impl Config {
             .map(|s| expand_tilde(&s))
             .unwrap_or_else(|| home().join("Obsidian/AgentMemory"));
 
+        let secrets = secrets_policy(&project_root, pf.secrets, &gf.secrets)?;
         Ok(Self {
             project_root,
             project_name,
             project_vault,
             global_vault,
-            secrets: pf.secrets,
+            secrets,
             audit: pf.audit,
         })
     }
@@ -178,6 +189,33 @@ impl Config {
         // The name comes from repo config: keep it a single, harmless path component.
         self.global_vault.join("Projects").join(sanitize(&self.project_name))
     }
+}
+
+/// Repo config can only make secret scanning stricter: its `env_files` are added to the defaults
+/// (and must be plain relative paths inside the project), and it can enable but not disable
+/// process-environment scanning. `mode` may switch to `redact`, which still never stores a secret.
+fn secrets_policy(project_root: &Path, repo: SecretsConfig, user: &GlobalSecrets) -> Result<SecretsConfig> {
+    let mut env_files = SecretsConfig::default().env_files;
+    for f in repo.env_files {
+        let p = Path::new(&f);
+        if p.is_absolute()
+            || f.starts_with('~')
+            || p.components().any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+        {
+            anyhow::bail!(
+                "{}: secrets.env_files entry \"{f}\" must be a relative path inside the project",
+                project_root.join(PROJECT_CONFIG_FILE).display()
+            );
+        }
+        if !env_files.contains(&f) {
+            env_files.push(f);
+        }
+    }
+    Ok(SecretsConfig {
+        mode: repo.mode,
+        env_files,
+        scan_process_env: repo.scan_process_env || user.scan_process_env.unwrap_or(true),
+    })
 }
 
 /// The deepest existing ancestor of `p` (or `p` itself), with symlinks resolved.
@@ -238,6 +276,19 @@ mod tests {
         let r = Config::load(Some(&dir));
         let _ = std::fs::remove_dir_all(&dir);
         r
+    }
+
+    #[test]
+    fn repo_config_cannot_weaken_secret_scanning() {
+        let c = load_with("[secrets]\nenv_files = [\"config/.env.test\"]\nscan_process_env = false\n").unwrap();
+        assert!(c.secrets.scan_process_env, "repo cannot turn process-env scanning off");
+        assert!(c.secrets.env_files.contains(&".env".to_string()), "defaults stay");
+        assert!(c.secrets.env_files.contains(&"config/.env.test".to_string()), "additions allowed");
+        for bad in ["/etc/passwd", "../../.aws/credentials", "~/.ssh/id_rsa"] {
+            assert!(load_with(&format!("[secrets]\nenv_files = [\"{bad}\"]\n")).is_err(), "{bad}");
+        }
+        let empty = load_with("[secrets]\nenv_files = []\n").unwrap();
+        assert_eq!(empty.secrets.env_files, SecretsConfig::default().env_files);
     }
 
     #[test]

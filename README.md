@@ -218,6 +218,11 @@ The project vault may come from an untrusted clone, so its files can only add to
 
 For the same reason:
 - `.obmem.toml` `vault` must be a relative path inside the repo (no `..`, `~` or absolute paths).
+- Repo config can only make secret scanning stricter.
+  - `secrets.env_files` entries are added to the defaults, never replace them, and must be relative paths inside the repo. Symlinks that leave the repo are skipped.
+  - `scan_process_env = false` from the repo is ignored. To turn it off, set it in your own `~/.config/obmem/config.toml` under `[secrets]`.
+- Files are written through a randomly named temp file that is created exclusively, then renamed. A file or symlink planted in the vault cannot redirect the write.
+- `obmem init` never writes through a symlink, including a dangling one, and checks that each file really lands inside its repo or vault.
 - Every write checks that its real (symlink-resolved) folder is still inside its vault, and refuses to write through a symlinked file.
 - `name` is reduced to a single path component before it is used inside the global vault.
 - Finding notes can be changed only with `memory_resolve` / `obmem resolve`, not with `memory_write`.

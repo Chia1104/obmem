@@ -4,14 +4,26 @@ use crate::config::{Config, PROJECT_CONFIG_FILE, global_config_path};
 use anyhow::Result;
 use std::path::Path;
 
-fn put(path: &Path, content: &str, created: &mut Vec<String>) -> Result<()> {
-    if path.exists() {
+/// Create `path` with `content` unless something is already there. Never follows a symlink:
+/// `path.exists()` is false for a dangling symlink, and writing through it would create a file
+/// wherever it points. With `root`, the file must also really sit inside it.
+fn put(root: Option<&Path>, path: &Path, content: &str, created: &mut Vec<String>) -> Result<()> {
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            anyhow::bail!("refusing to create {}: it is a symlink", path.display());
+        }
         return Ok(());
     }
-    if let Some(d) = path.parent() {
-        std::fs::create_dir_all(d)?;
+    let dir = path.parent().ok_or_else(|| anyhow::anyhow!("no parent for {}", path.display()))?;
+    if let Some(r) = root {
+        crate::config::ensure_within(r, dir)?;
     }
-    std::fs::write(path, content)?;
+    std::fs::create_dir_all(dir)?;
+    if let Some(r) = root {
+        crate::config::ensure_within(r, dir)?;
+    }
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    std::io::Write::write_all(&mut f, content.as_bytes())?;
     created.push(path.display().to_string());
     Ok(())
 }
@@ -93,6 +105,7 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
     let gv = &cfg.global_vault;
 
     put(
+        Some(&cfg.project_root),
         &cfg.project_root.join(PROJECT_CONFIG_FILE),
         &format!(
             "# obmem project config\nvault = \"{}\"\nname = \"{}\"\n\n[secrets]\nmode = \"block\"   # or \"redact\"\nenv_files = [\".env\", \".env.local\", \".env.development\", \".env.production\"]\nscan_process_env = true\n",
@@ -102,6 +115,7 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
         &mut created,
     )?;
     put(
+        None,
         &global_config_path(),
         &format!("# obmem global config\nvault = \"{}\"\n", gv.display()),
         &mut created,
@@ -109,6 +123,7 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
 
     // Project vault (in repo, shared)
     put(
+        Some(pv),
         &pv.join("Index.md"),
         &format!(
             "---\ntype: concept\ntitle: {name} index\nstatus: active\nauthor: human\n---\n# {name}\n\n\
@@ -119,31 +134,32 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
         &mut created,
     )?;
     for d in ["Architecture", "Decisions", "Knowledge", "Runbooks", "Findings", "Inbox", "Archive"] {
-        put(&pv.join(d).join(".gitkeep"), "", &mut created)?;
+        put(Some(pv), &pv.join(d).join(".gitkeep"), "", &mut created)?;
     }
     // Obsidian's own app state (workspace layout, plugin caches) is per person, not team knowledge.
-    put(&pv.join(".gitignore"), "# Obsidian app state is per person\n.obsidian/\n", &mut created)?;
-    put(&pv.join("_system/secret-allowlist.toml"), ALLOWLIST, &mut created)?;
-    put(&pv.join("_system/secret-rules.toml"), RULES, &mut created)?;
-    put(&pv.join("_system/Review.base"), REVIEW_BASE, &mut created)?;
-    put(&pv.join("_system/Findings.base"), FINDINGS_BASE, &mut created)?;
-    put(&pv.join(crate::audit::SUPPRESSIONS_FILE), crate::audit::SUPPRESSIONS_TEMPLATE, &mut created)?;
+    put(Some(pv), &pv.join(".gitignore"), "# Obsidian app state is per person\n.obsidian/\n", &mut created)?;
+    put(Some(pv), &pv.join("_system/secret-allowlist.toml"), ALLOWLIST, &mut created)?;
+    put(Some(pv), &pv.join("_system/secret-rules.toml"), RULES, &mut created)?;
+    put(Some(pv), &pv.join("_system/Review.base"), REVIEW_BASE, &mut created)?;
+    put(Some(pv), &pv.join("_system/Findings.base"), FINDINGS_BASE, &mut created)?;
+    put(Some(pv), &pv.join(crate::audit::SUPPRESSIONS_FILE), crate::audit::SUPPRESSIONS_TEMPLATE, &mut created)?;
     put(
+        Some(pv),
         &pv.join("Templates/decision.md"),
         &template("decision", "## Context\n\n## Decision\n\n## Alternatives considered\n\n## Consequences\n"),
         &mut created,
     )?;
-    put(&pv.join("Templates/fact.md"), &template("fact", ""), &mut created)?;
-    put(&pv.join("Templates/procedure.md"), &template("procedure", "## Steps\n1. \n"), &mut created)?;
+    put(Some(pv), &pv.join("Templates/fact.md"), &template("fact", ""), &mut created)?;
+    put(Some(pv), &pv.join("Templates/procedure.md"), &template("procedure", "## Steps\n1. \n"), &mut created)?;
 
     // Global vault (personal)
     for d in ["Global/Feedback", "Global/Preferences"] {
-        put(&gv.join(d).join(".gitkeep"), "", &mut created)?;
+        put(Some(gv), &gv.join(d).join(".gitkeep"), "", &mut created)?;
     }
-    put(&gv.join("_system/secret-allowlist.toml"), ALLOWLIST, &mut created)?;
-    put(&gv.join("_system/Findings.base"), FINDINGS_BASE, &mut created)?;
-    put(&gv.join(crate::audit::SUPPRESSIONS_FILE), crate::audit::SUPPRESSIONS_TEMPLATE, &mut created)?;
-    put(&cfg.global_project_dir().join("Sessions/.gitkeep"), "", &mut created)?;
+    put(Some(gv), &gv.join("_system/secret-allowlist.toml"), ALLOWLIST, &mut created)?;
+    put(Some(gv), &gv.join("_system/Findings.base"), FINDINGS_BASE, &mut created)?;
+    put(Some(gv), &gv.join(crate::audit::SUPPRESSIONS_FILE), crate::audit::SUPPRESSIONS_TEMPLATE, &mut created)?;
+    put(Some(gv), &cfg.global_project_dir().join("Sessions/.gitkeep"), "", &mut created)?;
     Ok(created)
 }
 
@@ -174,4 +190,36 @@ pub fn setup_snippets(bin: &str, cfg: &Config) -> String {
    findings show up in _system/Findings.base and at session start.
 "#
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn put_never_follows_symlinks() {
+        let dir = std::env::temp_dir().join(format!("obmem-put-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (vault, outside) = (dir.join("kb"), dir.join("outside"));
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let mut created = vec![];
+
+        // a dangling symlink planted where init wants to write (path.exists() would say false)
+        std::os::unix::fs::symlink(outside.join("planted.txt"), vault.join("Index.md")).unwrap();
+        assert!(put(Some(&vault), &vault.join("Index.md"), "x", &mut created).is_err());
+        assert!(!outside.join("planted.txt").exists(), "nothing written through the symlink");
+
+        // a symlinked folder inside the vault that points outside it
+        std::os::unix::fs::symlink(&outside, vault.join("Decisions")).unwrap();
+        assert!(put(Some(&vault), &vault.join("Decisions/.gitkeep"), "", &mut created).is_err());
+        assert!(!outside.join(".gitkeep").exists());
+
+        // normal files are created once, then left alone
+        assert!(put(Some(&vault), &vault.join("Runbooks/.gitkeep"), "", &mut created).is_ok());
+        std::fs::write(vault.join("Runbooks/.gitkeep"), "mine").unwrap();
+        put(Some(&vault), &vault.join("Runbooks/.gitkeep"), "", &mut created).unwrap();
+        assert_eq!(std::fs::read_to_string(vault.join("Runbooks/.gitkeep")).unwrap(), "mine");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

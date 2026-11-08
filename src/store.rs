@@ -83,7 +83,15 @@ impl Store {
             // Only the personal global vault may add broad allowlist entries (regexes, stopwords);
             // project-vault files arrive with clones and contribute exact fingerprints only.
             trusted_files: vec![allow_files[1].as_path(), rule_files[1].as_path()],
-            env_files: cfg.secrets.env_files.iter().map(|f| cfg.project_root.join(f)).collect(),
+            // Repo config chose these (validated as relative in Config::load); also refuse ones that
+            // leave the project through a symlink.
+            env_files: cfg
+                .secrets
+                .env_files
+                .iter()
+                .map(|f| cfg.project_root.join(f))
+                .filter(|p| crate::config::ensure_within(&cfg.project_root, p).is_ok())
+                .collect(),
             scan_process_env: cfg.secrets.scan_process_env,
         })?;
         let mut s = Self { cfg, index, obs: Box::new(obsidian::Cli::default()), scanner };
@@ -657,10 +665,40 @@ pub fn atomic_write(root: &Path, path: &Path, content: &str) -> Result<()> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         bail!("refusing to write {}: it is a symlink", path.display());
     }
-    let tmp = dir.join(format!(".{}.obmem-tmp", path.file_name().unwrap().to_string_lossy()));
-    std::fs::write(&tmp, content)?;
-    std::fs::rename(&tmp, path)?;
+    // Random name, created exclusively: with a predictable name, a file or symlink planted in
+    // the vault (e.g. by a cloned repo) could redirect the write. `create_new` fails on any
+    // existing entry, dangling symlinks included.
+    let base = path.file_name().unwrap().to_string_lossy();
+    let (tmp, mut file) = {
+        let mut attempt = 0u32;
+        loop {
+            let tmp = dir.join(format!(".{base}.{:016x}.obmem-tmp", temp_nonce(attempt)));
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+                Ok(f) => break (tmp, f),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 8 => attempt += 1,
+                Err(e) => return Err(anyhow!("creating temp file in {}: {e}", dir.display())),
+            }
+        }
+    };
+    let written = std::io::Write::write_all(&mut file, content.as_bytes()).and_then(|_| file.sync_all());
+    drop(file);
+    if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(anyhow!("writing {}: {e}", path.display()));
+    }
     Ok(())
+}
+
+/// Unpredictable per process (RandomState is seeded randomly) and distinct per call.
+fn temp_nonce(attempt: u32) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    h.write_u32(attempt);
+    h.write_u32(std::process::id());
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.finish()
 }
 
 fn git_head(root: &Path) -> Option<String> {
@@ -691,6 +729,32 @@ mod tests {
             author: "agent:test".into(),
             file_stem: None,
         }
+    }
+
+    #[test]
+    fn atomic_write_uses_fresh_temp_files_and_refuses_symlink_targets() {
+        let dir = std::env::temp_dir().join(format!("obmem-aw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("v")).unwrap();
+        let v = dir.join("v");
+        // the old predictable temp name, planted as a symlink, is no longer used at all
+        std::os::unix::fs::symlink(dir.join("stolen"), v.join(".n.md.obmem-tmp")).unwrap();
+        for i in 0..3 {
+            atomic_write(&v, &v.join("n.md"), &format!("v{i}")).unwrap();
+        }
+        assert_eq!(std::fs::read_to_string(v.join("n.md")).unwrap(), "v2");
+        assert!(!dir.join("stolen").exists());
+        let leftovers: Vec<_> = std::fs::read_dir(&v)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".obmem-tmp") && e.file_name() != ".n.md.obmem-tmp")
+            .collect();
+        assert!(leftovers.is_empty(), "no temp files left behind");
+        // the target itself being a symlink is refused
+        std::os::unix::fs::symlink(dir.join("elsewhere.md"), v.join("link.md")).unwrap();
+        assert!(atomic_write(&v, &v.join("link.md"), "x").is_err());
+        assert!(!dir.join("elsewhere.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

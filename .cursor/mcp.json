@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "obmem": {
+      "command": "obmem",
+      "args": [
+        "serve",
+        "--project",
+        "${workspaceFolder}"
+      ]
+    }
+  }
+}

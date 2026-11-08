@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "obmem hook session-start" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "obmem hook stop" }] }],
+    "PreCompact": [{ "hooks": [{ "type": "command", "command": "obmem hook pre-compact" }] }]
+  }
+}

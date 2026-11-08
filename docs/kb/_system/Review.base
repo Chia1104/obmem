@@ -1,0 +1,14 @@
+filters:
+  or:
+    - status == "draft"
+    - status == "open"
+views:
+  - type: table
+    name: Review queue
+    order:
+      - file.name
+      - type
+      - status
+      - author
+      - confidence
+      - updated

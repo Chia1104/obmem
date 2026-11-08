@@ -1,0 +1,11 @@
+# obmem audit settings and suppressions for this vault.
+# Keep top-level keys above the first [[suppressed]] entry (TOML puts later keys in that table).
+
+# Rules to skip entirely in this vault, e.g. ["orphan"].
+# Available: broken-link, orphan, schema, stale, supersede, duplicate, code-drift
+disabled_rules = []
+# Vault-relative path prefixes to skip. Templates/ and _system/ are always skipped.
+ignore_paths = []
+
+# Findings a human rejected as false positives. `obmem audit --write` appends entries here when
+# a finding's status is set to `rejected`; you can also add them by hand (fingerprint is enough).

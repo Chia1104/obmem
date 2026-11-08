@@ -1,0 +1,29 @@
+filters:
+  and:
+    - type == "finding"
+views:
+  - type: table
+    name: Open findings
+    filters:
+      or:
+        - status == "open"
+        - status == "accepted"
+    order:
+      - file.name
+      - severity
+      - rule
+      - target
+      - status
+      - updated
+  - type: table
+    name: Closed
+    filters:
+      or:
+        - status == "fixed"
+        - status == "rejected"
+    order:
+      - file.name
+      - rule
+      - target
+      - status
+      - updated

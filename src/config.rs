@@ -1,0 +1,266 @@
+//! Configuration: where the two vaults live and how writes are policed.
+//!
+//! - Project vault: inside the repo (default `docs/kb`), shared with the team via git.
+//! - Global vault:  a personal vault (default `~/Obsidian/AgentMemory`) for preferences,
+//!   cross-project feedback and noisy session logs that should not land in the repo.
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+pub const PROJECT_CONFIG_FILE: &str = ".obmem.toml";
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectFile {
+    /// Vault directory, relative to the project root.
+    pub vault: Option<String>,
+    /// Project name used in the global vault (`Projects/<name>/`).
+    pub name: Option<String>,
+    pub secrets: SecretsConfig,
+    pub audit: AuditConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuditConfig {
+    /// Active knowledge notes not verified/updated for this many days are reported as stale.
+    pub stale_days: i64,
+    /// Title similarity (trigram Jaccard) at or above which two notes count as duplicates.
+    pub duplicate_threshold: f64,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self { stale_days: 180, duplicate_threshold: 0.75 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GlobalFile {
+    pub vault: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SecretMode {
+    /// Refuse the write and tell the agent what to remove (default).
+    #[default]
+    Block,
+    /// Replace the secret with `[REDACTED:<rule>]` and write anyway.
+    Redact,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecretsConfig {
+    pub mode: SecretMode,
+    /// Files (relative to project root) whose values are treated as known secrets.
+    pub env_files: Vec<String>,
+    /// Also treat values of sensitive-looking environment variables as known secrets.
+    pub scan_process_env: bool,
+}
+
+impl Default for SecretsConfig {
+    fn default() -> Self {
+        Self {
+            mode: SecretMode::Block,
+            env_files: vec![
+                ".env".into(),
+                ".env.local".into(),
+                ".env.development".into(),
+                ".env.production".into(),
+            ],
+            scan_process_env: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub project_root: PathBuf,
+    pub project_name: String,
+    pub project_vault: PathBuf,
+    pub global_vault: PathBuf,
+    pub secrets: SecretsConfig,
+    pub audit: AuditConfig,
+}
+
+pub fn home() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn expand_tilde(p: &str) -> PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        home().join(rest)
+    } else if p == "~" {
+        home()
+    } else {
+        PathBuf::from(p)
+    }
+}
+
+/// `~/.config/obmem/config.toml` (XDG style on every OS, easier to find than
+/// `~/Library/Application Support`).
+pub fn global_config_path() -> PathBuf {
+    if let Ok(p) = std::env::var("OBMEM_CONFIG") {
+        return PathBuf::from(p);
+    }
+    home().join(".config/obmem/config.toml")
+}
+
+/// Walk up from `start` until a `.obmem.toml` or `.git` is found.
+pub fn find_project_root(start: &Path) -> PathBuf {
+    let mut cur = Some(start);
+    while let Some(dir) = cur {
+        if dir.join(PROJECT_CONFIG_FILE).exists() || dir.join(".git").exists() {
+            return dir.to_path_buf();
+        }
+        cur = dir.parent();
+    }
+    start.to_path_buf()
+}
+
+impl Config {
+    pub fn load(project_override: Option<&Path>) -> Result<Self> {
+        let start = match project_override {
+            Some(p) => p.to_path_buf(),
+            None => match std::env::var("OBMEM_PROJECT_ROOT") {
+                Ok(p) => PathBuf::from(p),
+                Err(_) => std::env::current_dir()?,
+            },
+        };
+        let project_root = find_project_root(&start);
+
+        let pf: ProjectFile = read_toml(&project_root.join(PROJECT_CONFIG_FILE))?.unwrap_or_default();
+        let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+
+        let project_name = pf.name.clone().unwrap_or_else(|| {
+            project_root
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "default".into())
+        });
+        // `.obmem.toml` ships with the repo, so a clone must not be able to point writes elsewhere.
+        let vault_rel = pf.vault.as_deref().unwrap_or("docs/kb");
+        let vp = Path::new(vault_rel);
+        if vp.is_absolute()
+            || vault_rel.starts_with('~')
+            || vp.components().any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+        {
+            anyhow::bail!(
+                "{}: `vault = \"{vault_rel}\"` must be a relative path inside the project (no `..`, `~` or absolute paths)",
+                project_root.join(PROJECT_CONFIG_FILE).display()
+            );
+        }
+        let project_vault = project_root.join(vp);
+        // Lexically fine is not enough: an existing component may be a symlink out of the repo.
+        ensure_within(&project_root, &project_vault)?;
+        let global_vault = std::env::var("OBMEM_GLOBAL_VAULT")
+            .ok()
+            .or(gf.vault)
+            .map(|s| expand_tilde(&s))
+            .unwrap_or_else(|| home().join("Obsidian/AgentMemory"));
+
+        Ok(Self {
+            project_root,
+            project_name,
+            project_vault,
+            global_vault,
+            secrets: pf.secrets,
+            audit: pf.audit,
+        })
+    }
+
+    /// Session logs etc. for this project inside the global vault.
+    pub fn global_project_dir(&self) -> PathBuf {
+        // The name comes from repo config: keep it a single, harmless path component.
+        self.global_vault.join("Projects").join(sanitize(&self.project_name))
+    }
+}
+
+/// The deepest existing ancestor of `p` (or `p` itself), with symlinks resolved.
+fn real_existing(p: &Path) -> Result<PathBuf> {
+    let mut cur = p;
+    loop {
+        if cur.exists() {
+            return Ok(std::fs::canonicalize(cur)?);
+        }
+        cur = cur.parent().ok_or_else(|| anyhow::anyhow!("no existing ancestor of {}", p.display()))?;
+    }
+}
+
+/// Refuse paths that leave `root` once symlinks are resolved (checks what exists so far, so it
+/// can run before any directory is created).
+pub fn ensure_within(root: &Path, p: &Path) -> Result<()> {
+    if !p.starts_with(root) {
+        anyhow::bail!("refusing {}: not inside {}", p.display(), root.display());
+    }
+    let real_root = real_existing(root)?;
+    let real = real_existing(p)?;
+    if !real.starts_with(&real_root) {
+        anyhow::bail!(
+            "refusing {}: it resolves to {} (outside {}) through a symlink",
+            p.display(),
+            real.display(),
+            real_root.display()
+        );
+    }
+    Ok(())
+}
+
+fn sanitize(s: &str) -> String {
+    let s: String = s
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    if s.is_empty() { "default".into() } else { s }
+}
+
+fn read_toml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let s = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let v = toml::from_str(&s).with_context(|| format!("parsing {}", path.display()))?;
+    Ok(Some(v))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load_with(toml: &str) -> Result<Config> {
+        let dir = std::env::temp_dir().join(format!("obmem-cfg-{}-{}", std::process::id(), sanitize(toml)));
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(dir.join(PROJECT_CONFIG_FILE), toml)?;
+        let r = Config::load(Some(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+        r
+    }
+
+    #[test]
+    fn repo_config_cannot_escape() {
+        for bad in ["vault = \"../../etc\"", "vault = \"/tmp/x\"", "vault = \"~/x\"", "vault = \"docs/../../x\""] {
+            assert!(load_with(bad).is_err(), "{bad} should be rejected");
+        }
+        // a symlinked vault folder that points outside the repo
+        let dir = std::env::temp_dir().join(format!("obmem-cfg-link-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("obmem-cfg-outside-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("docs")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("docs/kb")).unwrap();
+        let err = Config::load(Some(&dir)).unwrap_err().to_string();
+        assert!(err.contains("symlink"), "{err}");
+        assert!(ensure_within(&dir, &dir.join("docs/kb/Decisions/x.md")).is_err());
+        assert!(ensure_within(&dir, &dir.join("ok/new/dir/x.md")).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+
+        let c = load_with("vault = \"./docs/kb\"\nname = \"../../evil\"").unwrap();
+        let dir = c.global_project_dir();
+        assert_eq!(dir.parent().unwrap(), c.global_vault.join("Projects"));
+        assert!(!dir.file_name().unwrap().to_string_lossy().contains(".."));
+    }
+}

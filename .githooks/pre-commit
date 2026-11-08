@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refuse commits that add secrets to the project vault (docs/kb). Source code is not scanned.
+if ! command -v obmem >/dev/null 2>&1; then
+  echo "pre-commit: obmem not installed, skipping vault secret scan" >&2
+  exit 0
+fi
+obmem scan --staged || {
+  echo "pre-commit: possible secrets in the vault (above). Replace them with a reference, or allowlist the fingerprint in docs/kb/_system/secret-allowlist.toml." >&2
+  exit 1
+}

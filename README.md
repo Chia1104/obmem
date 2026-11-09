@@ -28,10 +28,23 @@ Writes, the SessionStart hook and the other audit rules read the files directly 
 ## Quick start
 
 ```sh
-cargo install --path .
+cargo install --path crates/obmem
 cd your-repo && obmem init        # creates both vaults and config, prints MCP/hook setup snippets
 obmem status
 ```
+
+## Repository layout
+
+A Cargo workspace; every front end shares `obmem-core`.
+
+| Crate | What it holds |
+| --- | --- |
+| [`crates/obmem-core`](crates/obmem-core) | The memory model: config, vaults, notes, search through the Obsidian CLI, context ranking, audit, code drift, secret scanning, `init` and `import` |
+| [`crates/obmem-mcp`](crates/obmem-mcp) | The MCP server (`obmem serve`); the only crate that depends on `rmcp` |
+| [`crates/obmem-agents`](crates/obmem-agents) | Agent integrations: hook entry points and `obmem setup` for each agent |
+| [`crates/obmem`](crates/obmem) | The `obmem` binary: the clap CLI that wires the crates together |
+
+`clap` is an optional feature (`clap`) of `obmem-core` and `obmem-agents`, so library users such as a GUI do not pull it in. Run `cargo test --workspace` from the root.
 
 ## This repo uses obmem itself
 
@@ -41,7 +54,7 @@ This repo dogfoods obmem:
 - `.githooks/pre-commit` runs `obmem scan --staged`; enable it with `git config core.hooksPath .githooks`.
 - `docs/kb` is the project vault.
 
-All of these call `obmem` from `PATH`, so run `cargo install --path .` first.
+All of these call `obmem` from `PATH`, so run `cargo install --path crates/obmem` first.
 
 ## MCP tools
 
@@ -203,7 +216,7 @@ Each finding's fix names the exact `git diff <commit> HEAD -- <path>` to read. A
 ## Secret scanning (no long hard-coded list to maintain)
 
 1. **Known values**: the real values in `.env*` plus env vars whose names look sensitive, matched exactly with Aho-Corasick. Works for any format, including in-house tokens, with essentially zero false positives. Values stay in memory only.
-2. **Format rules**: [`src/secret_rules.toml`](src/secret_rules.toml) has only ~15 rules for fixed-prefix tokens. It uses the gitleaks format, so you can drop a full upstream `gitleaks.toml` into `_system/secret-rules.toml`.
+2. **Format rules**: [`crates/obmem-core/src/secret_rules.toml`](crates/obmem-core/src/secret_rules.toml) has only ~15 rules for fixed-prefix tokens. It uses the gitleaks format, so you can drop a full upstream `gitleaks.toml` into `_system/secret-rules.toml`.
 3. **Context + entropy**: `password = <value>`-style assignments where the value's Shannon entropy is ≥ 3.5, which filters out `changeme`.
 
 Placeholders like `<YOUR_KEY>`, `${VAR}`, `xxxx` are ignored. False positives: copy the `fingerprint` from the error into `_system/secret-allowlist.toml`.

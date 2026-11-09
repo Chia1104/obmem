@@ -1,11 +1,18 @@
-[package]
-name = "obmem"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Obsidian-backed long-term memory for coding agents (MCP server + CLI)"
+repository = "https://github.com/Chia1104/obmem"
 
-[dependencies]
+[workspace.dependencies]
+obmem-core = { path = "crates/obmem-core" }
+obmem-mcp = { path = "crates/obmem-mcp" }
+obmem-agents = { path = "crates/obmem-agents" }
+
 aho-corasick = "1.1.5"
 anyhow = "1.0.104"
 chrono = "0.4.45"

@@ -37,7 +37,8 @@ pub struct WriteRequest {
 
 /// What happened to a finding. Only humans may reject (a rejection silences the audit rule
 /// for that spot forever, so an agent must not be able to do it on its own).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
     /// Real problem; someone will fix it.

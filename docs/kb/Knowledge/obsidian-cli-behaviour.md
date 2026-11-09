@@ -8,17 +8,17 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: e9961bd
 code_refs:
-- src/obsidian.rs#vault_id
-- src/obsidian.rs#is_empty_result
-- src/obsidian.rs#app_missing
-- src/store.rs#search
+- crates/obmem-core/src/obsidian.rs#vault_id
+- crates/obmem-core/src/obsidian.rs#is_empty_result
+- crates/obmem-core/src/obsidian.rs#app_missing
+- crates/obmem-core/src/store.rs#search
 tags:
 - obsidian
 - gotcha
 verified_at: 2026-11-09
 verified_by: agent
 ---
-Non-obvious behaviour of the official Obsidian CLI (verified on Obsidian 1.14.5) that `src/obsidian.rs` depends on:
+Non-obvious behaviour of the official Obsidian CLI (verified on Obsidian 1.14.5) that `crates/obmem-core/src/obsidian.rs` depends on:
 
 - **App must be running:** if Obsidian is closed, the CLI does not start it, although the docs say it does. It prints "The CLI is unable to find Obsidian…" on stderr and exits 1. obmem starts the app in the background (`open -g -a Obsidian` on macOS) and retries.
   - For about 1-2 s after launch, commands answer `Error: Command "…" not found` until they register, so obmem keeps retrying through that too.

@@ -8,9 +8,9 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: e9961bd
 code_refs:
-- src/hooks.rs#changed_since
-- src/hooks.rs#Agent
-- src/setup.rs#setup
+- crates/obmem-agents/src/hooks.rs#changed_since
+- crates/obmem-agents/src/hooks.rs#Agent
+- crates/obmem-agents/src/setup.rs#setup
 tags:
 - hooks
 - agents
@@ -36,6 +36,6 @@ Vault writes (`memory_write`) don't count.
 ## Consequences
 - Work that doesn't touch files (pure research, answering questions) isn't detected for those agents.
 - Edits made before the session started never count.
-- Agent-specific output formats live in `Agent` (`src/hooks.rs`), and `obmem setup` writes each agent's config.
+- Agent-specific output formats live in `Agent` (`crates/obmem-agents/src/hooks.rs`), and `obmem setup` writes each agent's config.
 
 Related: [[use-the-obsidian-cli-for-search-and-link-checks-instead-of-an-own-index]].

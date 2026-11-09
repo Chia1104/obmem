@@ -8,8 +8,8 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: 8b260e5
 code_refs:
-- src/hooks.rs#HookInput
-- src/setup.rs#setup
+- crates/obmem-agents/src/hooks.rs#HookInput
+- crates/obmem-agents/src/setup.rs#setup
 tags:
 - hooks
 - cursor

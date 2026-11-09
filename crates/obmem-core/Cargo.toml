@@ -1,0 +1,28 @@
+[package]
+name = "obmem-core"
+description = "obmem's memory model: config, vaults, notes, search, audit and secret scanning"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Derive clap::ValueEnum on the public enums, for front ends that take them as CLI arguments.
+clap = ["dep:clap"]
+
+[dependencies]
+aho-corasick.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+clap = { workspace = true, optional = true }
+dirs.workspace = true
+hex.workspace = true
+regex.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+yaml_serde.workspace = true

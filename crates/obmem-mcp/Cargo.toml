@@ -1,0 +1,16 @@
+[package]
+name = "obmem-mcp"
+description = "obmem's MCP server (stdio)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+obmem-core.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+tracing.workspace = true

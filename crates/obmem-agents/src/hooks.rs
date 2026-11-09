@@ -14,8 +14,8 @@
 //!
 //! Hooks must never break a session: callers print errors to stderr and exit 0.
 
-use crate::config::{Config, SecretMode};
-use crate::store::Store;
+use obmem_core::config::{Config, SecretMode};
+use obmem_core::store::Store;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -28,7 +28,8 @@ const WORK_TOOL_CALLS: usize = 5;
 const STOP_COOLDOWN: Duration = Duration::from_secs(30 * 60);
 
 /// Which agent is calling: decides the input field names and the output format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Agent {
     /// Claude Code: plain-text context, `{"decision":"block"}` stop, PreCompact steers the summary.
     #[default]
@@ -207,7 +208,7 @@ fn state_dir() -> PathBuf {
     if let Ok(p) = std::env::var("OBMEM_STATE_DIR") {
         return PathBuf::from(p);
     }
-    dirs::cache_dir().unwrap_or_else(|| crate::config::home().join(".cache")).join("obmem/hook-state")
+    dirs::cache_dir().unwrap_or_else(|| obmem_core::config::home().join(".cache")).join("obmem/hook-state")
 }
 
 fn state_file(kind: &str, session: &str) -> PathBuf {

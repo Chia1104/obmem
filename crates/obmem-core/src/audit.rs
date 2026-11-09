@@ -50,8 +50,8 @@ ignore_paths = []
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
-    clap::ValueEnum,
 )]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,
@@ -979,6 +979,55 @@ pub fn suppress_finding(vault_root: &Path, rel: &str, fm: &Frontmatter, date: &s
         },
     )?;
     Ok(true)
+}
+
+/// Human-readable audit report (shared by the CLI and the MCP tool).
+pub fn report_text(
+    report: &Audit,
+    shown: &[&Issue],
+    stats: Option<&WriteStats>,
+    min: Severity,
+    max_issues: usize,
+) -> String {
+    let mut out = String::new();
+    let count = |s: Severity| report.issues.iter().filter(|i| i.severity == s).count();
+    out.push_str(&format!(
+        "obmem audit: {} notes checked; {} error, {} warn, {} info ({} suppressed). Showing >= {}.\n",
+        report.checked_notes,
+        count(Severity::Error),
+        count(Severity::Warn),
+        count(Severity::Info),
+        report.suppressed,
+        min.as_str()
+    ));
+    for n in &report.notices {
+        out.push_str(&format!("note: {n}\n"));
+    }
+    for i in shown.iter().take(max_issues) {
+        out.push_str(&format!(
+            "{:<5} {:<11} {}:{}\n      {}\n      fix: {}\n",
+            i.severity.as_str(), i.rule, i.scope, i.path, i.message, i.fix
+        ));
+    }
+    if shown.len() > max_issues {
+        out.push_str(&format!("… and {} more (narrow with scope / rules)\n", shown.len() - max_issues));
+    }
+    if let Some(st) = stats {
+        out.push_str(&format!(
+            "Findings: {} created, {} reopened, {} closed, {} newly suppressed.\n",
+            st.created.len(), st.reopened.len(), st.closed.len(), st.newly_suppressed
+        ));
+        for c in &st.created {
+            out.push_str(&format!("  + {c}\n"));
+        }
+        for c in &st.reopened {
+            out.push_str(&format!("  ↺ {c}\n"));
+        }
+        for c in &st.closed {
+            out.push_str(&format!("  ✓ {c}\n"));
+        }
+    }
+    out
 }
 
 #[cfg(test)]

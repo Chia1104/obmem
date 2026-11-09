@@ -1,18 +1,6 @@
-mod audit;
-mod config;
-mod context;
-mod drift;
-mod guide;
-mod hooks;
-mod import;
-mod catalog;
-mod init;
-mod note;
-mod obsidian;
-mod secrets;
-mod setup;
-mod server;
-mod store;
+use obmem_agents::{hooks, setup};
+use obmem_core::{audit, config, context, guide, import, init, note, obsidian, store};
+use obmem_mcp as server;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -290,7 +278,7 @@ fn main() -> Result<()> {
                 });
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
-                print!("{}", audit_text(&report, &shown, stats.as_ref(), min_severity, usize::MAX));
+                print!("{}", audit::report_text(&report, &shown, stats.as_ref(), min_severity, usize::MAX));
             }
             if let Some(level) = fail_on
                 && report.issues.iter().any(|i| i.severity >= level)
@@ -394,55 +382,6 @@ fn staged_vault_inputs(cfg: &config::Config) -> Result<Vec<(String, String)>> {
         inputs.push((rel, String::from_utf8_lossy(&content).into_owned()));
     }
     Ok(inputs)
-}
-
-/// Human-readable audit report (shared by the CLI and the MCP tool).
-pub fn audit_text(
-    report: &audit::Audit,
-    shown: &[&audit::Issue],
-    stats: Option<&audit::WriteStats>,
-    min: audit::Severity,
-    max_issues: usize,
-) -> String {
-    let mut out = String::new();
-    let count = |s: audit::Severity| report.issues.iter().filter(|i| i.severity == s).count();
-    out.push_str(&format!(
-        "obmem audit: {} notes checked; {} error, {} warn, {} info ({} suppressed). Showing >= {}.\n",
-        report.checked_notes,
-        count(audit::Severity::Error),
-        count(audit::Severity::Warn),
-        count(audit::Severity::Info),
-        report.suppressed,
-        min.as_str()
-    ));
-    for n in &report.notices {
-        out.push_str(&format!("note: {n}\n"));
-    }
-    for i in shown.iter().take(max_issues) {
-        out.push_str(&format!(
-            "{:<5} {:<11} {}:{}\n      {}\n      fix: {}\n",
-            i.severity.as_str(), i.rule, i.scope, i.path, i.message, i.fix
-        ));
-    }
-    if shown.len() > max_issues {
-        out.push_str(&format!("… and {} more (narrow with scope / rules)\n", shown.len() - max_issues));
-    }
-    if let Some(st) = stats {
-        out.push_str(&format!(
-            "Findings: {} created, {} reopened, {} closed, {} newly suppressed.\n",
-            st.created.len(), st.reopened.len(), st.closed.len(), st.newly_suppressed
-        ));
-        for c in &st.created {
-            out.push_str(&format!("  + {c}\n"));
-        }
-        for c in &st.reopened {
-            out.push_str(&format!("  ↺ {c}\n"));
-        }
-        for c in &st.closed {
-            out.push_str(&format!("  ✓ {c}\n"));
-        }
-    }
-    out
 }
 
 #[cfg(test)]

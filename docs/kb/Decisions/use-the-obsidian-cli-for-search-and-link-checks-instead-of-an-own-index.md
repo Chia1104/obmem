@@ -8,9 +8,9 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: e9961bd
 code_refs:
-- src/obsidian.rs#Api
-- src/catalog.rs#Catalog
-- src/store.rs#search
+- crates/obmem-core/src/obsidian.rs#Api
+- crates/obmem-core/src/catalog.rs#Catalog
+- crates/obmem-core/src/store.rs#search
 tags:
 - obsidian
 - architecture

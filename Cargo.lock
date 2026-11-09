@@ -571,6 +571,32 @@ dependencies = [
 name = "obmem"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "obmem-agents",
+ "obmem-core",
+ "obmem-mcp",
+ "serde_json",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "obmem-agents"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs",
+ "obmem-core",
+ "serde_json",
+]
+
+[[package]]
+name = "obmem-core"
+version = "0.1.0"
+dependencies = [
  "aho-corasick",
  "anyhow",
  "chrono",
@@ -578,17 +604,27 @@ dependencies = [
  "dirs",
  "hex",
  "regex",
- "rmcp",
  "schemars",
  "serde",
  "serde_json",
  "sha2",
- "tokio",
  "toml",
  "tracing",
- "tracing-subscriber",
  "walkdir",
  "yaml_serde",
+]
+
+[[package]]
+name = "obmem-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "obmem-core",
+ "rmcp",
+ "schemars",
+ "serde",
+ "tracing",
 ]
 
 [[package]]

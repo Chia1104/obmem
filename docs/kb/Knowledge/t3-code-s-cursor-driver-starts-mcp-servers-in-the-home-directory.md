@@ -8,8 +8,8 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: e9961bd
 code_refs:
-- src/server.rs#use_project
-- src/store.rs#project_ready
+- crates/obmem-mcp/src/lib.rs#use_project
+- crates/obmem-core/src/store.rs#project_ready
 tags:
 - t3code
 - cursor

@@ -8,9 +8,9 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: 8b260e5
 code_refs:
-- src/hooks.rs#HookInput
-- src/hooks.rs#scan_transcript
-- src/hooks.rs#stop
+- crates/obmem-agents/src/hooks.rs#HookInput
+- crates/obmem-agents/src/hooks.rs#scan_transcript
+- crates/obmem-agents/src/hooks.rs#stop
 tags:
 - cursor
 - hooks

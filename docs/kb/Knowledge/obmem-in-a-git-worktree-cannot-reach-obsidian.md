@@ -8,7 +8,7 @@ created: 2026-11-09
 updated: 2026-11-09
 verified_commit: e9961bd
 code_refs:
-- src/obsidian.rs#vault_id
+- crates/obmem-core/src/obsidian.rs#vault_id
 tags:
 - obsidian
 - gotcha

@@ -1,8 +1,8 @@
 //! MCP server (stdio) — agent-agnostic: Claude Code, Codex, Cursor, … all speak MCP.
 
-use crate::audit::{AuditOptions, Severity};
-use crate::note::{NoteType, Scope};
-use crate::store::{Store, Verdict, WriteOutcome, WriteRequest};
+use obmem_core::audit::{AuditOptions, Severity};
+use obmem_core::note::{NoteType, Scope};
+use obmem_core::store::{Store, Verdict, WriteOutcome, WriteRequest};
 use rmcp::{
     ErrorData as McpError, Peer, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -205,12 +205,12 @@ impl MemoryServer {
             }
         }
         let dir = real.as_path();
-        let cfg = crate::config::Config::load(Some(dir)).map_err(|e| format!("{e:#}"))?;
-        if !cfg.project_root.join(crate::config::PROJECT_CONFIG_FILE).exists() {
+        let cfg = obmem_core::config::Config::load(Some(dir)).map_err(|e| format!("{e:#}"))?;
+        if !cfg.project_root.join(obmem_core::config::PROJECT_CONFIG_FILE).exists() {
             return Err(format!(
                 "{} is not an obmem project (no {} in {} or above it).",
                 dir.display(),
-                crate::config::PROJECT_CONFIG_FILE,
+                obmem_core::config::PROJECT_CONFIG_FILE,
                 cfg.project_root.display()
             ));
         }
@@ -237,8 +237,8 @@ impl MemoryServer {
         let Ok(roots) = peer.list_roots().await else { return };
         for root in roots.roots {
             let Some(dir) = file_uri_to_path(&root.uri) else { continue };
-            let Ok(cfg) = crate::config::Config::load(Some(&dir)) else { continue };
-            if !cfg.project_root.join(crate::config::PROJECT_CONFIG_FILE).exists() {
+            let Ok(cfg) = obmem_core::config::Config::load(Some(&dir)) else { continue };
+            if !cfg.project_root.join(obmem_core::config::PROJECT_CONFIG_FILE).exists() {
                 continue;
             }
             match Store::open(cfg) {
@@ -299,7 +299,7 @@ impl MemoryServer {
             return fail(e);
         }
         let mut s = self.store.lock().unwrap();
-        match crate::context::context(&mut s, &a.task, a.limit.unwrap_or(8).min(20), 5000) {
+        match obmem_core::context::context(&mut s, &a.task, a.limit.unwrap_or(8).min(20), 5000) {
             Ok(text) => ok(text),
             Err(e) => fail(e),
         }
@@ -412,7 +412,7 @@ impl MemoryServer {
         match s.audit(&opts, a.write_findings.then_some(min)) {
             Ok((report, stats)) => {
                 let shown: Vec<_> = report.issues.iter().filter(|i| i.severity >= min).collect();
-                ok(crate::audit_text(&report, &shown, stats.as_ref(), min, 40))
+                ok(obmem_core::audit::report_text(&report, &shown, stats.as_ref(), min, 40))
             }
             Err(e) => fail(e),
         }
@@ -457,7 +457,7 @@ impl ServerHandler for MemoryServer {
     fn get_info(&self) -> rmcp::model::ServerConfig {
         rmcp::model::ServerConfig::new(rmcp::model::ServerCapabilities::builder().enable_tools().build())
             .with_server_info(rmcp::model::Implementation::new("obmem", env!("CARGO_PKG_VERSION")))
-            .with_instructions(crate::guide::GUIDE.to_string())
+            .with_instructions(obmem_core::guide::GUIDE.to_string())
     }
 }
 

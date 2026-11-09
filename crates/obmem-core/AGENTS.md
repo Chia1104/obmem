@@ -73,4 +73,4 @@ Each note is ranked by how many distinct terms it contains, with title matches c
 - A finding names its note by path, never with a `[[link]]`. Obsidian counts a link as a backlink, so a linked note would stop being an orphan.
 - When a human sets a finding to `rejected`, its fingerprint goes into `_system/audit-suppressions.toml` for good. Agents cannot reject.
 - A code-drift fingerprint includes the commit. After `verify`, the next `audit --write` closes the old finding.
-- `sync-conflict` reports files whose name holds `SYNC_CONFLICT_MARK`, the copies obmem-sync writes when two devices changed the same file. Every other rule ignores those copies, so a conflict is reported once.
+- `sync-conflict` reports files whose name holds `SYNC_CONFLICT_MARK`, the copies obmem-sync writes when two devices changed the same file. Every other rule ignores those copies, so a conflict is reported once. The catalog and `Store::search` leave them out too, so agents never take another device's unmerged version for a note.

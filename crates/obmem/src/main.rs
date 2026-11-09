@@ -479,7 +479,7 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             let remote = sync::Remote::s3(&cfg, &creds)?;
             let seqs = sync::snapshot_seqs(&remote)?;
             if seqs.is_empty() {
-                println!("no snapshots yet: run `obmem sync backup`");
+                println!("no snapshots yet: run `obmem sync`");
             }
             for seq in seqs {
                 let m = sync::load_snapshot(&remote, &key, seq)?;

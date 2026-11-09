@@ -141,7 +141,7 @@ pub fn restore(remote: &Remote, key: &VaultKey, seq: Option<u64>, target: &Path)
         if key.blob_id(&content) != entry.blob {
             bail!("the content of {name} does not match its snapshot entry");
         }
-        let path = name.split('/').fold(root.clone(), |p, part| p.join(part));
+        let path = sync::path_in(&root, name);
         obmem_core::store::atomic_write_bytes(&root, &path, &content)?;
     }
     Ok(RestoreReport { seq, files: manifest.files.len() })

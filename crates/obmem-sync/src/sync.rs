@@ -27,8 +27,6 @@ use std::path::{Path, PathBuf};
 /// How often a sync starts over when other devices keep taking the next snapshot number, or
 /// files keep changing under it.
 const ATTEMPTS: usize = 5;
-/// A lock older than this is from a sync that died.
-const STALE_LOCK: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 pub struct SyncOptions<'a> {
     pub device: &'a str,
@@ -126,6 +124,19 @@ fn attempt(
     for e in remote_m.iter().flat_map(|m| m.files.values()) {
         sizes.insert(e.blob.clone(), e.size);
     }
+
+    // Names this pass leaves alone on both sides: files the scan skipped (a symlink, a name that
+    // differs from another only in case) are not deletions, and names from the bucket that this
+    // file system cannot hold are not written.
+    let mut excluded: HashSet<String> = scan.skipped.iter().map(|(n, _)| n.clone()).collect();
+    for name in remote_files.keys() {
+        if let Err(why) = files::check_portable(name)
+            && excluded.insert(name.clone())
+        {
+            scan.skipped.push((name.clone(), format!("from the bucket: {why}")));
+        }
+    }
+    let included = |n: &str| files::included(n, opts.community_plugins) && !excluded.contains(n);
     let empty = BTreeMap::new();
     let base = match (state, latest) {
         (Some(s), Some(l)) if s.key_check == key.blob_id(b"") && s.seq <= l => &s.files,
@@ -134,9 +145,7 @@ fn attempt(
 
     let other = remote_m.as_ref().map_or("unknown", |m| m.device.as_str());
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let plan = merge(base, &local, &remote_files, |n| files::included(n, opts.community_plugins), |n| {
-        conflict_name(n, other, &stamp)
-    });
+    let plan = merge(base, &local, &remote_files, included, |n| conflict_name(n, other, &stamp));
     if let Some((a, b)) = files::case_collisions(plan.result.keys().map(String::as_str)).first() {
         bail!("{a} and {b} differ only in case, which macOS and Windows cannot keep apart: rename one of them");
     }
@@ -182,8 +191,12 @@ fn attempt(
         report.created = true;
     }
 
-    // The bucket now holds the result: bring the vault in line, leaving alone what changed.
-    let mut new_base = plan.result.clone();
+    // The bucket now holds the result: bring the vault in line, leaving alone what changed. The
+    // base covers only what this device synced: a name it carried along was never here, and
+    // must not count as deleted here once this device starts syncing it.
+    let mut new_base: BTreeMap<String, String> =
+        plan.result.iter().filter(|(n, _)| included(n)).map(|(n, b)| (n.clone(), b.clone())).collect();
+    new_base.extend(base.iter().filter(|(n, _)| !included(n)).map(|(n, b)| (n.clone(), b.clone())));
     for (name, blob) in &plan.download {
         if current_blob(key, vault, name)?.as_ref() != local.get(name) {
             defer(&mut report, &mut new_base, base, name);
@@ -230,7 +243,8 @@ fn defer(report: &mut SyncReport, new_base: &mut BTreeMap<String, String>, base:
     report.deferred.push(name.to_string());
 }
 
-fn path_in(root: &Path, name: &str) -> PathBuf {
+/// The file a portable name stands for under `root`.
+pub(crate) fn path_in(root: &Path, name: &str) -> PathBuf {
     name.split('/').fold(root.to_path_buf(), |p, part| p.join(part))
 }
 
@@ -360,36 +374,31 @@ fn write_state(path: &Path, state: &State) -> Result<()> {
     obmem_core::store::atomic_write_bytes(dir, path, &serde_json::to_vec(state)?)
 }
 
-/// One sync per vault and bucket at a time on this machine.
-struct Lock(PathBuf);
+/// One sync per vault and bucket at a time on this machine: an OS file lock on a file next to the
+/// state, which the OS releases when the holder exits, however it ends. No stale locks to guess.
+struct Lock(#[allow(dead_code)] std::fs::File);
 
 impl Lock {
     fn acquire(state_file: &Path) -> Result<Self> {
         let path = state_file.with_extension("lock");
+        Self::try_take(&path)?.ok_or_else(|| anyhow!("another obmem sync is running (lock {})", path.display()))
+    }
+
+    fn try_take(path: &Path) -> Result<Option<Self>> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        for _ in 0..2 {
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(_) => return Ok(Self(path)),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    let age = std::fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
-                    if age.is_some_and(|a| a > STALE_LOCK) {
-                        let _ = std::fs::remove_file(&path);
-                        continue;
-                    }
-                    bail!("another obmem sync is running (lock {})", path.display());
-                }
-                Err(e) => return Err(anyhow::Error::from(e).context(format!("creating {}", path.display()))),
-            }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+            .with_context(|| format!("opening {}", path.display()))?;
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Self(file))),
+            Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => Err(anyhow::Error::from(e).context(format!("locking {}", path.display()))),
         }
-        bail!("could not take the sync lock {}", path.display())
-    }
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
     }
 }
 
@@ -557,6 +566,61 @@ pub(crate) mod tests {
         assert!(m.files.contains_key(".obsidian/plugins/x/main.js"), "the plugin stays in the bucket");
         mac.sync().unwrap();
         assert_eq!(read(&mac.vault, ".obsidian/plugins/x/main.js").as_deref(), Some("code"));
+    }
+
+    #[test]
+    fn turning_plugins_on_later_downloads_them_instead_of_deleting_them() {
+        let remote = remote::in_memory();
+        let (mut mac, mut win) = (device(&remote, "mac"), device(&remote, "win"));
+        mac.plugins = true;
+        put(&mac.vault, ".obsidian/plugins/x/main.js", "code");
+        mac.sync().unwrap();
+        win.sync().unwrap();
+
+        win.plugins = true;
+        let r = win.sync().unwrap();
+        assert!(r.deleted_remote.is_empty(), "{r:?}");
+        assert_eq!(read(&win.vault, ".obsidian/plugins/x/main.js").as_deref(), Some("code"));
+        mac.sync().unwrap();
+        assert_eq!(read(&mac.vault, ".obsidian/plugins/x/main.js").as_deref(), Some("code"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_the_scan_skips_is_not_a_deletion() {
+        let remote = remote::in_memory();
+        let (mac, win) = (device(&remote, "mac"), device(&remote, "win"));
+        put(&mac.vault, "Global/a.md", "a");
+        mac.sync().unwrap();
+        win.sync().unwrap();
+        // The file becomes something the scan skips (here a symlink; on a case-sensitive file
+        // system, a name that differs from another only in case).
+        std::fs::remove_file(mac.vault.join("Global/a.md")).unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", mac.vault.join("Global/a.md")).unwrap();
+        let r = mac.sync().unwrap();
+        assert!(r.deleted_remote.is_empty(), "{r:?}");
+        win.sync().unwrap();
+        assert_eq!(read(&win.vault, "Global/a.md").as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn names_from_the_bucket_this_file_system_cannot_hold_are_not_written() {
+        let remote = remote::in_memory();
+        let mac = device(&remote, "mac");
+        put(&mac.vault, "Global/a.md", "a");
+        mac.sync().unwrap();
+        // A snapshot from another client holds a name Windows cannot hold.
+        let mut m = load_snapshot(&remote, &mac.key, 1).unwrap();
+        let entry = m.files["Global/a.md"].clone();
+        m.files.insert("Global/b:c.md".into(), entry);
+        m.seq = 2;
+        remote.create(&snapshot_key(2), mac.key.encrypt(&serde_json::to_vec(&m).unwrap()).unwrap()).unwrap();
+
+        let r = mac.sync().unwrap();
+        assert!(r.skipped.iter().any(|(n, _)| n == "Global/b:c.md"), "{r:?}");
+        assert!(!r.downloaded.contains(&"Global/b:c.md".to_string()));
+        assert!(!mac.vault.join("Global/b:c.md").exists());
+        assert!(load_snapshot(&remote, &mac.key, 2).unwrap().files.contains_key("Global/b:c.md"), "left in the bucket");
     }
 
     #[test]

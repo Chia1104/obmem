@@ -1,4 +1,13 @@
 #!/bin/sh
+# Refuse commits whose Rust code is not formatted. It checks the working tree, not only what is
+# staged, and never formats on its own: re-staging here would sweep unstaged hunks into the commit.
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "pre-commit: cargo not on PATH, skipping the rustfmt check" >&2
+elif ! cargo fmt --all --check -- -l >&2; then
+  echo "pre-commit: the files above are not formatted. Run 'cargo fmt --all' and stage the result." >&2
+  exit 1
+fi
+
 # Refuse commits that add secrets to the project vault (docs/kb). Source code is not scanned.
 if ! command -v obmem >/dev/null 2>&1; then
   echo "pre-commit: obmem not installed, skipping vault secret scan" >&2

@@ -70,3 +70,42 @@ fn settings_secrets_and_personal_settings_are_saved() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn sync_settings_are_saved_and_ask_to_connect() {
+    let Some(dir) = sandbox("sync-settings") else { return };
+    let mut app = start();
+    app.wait_for_within("id:screen-personal-settings", SLOW).unwrap();
+    app.press("id:screen-personal-settings >> role:button").unwrap();
+    app.wait_for_within("id:personal-sync", SLOW).unwrap();
+    assert!(app.screen().shows("Off: no bucket yet."));
+
+    // The rules the config loader applies refuse the save and keep what was typed.
+    app.type_text("id:sync-endpoint", "acct.r2.cloudflarestorage.com").unwrap();
+    app.type_text("id:sync-bucket", "my-vault").unwrap();
+    app.press("id:personal-sync >> role:button[Save]").unwrap();
+    app.wait_for_within("That did not work", SLOW).unwrap();
+    assert_eq!(app.screen().input_text("id:sync-bucket").unwrap(), Some("my-vault"));
+
+    app.clear("id:sync-endpoint").unwrap();
+    app.type_text("id:sync-endpoint", "https://acct.r2.cloudflarestorage.com").unwrap();
+    app.type_text("id:sync-device", "test-box").unwrap();
+    app.press("id:personal-sync >> role:switch[Sync automatically]").unwrap();
+    app.press("id:personal-sync >> role:button[Save]").unwrap();
+    app.wait_for_within("Sync settings saved.", SLOW).unwrap();
+    let saved = settings::read_sync().unwrap();
+    assert_eq!((saved.bucket.as_str(), saved.device.as_str(), saved.auto), ("my-vault", "test-box", false));
+    let cfg = config::sync_config().unwrap();
+    assert_eq!(cfg.endpoint.as_deref(), Some("https://acct.r2.cloudflarestorage.com"));
+    assert!(!cfg.auto_sync());
+
+    // This test bucket is in no keychain: the page asks to connect (unless the keychain itself
+    // cannot be read here, which it then says).
+    app.wait_for_within("id:personal-sync", SLOW).unwrap();
+    let screen = app.screen();
+    assert!(
+        screen.shows("This device is not connected") || screen.shows("Could not read the keychain"),
+        "neither the connect prompt nor a keychain error"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

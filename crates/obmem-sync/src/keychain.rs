@@ -31,6 +31,15 @@ pub fn save(cfg: &SyncConfig, creds: &Credentials, key: &VaultKey) -> Result<()>
     entry(cfg)?.set_password(&serde_json::to_string(&stored)?).context("saving to the OS keychain")
 }
 
+/// Whether this device has what it needs for the configured bucket.
+pub fn is_set_up(cfg: &SyncConfig) -> Result<bool> {
+    match entry(cfg)?.get_password() {
+        Ok(_) => Ok(true),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(e) => Err(anyhow::Error::from(e).context("reading the OS keychain")),
+    }
+}
+
 pub fn load(cfg: &SyncConfig) -> Result<(Credentials, VaultKey)> {
     let json = match entry(cfg)?.get_password() {
         Ok(s) => s,

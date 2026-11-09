@@ -122,6 +122,10 @@ enum Cmd {
         /// Go ahead even if the sync would delete more than half of the vault.
         #[arg(long)]
         allow_deletes: bool,
+        /// Started by an agent hook: wait for a running sync, print nothing (the outcome goes to
+        /// the status `obmem status` shows).
+        #[arg(long, hide = true)]
+        background: bool,
         #[command(subcommand)]
         action: Option<SyncCmd>,
     },
@@ -219,6 +223,14 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
             }
         }
     }
+    // Like every hook, only in obmem projects: hooks installed user-wide stay harmless elsewhere.
+    if matches!(which, HookCmd::SessionStart { .. } | HookCmd::Stop { .. }) && in_obmem_project(dir.as_deref()) {
+        spawn_background_sync();
+    }
+}
+
+fn in_obmem_project(dir: Option<&std::path::Path>) -> bool {
+    config::Config::load(dir).is_ok_and(|c| c.project_root.join(config::PROJECT_CONFIG_FILE).exists())
 }
 
 fn main() -> Result<()> {
@@ -238,8 +250,14 @@ fn main() -> Result<()> {
         run_hook(which, cli.project.as_deref(), session.as_deref());
         return Ok(());
     }
-    if let Cmd::Sync { action, allow_deletes } = &cli.cmd {
+    if let Cmd::Sync { action, allow_deletes, background } = &cli.cmd {
         // Only the personal vault and the user's config are involved: no project to load.
+        if *background {
+            if let Ok(cfg) = config::sync_config() {
+                let _ = obmem_sync::run(&cfg, false, obmem_sync::BACKGROUND_WAIT);
+            }
+            return Ok(());
+        }
         return run_sync(action.as_ref(), *allow_deletes);
     }
     let cfg = config::Config::load(cli.project.as_deref())?;
@@ -428,6 +446,7 @@ fn main() -> Result<()> {
             println!("secret rules:   {}", st.secret_rules);
             println!("known secrets:  {} values loaded (from .env files / env vars, memory only)", st.known_secrets);
             println!("secret mode:    {:?}", st.secret_mode);
+            println!("sync:           {}", sync_status_line());
         }
     }
     Ok(())
@@ -466,8 +485,7 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
                 }
                 first
             };
-            let (key, created) = sync::unlock_or_create(&remote, &passphrase.into())?;
-            sync::keychain::save(&cfg, &creds, &key)?;
+            let created = sync::connect(&cfg, creds, &passphrase.into())?;
             println!(
                 "{} the backup in {}; the access key and backup key are in this device's keychain",
                 if created { "created" } else { "unlocked" },
@@ -502,13 +520,9 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
 }
 
 fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
-    use obmem_sync as sync;
-    let (creds, key) = sync::keychain::load(cfg)?;
-    let remote = sync::Remote::s3(cfg, &creds)?;
-    let vault = config::global_vault()?;
-    let device = config::device_name(cfg);
-    let opts = sync::SyncOptions { device: &device, community_plugins: cfg.community_plugins.unwrap_or(false), allow_mass_delete };
-    let r = sync::sync(&remote, &key, &vault, &sync::state_path(cfg, &vault), &opts)?;
+    let Some(r) = obmem_sync::run(cfg, allow_mass_delete, std::time::Duration::ZERO)? else {
+        return Ok(());
+    };
     for (name, why) in &r.skipped {
         eprintln!("skipped {name}: {why}");
     }
@@ -526,12 +540,71 @@ fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
     for n in &r.conflicts {
         println!("CONFLICT: {n} is another device's version; merge it into the original, then delete it");
     }
-    match (r.created, r.seq) {
-        (_, 0) => println!("nothing to sync yet"),
-        (true, seq) => println!("synced: snapshot {seq}"),
-        (false, seq) => println!("up to date with snapshot {seq}"),
-    }
+    println!("{}", obmem_sync::summary(&r));
     Ok(())
+}
+
+fn sync_status_line() -> String {
+    let cfg = match config::sync_config() {
+        Ok(c) if c.bucket.is_some() => c,
+        Ok(_) => return "not set up (add [sync] to your config, then `obmem sync setup`)".into(),
+        Err(e) => return format!("config unreadable: {e:#}"),
+    };
+    let auto = if cfg.auto_sync() { "" } else { " (automatic sync off)" };
+    match obmem_sync::last_status(&cfg) {
+        None => format!("not run on this device yet{auto}"),
+        Some(s) if s.ok => format!("{} at {}{auto}", s.message, s.at),
+        Some(s) => format!("FAILED at {}: {}{auto}", s.at, s.message),
+    }
+}
+
+/// After a session starts or stops, sync the personal vault in a process of its own, so the
+/// agent never waits on the network. Errors go to the sync status, never to the agent.
+fn spawn_background_sync() {
+    let Ok(cfg) = config::sync_config() else { return };
+    if !cfg.auto_sync() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["sync", "--background"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Its own process group: the agent ending the hook's group must not end the sync.
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        stop_sharing_std_handles();
+    }
+    if let Err(e) = cmd.spawn() {
+        eprintln!("obmem: could not start the background sync: {e}");
+    }
+}
+
+/// Windows children inherit every inheritable handle, and the agent reads the hook's output
+/// until the last holder of its pipe closes it: without this, the agent would wait for the sync.
+#[cfg(windows)]
+fn stop_sharing_std_handles() {
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation};
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on this process's own standard handles.
+        unsafe {
+            let h = GetStdHandle(id);
+            if !h.is_null() && h != INVALID_HANDLE_VALUE {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
 }
 
 fn prompt(label: &str) -> Result<String> {

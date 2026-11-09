@@ -124,6 +124,7 @@ bucket = "my-obmem-vault"
 # prefix = "obmem"       # key prefix inside the bucket
 # device = "work-mac"    # this machine's name; default: the host name
 # community_plugins = false
+# auto = true            # sync in the background when agent sessions start and stop
 ```
 
 ```sh
@@ -132,6 +133,8 @@ obmem sync                        # sync now
 obmem sync list                   # snapshots: number, time, device, file count
 obmem sync restore --snapshot 12 --to ~/restored   # an older state, into an empty folder
 ```
+
+Once a device is set up, obmem syncs on its own: whenever an agent session starts or stops in an obmem project, the hook starts `obmem sync` in the background, so the agent never waits on the network. `obmem status` and the desktop app's Personal settings show the last sync and why it failed, if it did. Set `auto = false` to sync only by hand. The desktop app can also edit `[sync]`, connect the device and sync now.
 
 `setup` keeps the access key and the unlocked vault key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the bucket cannot be read.**
 

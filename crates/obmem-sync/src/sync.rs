@@ -27,13 +27,31 @@ use std::path::{Path, PathBuf};
 /// How often a sync starts over when other devices keep taking the next snapshot number, or
 /// files keep changing under it.
 const ATTEMPTS: usize = 5;
+/// The least time between the starts of two syncs that wait (those agent hooks start).
+const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct SyncOptions<'a> {
     pub device: &'a str,
     pub community_plugins: bool,
     /// Go ahead even when the sync would delete many files (see [`too_many_deletions`]).
     pub allow_mass_delete: bool,
+    /// How long to wait for a sync already running on this machine. Zero: fail at once. While
+    /// waiting, at most one sync queues behind the running one; another that comes along
+    /// returns [`Queued`], because the queued sync will see its changes too.
+    pub wait: std::time::Duration,
 }
+
+/// The error of a sync that did not run because another one is already queued.
+#[derive(Debug)]
+pub struct Queued;
+
+impl std::fmt::Display for Queued {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a sync is already queued on this machine")
+    }
+}
+
+impl std::error::Error for Queued {}
 
 #[derive(Debug, Default)]
 pub struct SyncReport {
@@ -82,7 +100,7 @@ pub fn sync(remote: &Remote, key: &VaultKey, vault: &Path, state_file: &Path, op
     if !vault.is_dir() {
         bail!("{} is not a folder", vault.display());
     }
-    let _lock = Lock::acquire(state_file)?;
+    let _lock = Lock::acquire(state_file, opts.wait)?;
     let state = read_state(state_file)?;
     for _ in 0..ATTEMPTS {
         if let Some(report) = attempt(remote, key, vault, state_file, &state, opts)? {
@@ -379,9 +397,31 @@ fn write_state(path: &Path, state: &State) -> Result<()> {
 struct Lock(#[allow(dead_code)] std::fs::File);
 
 impl Lock {
-    fn acquire(state_file: &Path) -> Result<Self> {
+    /// With a zero `wait`, fail at once if a sync is running. Otherwise queue behind it: at most
+    /// one sync waits (a second lock, `.queued`), and it starts no sooner than `MIN_INTERVAL`
+    /// after the last sync started, so a burst of agent turns makes one sync, not one each.
+    fn acquire(state_file: &Path, wait: std::time::Duration) -> Result<Self> {
         let path = state_file.with_extension("lock");
-        Self::try_take(&path)?.ok_or_else(|| anyhow!("another obmem sync is running (lock {})", path.display()))
+        if wait.is_zero() {
+            let lock = Self::try_take(&path)?.ok_or_else(|| anyhow!("another obmem sync is running (lock {})", path.display()))?;
+            lock.mark_start();
+            return Ok(lock);
+        }
+        let Some(_queued) = Self::try_take(&state_file.with_extension("queued"))? else { return Err(Queued.into()) };
+        let deadline = std::time::Instant::now() + wait;
+        loop {
+            let since_last = Self::last_start(&path).and_then(|t| t.elapsed().ok());
+            if since_last.is_none_or(|e| e >= MIN_INTERVAL)
+                && let Some(lock) = Self::try_take(&path)?
+            {
+                lock.mark_start();
+                return Ok(lock);
+            }
+            if std::time::Instant::now() >= deadline {
+                bail!("gave up after {}s: another obmem sync is running or started under a minute ago (lock {})", wait.as_secs(), path.display());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
     }
 
     fn try_take(path: &Path) -> Result<Option<Self>> {
@@ -399,6 +439,15 @@ impl Lock {
             Err(std::fs::TryLockError::WouldBlock) => Ok(None),
             Err(std::fs::TryLockError::Error(e)) => Err(anyhow::Error::from(e).context(format!("locking {}", path.display()))),
         }
+    }
+
+    /// The lock file's time is when the last sync started.
+    fn mark_start(&self) {
+        let _ = self.0.set_modified(std::time::SystemTime::now());
+    }
+
+    fn last_start(path: &Path) -> Option<std::time::SystemTime> {
+        std::fs::metadata(path).and_then(|m| m.modified()).ok()
     }
 }
 
@@ -433,7 +482,7 @@ pub(crate) mod tests {
 
     impl Device<'_> {
         pub fn sync(&self) -> Result<SyncReport> {
-            let opts = SyncOptions { device: self.name, community_plugins: self.plugins, allow_mass_delete: false };
+            let opts = SyncOptions { device: self.name, community_plugins: self.plugins, allow_mass_delete: false, wait: Default::default() };
             sync(self.remote, &self.key, &self.vault, &self.state, &opts)
         }
     }
@@ -636,7 +685,7 @@ pub(crate) mod tests {
         assert!(err.to_string().contains("--allow-deletes"), "{err}");
         assert_eq!(snapshot_seqs(&remote).unwrap(), [1]);
 
-        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: true };
+        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: true, wait: Default::default() };
         let r = sync(&remote, &mac.key, &mac.vault, &mac.state, &opts).unwrap();
         assert_eq!(r.deleted_remote.len(), 20);
     }
@@ -651,7 +700,7 @@ pub(crate) mod tests {
         // The bucket is recreated (new key) while this device still remembers the old one.
         let fresh = remote::in_memory();
         let (key, _) = unlock_or_create(&fresh, &pass("other")).unwrap();
-        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false };
+        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false, wait: Default::default() };
         let r = sync(&fresh, &key, &mac.vault, &mac.state, &opts).unwrap();
         assert_eq!(r.uploaded, ["Global/a.md"]);
         assert_eq!(read(&mac.vault, "Global/a.md").as_deref(), Some("a"));
@@ -661,9 +710,38 @@ pub(crate) mod tests {
     fn a_second_sync_at_the_same_time_is_refused() {
         let remote = remote::in_memory();
         let mac = device(&remote, "mac");
-        let _held = Lock::acquire(&mac.state).unwrap();
+        let held = Lock::acquire(&mac.state, Default::default()).unwrap();
         let err = mac.sync().unwrap_err();
         assert!(err.to_string().contains("another obmem sync is running"), "{err}");
+
+        // Waiting: the first waiter queues, a second one leaves it to the first.
+        let opts = |wait| SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false, wait };
+        let (remote2, key, vault, state) = (&remote, &mac.key, mac.vault.clone(), mac.state.clone());
+        // The running sync started long enough ago for a waiter to go right after it.
+        held.0.set_modified(std::time::SystemTime::now() - 2 * MIN_INTERVAL).unwrap();
+        std::thread::scope(|s| {
+            let first = s.spawn(|| sync(remote2, key, &vault, &state, &opts(std::time::Duration::from_secs(20))));
+            while !state.with_extension("queued").exists() {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let second = sync(remote2, key, &vault, &state, &opts(std::time::Duration::from_secs(20))).unwrap_err();
+            assert!(second.downcast_ref::<Queued>().is_some(), "{second}");
+            drop(held);
+            assert!(first.join().unwrap().is_ok());
+        });
+        // Every lock is free again.
+        assert!(mac.sync().is_ok());
+    }
+
+    #[test]
+    fn a_waiting_sync_keeps_its_distance_from_the_last_one() {
+        let remote = remote::in_memory();
+        let mac = device(&remote, "mac");
+        mac.sync().unwrap(); // just started one
+        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false, wait: std::time::Duration::from_secs(1) };
+        let err = sync(&remote, &mac.key, &mac.vault, &mac.state, &opts).unwrap_err();
+        assert!(err.to_string().contains("gave up"), "{err}");
     }
 
     #[test]

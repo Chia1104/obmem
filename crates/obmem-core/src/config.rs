@@ -70,8 +70,17 @@ pub struct SyncConfig {
     pub prefix: Option<String>,
     /// This machine's name in snapshots. Unset: the host name.
     pub device: Option<String>,
-    /// Also back up `.obsidian/plugins/` and `community-plugins.json`.
+    /// Also sync `.obsidian/plugins/` and `community-plugins.json`.
     pub community_plugins: Option<bool>,
+    /// Sync in the background when an agent session starts and stops. Unset: on.
+    pub auto: Option<bool>,
+}
+
+impl SyncConfig {
+    /// A bucket is configured and automatic sync is not turned off.
+    pub fn auto_sync(&self) -> bool {
+        self.bucket.is_some() && self.auto.unwrap_or(true)
+    }
 }
 
 /// Secret-scanning switches that may only come from the user's own config: a repo's
@@ -259,7 +268,11 @@ pub fn device_name(sync: &SyncConfig) -> String {
 
 /// The user's `[sync]` settings.
 pub fn sync_config() -> Result<SyncConfig> {
-    let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+    sync_config_at(&global_config_path())
+}
+
+pub(crate) fn sync_config_at(path: &Path) -> Result<SyncConfig> {
+    let gf: GlobalFile = read_toml(path)?.unwrap_or_default();
     Ok(gf.sync)
 }
 

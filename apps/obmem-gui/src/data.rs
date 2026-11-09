@@ -5,7 +5,7 @@ use obmem_agents::hooks::Agent;
 use obmem_agents::setup;
 use obmem_core::allowlist::{self, Allowlist, Kind};
 use obmem_core::config::{self, Config};
-use obmem_core::settings::{self, GlobalSettings, ProjectSettings};
+use obmem_core::settings::{self, GlobalSettings, ProjectSettings, SyncSettings};
 use obmem_core::status::{self, Status};
 use obmem_core::audit::{AuditOptions, Severity};
 use obmem_core::note::Scope;
@@ -45,6 +45,16 @@ pub struct Personal {
     pub settings: GlobalSettings,
     pub vault: PathBuf,
     pub allowlist: Result<Allowlist, String>,
+    pub sync: Result<SyncInfo, String>,
+}
+
+/// Sync of the personal vault: the settings, whether this device is connected, the last outcome.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyncInfo {
+    pub settings: SyncSettings,
+    /// The keychain holds this device's access key and vault key for the configured bucket.
+    pub connected: Result<bool, String>,
+    pub last: Option<obmem_sync::Status>,
 }
 
 /// A suspected secret in text the user tested, shown masked.
@@ -171,8 +181,52 @@ pub fn personal() -> Result<Personal, String> {
     Ok(Personal {
         settings: settings::read_global().map_err(text)?,
         allowlist: allowlist::read(&vault).map_err(text),
+        sync: sync_info(),
         vault,
     })
+}
+
+fn sync_info() -> Result<SyncInfo, String> {
+    let settings = settings::read_sync().map_err(text)?;
+    let cfg = config::sync_config().map_err(text)?;
+    let configured = cfg.bucket.is_some();
+    Ok(SyncInfo {
+        connected: if configured { obmem_sync::keychain::is_set_up(&cfg).map_err(text) } else { Ok(false) },
+        last: if configured { obmem_sync::last_status(&cfg) } else { None },
+        settings,
+    })
+}
+
+pub fn save_sync(s: &SyncSettings) -> Result<(), String> {
+    settings::save_sync(s).map_err(text)
+}
+
+/// Connect this device to the bucket the saved settings name.
+pub fn connect_sync(access_key_id: String, secret_access_key: String, passphrase: String, repeat: String) -> Result<String, String> {
+    let cfg = config::sync_config().map_err(text)?;
+    let bucket = cfg.bucket.clone().ok_or("Save a bucket first.")?;
+    if access_key_id.trim().is_empty() || secret_access_key.is_empty() || passphrase.is_empty() {
+        return Err("Fill in the access key, the secret and the passphrase.".into());
+    }
+    if passphrase != repeat {
+        return Err("The passphrases differ.".into());
+    }
+    let creds = obmem_sync::Credentials { access_key_id: access_key_id.trim().to_string(), secret_access_key };
+    let created = obmem_sync::connect(&cfg, creds, &passphrase.into()).map_err(text)?;
+    Ok(if created {
+        format!("Started a new encrypted vault in {bucket}. Every other device unlocks it with the same passphrase.")
+    } else {
+        format!("Connected to the vault in {bucket}.")
+    })
+}
+
+/// One sync, now; the outcome also goes to the status the page shows.
+pub fn sync_now() -> Result<String, String> {
+    let cfg = config::sync_config().map_err(text)?;
+    match obmem_sync::run(&cfg, false, std::time::Duration::ZERO).map_err(text)? {
+        Some(r) => Ok(obmem_sync::summary(&r)),
+        None => Ok("A sync is already queued.".into()),
+    }
 }
 
 pub fn save_personal(s: &GlobalSettings) -> Result<(), String> {

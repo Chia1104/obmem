@@ -15,11 +15,13 @@ pub mod files;
 pub mod key;
 pub mod keychain;
 pub mod remote;
+mod run;
 mod sync;
 
 pub use key::VaultKey;
 pub use remote::{Credentials, Remote};
-pub use sync::{SyncOptions, SyncReport, state_path, sync};
+pub use run::{BACKGROUND_WAIT, Status, connect, last_status, run, summary};
+pub use sync::{Queued, SyncOptions, SyncReport, state_path, sync};
 
 use age::secrecy::SecretString;
 use anyhow::{Context, Result, anyhow, bail};

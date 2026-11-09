@@ -5,3 +5,4 @@ The `obmem` CLI. It parses arguments with clap, calls obmem-core, obmem-mcp and 
 - This crate turns on the `clap` feature of obmem-core and obmem-agents.
 - `init` and the session-start hook record the project in the machine's project list (`obmem projects`). A failure to record never fails the hook.
 - `obmem scan --staged` reads staged blobs from the git index, not from the working tree, so it sees exactly what the commit will contain. It fails rather than skipping a file it cannot read.
+- After the session-start and stop hooks in an obmem project, `spawn_background_sync` starts `obmem sync --background` as a detached process with null stdio (its own process group on Unix). On Windows it first marks the standard handles non-inheritable, so the agent does not wait on a pipe the sync still holds. The hook's own output never depends on the sync.

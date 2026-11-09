@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 obmem-core.workspace = true
 obmem-agents.workspace = true
+obmem-sync.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 nsh-core.workspace = true

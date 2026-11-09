@@ -10,6 +10,7 @@ obmem's desktop control panel for macOS and Windows, built with Native Shell (NS
 - `widgets.rs`: the shared pieces and the responsive rules: `page` (scrolls, caps the column width), `page_header` (actions wrap under the title), `tabs`, `choice`, `switch_control`, `checkbox_control`, `callout` (a card with an inset color bar, which notices use), `field` (label above the control when the page is narrow). Layout follows `window()`, which is a signal: a `style_when(move || …window()…)` restyles as the window resizes.
 - `theme.json` (applied with `set_tokens` in `App`): the palette over NSH's shadcn default, plus the app's own tokens `ok`, `warn` and `highlight`, read with `widgets::tone`. `icons.rs`: inline SVG icons in `currentColor`.
 - `project_page.rs` (header, tabs, Overview with the Claude Code import), `agent_tab.rs`, `sessions_tab.rs`, `settings_tab.rs`, `secrets_tab.rs`, `review_page.rs`, `personal_page.rs`: views only.
+- `personal_page.rs` has the Sync card: `[sync]` settings (through `settings::save_sync`), connecting the device (the secret and passphrase fields are `masked`), the last sync status and Sync now, all through obmem-sync.
 - The Agent view shows the session-start context and `memory_context` output as plain text, exactly as an agent receives them. Rendering them as Markdown would merge lines and show something no agent sees.
 - `login_env.rs`: on macOS, the PATH from a login shell (see below).
 
@@ -17,6 +18,7 @@ Logic another front end could use belongs in obmem-core or obmem-agents, not her
 
 ## NSH rules that bit
 
+- After a failed save, do not reload the data the form was built from: the region rebuilds the form from the file and the user loses what they typed.
 - A region re-renders whenever a signal it read changes. So each part of the state has its own signal, and a region that holds a form reads only what the form is built from. If it also read the notice, a failed save would rebuild the form and lose what the user typed. Seed a form's signals with untracked reads (`get_untracked`) for the same reason.
 
 - A task started with `spawn` ends with its owner, and the button that starts one is usually re-rendered away when the task updates the page. Start tasks through `state::run_task` / `in_background`, which run them under the window's owner.

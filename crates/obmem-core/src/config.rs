@@ -52,6 +52,26 @@ pub struct GlobalFile {
     pub vault: Option<String>,
     pub secrets: GlobalSecrets,
     pub review: ReviewConfig,
+    pub sync: SyncConfig,
+}
+
+/// `[sync]`: where the personal vault is backed up, an S3-compatible bucket (AWS S3, Cloudflare R2,
+/// MinIO). Only the user's config has it. Credentials and the vault key live in the OS keychain,
+/// never in this file.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct SyncConfig {
+    /// S3 API endpoint, e.g. `https://<account>.r2.cloudflarestorage.com`. Unset: AWS S3.
+    pub endpoint: Option<String>,
+    /// Bucket region. Unset: `auto` (what R2 expects); AWS needs the real region.
+    pub region: Option<String>,
+    pub bucket: Option<String>,
+    /// Key prefix inside the bucket, so one bucket can hold more than one vault. Unset: `obmem`.
+    pub prefix: Option<String>,
+    /// This machine's name in snapshots. Unset: the host name.
+    pub device: Option<String>,
+    /// Also back up `.obsidian/plugins/` and `community-plugins.json`.
+    pub community_plugins: Option<bool>,
 }
 
 /// Secret-scanning switches that may only come from the user's own config: a repo's
@@ -221,6 +241,12 @@ fn auto_approve(repo: &ReviewConfig, user: &ReviewConfig) -> bool {
 pub fn global_vault() -> Result<PathBuf> {
     let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
     Ok(global_vault_from(gf.vault))
+}
+
+/// The user's `[sync]` settings.
+pub fn sync_config() -> Result<SyncConfig> {
+    let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+    Ok(gf.sync)
 }
 
 fn global_vault_from(configured: Option<String>) -> PathBuf {

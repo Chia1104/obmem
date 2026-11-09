@@ -110,6 +110,33 @@ By default a write that contains a secret is refused. Set `mode = "redact"` to w
 
 For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks the staged files in the project vault.
 
+## Backup
+
+obmem can back up the personal vault to an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Everything in the bucket is encrypted with a key that only your passphrase unlocks, file names included. A backup made on macOS restores on Windows and the other way round.
+
+```toml
+# ~/.config/obmem/config.toml
+[sync]
+endpoint = "https://<account-id>.r2.cloudflarestorage.com"  # leave out for AWS S3
+bucket = "my-obmem-backup"
+# region = "us-east-1"   # AWS needs the bucket's region; R2 uses "auto", the default
+# prefix = "obmem"       # key prefix inside the bucket
+# device = "work-mac"    # this machine's name in snapshots; default: the host name
+# community_plugins = false
+```
+
+```sh
+obmem sync setup                  # access key, then choose (first device) or enter the passphrase
+obmem sync backup                 # a new snapshot, uploading only what changed
+obmem sync list                   # snapshots: number, time, device, file count
+obmem sync restore                # latest snapshot into the personal vault (must be empty or missing)
+obmem sync restore --snapshot 12 --to ~/restored
+```
+
+`setup` keeps the access key and the unlocked backup key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the backup cannot be read.**
+
+Each snapshot is a restore point; unchanged files are stored once. The backup holds the notes, `_system/`, and Obsidian's settings, themes and snippets from `.obsidian/`. It leaves out the workspace layout, other dot-folders and symlinks, plus community plugins unless `community_plugins = true`. A file whose name Windows cannot hold (`:` or `?`, a name like `con`, a trailing dot) is skipped with a warning.
+
 ## Import Claude Code memory
 
 `obmem import-claude` imports `~/.claude/projects/<project>/memory/*.md` as draft notes (active with auto-approve). User and feedback memories go to the global vault, project and reference memories to the project vault. Files that already exist are skipped.
@@ -139,6 +166,7 @@ A Cargo workspace:
 | `crates/obmem-core` | Config, vaults, notes, search, audit, secret scanning |
 | `crates/obmem-mcp` | The MCP server |
 | `crates/obmem-agents` | Agent hooks and `obmem setup` |
+| `crates/obmem-sync` | Encrypted backup of the personal vault to S3-compatible storage |
 | `crates/obmem` | The `obmem` binary |
 | `apps/obmem-gui` | The desktop app ([Native Shell](https://nsh.dev)) |
 

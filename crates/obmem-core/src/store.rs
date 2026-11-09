@@ -778,6 +778,11 @@ fn ensure_trailing_newline(mut s: String) -> String {
 /// Write via temp file + rename so Obsidian / sync clients never see a half-written note.
 /// `root` is the vault the file must stay in, even through symlinked folders.
 pub fn atomic_write(root: &Path, path: &Path, content: &str) -> Result<()> {
+    atomic_write_bytes(root, path, content.as_bytes())
+}
+
+/// [`atomic_write`] for content that need not be text (a restored attachment, say).
+pub fn atomic_write_bytes(root: &Path, path: &Path, content: &[u8]) -> Result<()> {
     let dir = path.parent().ok_or_else(|| anyhow!("no parent dir"))?;
     crate::config::ensure_within(root, dir)?;
     std::fs::create_dir_all(dir)?;
@@ -800,7 +805,7 @@ pub fn atomic_write(root: &Path, path: &Path, content: &str) -> Result<()> {
             }
         }
     };
-    let written = std::io::Write::write_all(&mut file, content.as_bytes()).and_then(|_| file.sync_all());
+    let written = std::io::Write::write_all(&mut file, content).and_then(|_| file.sync_all());
     drop(file);
     if let Err(e) = written.and_then(|_| std::fs::rename(&tmp, path)) {
         let _ = std::fs::remove_file(&tmp);

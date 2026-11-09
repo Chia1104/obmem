@@ -116,6 +116,31 @@ enum Cmd {
     Guide,
     /// Show resolved paths and counts.
     Status,
+    /// Encrypted backup of the personal vault to an S3-compatible bucket (`[sync]` in
+    /// ~/.config/obmem/config.toml).
+    Sync {
+        #[command(subcommand)]
+        action: SyncCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncCmd {
+    /// Save the bucket's access key on this device, and choose the backup passphrase (first
+    /// device) or unlock the backup with it (every other device).
+    Setup,
+    /// Back up the personal vault now (a new snapshot, unless nothing changed).
+    Backup,
+    /// List the snapshots in the bucket.
+    List,
+    /// Restore a snapshot into an empty folder. Default: the latest snapshot, into the personal
+    /// vault, which must then be empty or missing (a new device).
+    Restore {
+        #[arg(long)]
+        snapshot: Option<u64>,
+        #[arg(long)]
+        to: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -211,6 +236,10 @@ fn main() -> Result<()> {
     if let Cmd::Hook { which, session } = &cli.cmd {
         run_hook(which, cli.project.as_deref(), session.as_deref());
         return Ok(());
+    }
+    if let Cmd::Sync { action } = &cli.cmd {
+        // Only the personal vault and the user's config are involved: no project to load.
+        return run_sync(action);
     }
     let cfg = config::Config::load(cli.project.as_deref())?;
 
@@ -374,7 +403,7 @@ fn main() -> Result<()> {
             let mut store = store::Store::open(cfg)?;
             println!("{}", store.verify(&id, "human (cli)", true)?);
         }
-        Cmd::Hook { .. } => unreachable!("handled before loading config"),
+        Cmd::Hook { .. } | Cmd::Sync { .. } => unreachable!("handled before loading config"),
         Cmd::Status => {
             let st = status::status(&store::Store::open(cfg)?);
             println!("project root:   {}", st.project_root.display());
@@ -401,6 +430,98 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn run_sync(action: &SyncCmd) -> Result<()> {
+    use obmem_sync as sync;
+    let cfg = config::sync_config()?;
+    if cfg.bucket.is_none() {
+        anyhow::bail!(
+            "no backup bucket configured: add a [sync] table with `bucket` (and `endpoint` for R2 or MinIO) to {}",
+            config::global_config_path().display()
+        );
+    }
+    match action {
+        SyncCmd::Setup => {
+            let creds = sync::Credentials {
+                access_key_id: prompt("Access key ID: ")?,
+                secret_access_key: rpassword::prompt_password("Secret access key: ")?,
+            };
+            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let passphrase = if sync::has_key(&remote)? {
+                rpassword::prompt_password("Backup passphrase: ")?
+            } else {
+                eprintln!("This bucket holds no backup yet. Choose a passphrase: it encrypts the backup,");
+                eprintln!("and every other device unlocks it with the same one. Without it the backup cannot be read.");
+                let first = rpassword::prompt_password("New backup passphrase: ")?;
+                if first.is_empty() {
+                    anyhow::bail!("the passphrase cannot be empty");
+                }
+                if rpassword::prompt_password("Repeat it: ")? != first {
+                    anyhow::bail!("the passphrases differ");
+                }
+                first
+            };
+            let (key, created) = sync::unlock_or_create(&remote, &passphrase.into())?;
+            sync::keychain::save(&cfg, &creds, &key)?;
+            println!(
+                "{} the backup in {}; the access key and backup key are in this device's keychain",
+                if created { "created" } else { "unlocked" },
+                cfg.bucket.as_deref().unwrap_or_default()
+            );
+        }
+        SyncCmd::Backup => {
+            let (creds, key) = sync::keychain::load(&cfg)?;
+            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let vault = config::global_vault()?;
+            let device = sync::device_name(&cfg);
+            let opts = sync::BackupOptions { device: &device, community_plugins: cfg.community_plugins.unwrap_or(false) };
+            let r = sync::backup(&remote, &key, &vault, &opts)?;
+            for (name, why) in &r.skipped {
+                eprintln!("skipped {name}: {why}");
+            }
+            if r.created {
+                println!("snapshot {}: {} files, {} uploaded", r.seq, r.files, r.uploaded);
+            } else {
+                println!("nothing changed since snapshot {} ({} files)", r.seq, r.files);
+            }
+        }
+        SyncCmd::List => {
+            let (creds, key) = sync::keychain::load(&cfg)?;
+            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let seqs = sync::snapshot_seqs(&remote)?;
+            if seqs.is_empty() {
+                println!("no snapshots yet: run `obmem sync backup`");
+            }
+            for seq in seqs {
+                let m = sync::load_snapshot(&remote, &key, seq)?;
+                println!("{seq:>6}  {}  {:<20} {} files", m.created, m.device, m.files.len());
+            }
+        }
+        SyncCmd::Restore { snapshot, to } => {
+            let (creds, key) = sync::keychain::load(&cfg)?;
+            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let target = match to {
+                Some(p) => p.clone(),
+                None => config::global_vault()?,
+            };
+            let r = sync::restore(&remote, &key, *snapshot, &target)?;
+            println!("restored snapshot {} ({} files) into {}", r.seq, r.files, target.display());
+            println!("next: open the folder in Obsidian (\"Open folder as vault\")");
+        }
+    }
+    Ok(())
+}
+
+fn prompt(label: &str) -> Result<String> {
+    eprint!("{label}");
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    let line = line.trim().to_string();
+    if line.is_empty() {
+        anyhow::bail!("no input");
+    }
+    Ok(line)
 }
 
 /// The staged files inside the project vault, read from the **index** (exactly what the commit

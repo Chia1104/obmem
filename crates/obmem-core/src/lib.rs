@@ -2,6 +2,7 @@
 //! configuration, the project and global vaults, notes, search through the Obsidian CLI,
 //! the audit, and the secret scanner.
 
+pub mod allowlist;
 pub mod audit;
 pub mod catalog;
 pub mod config;
@@ -14,5 +15,6 @@ pub mod note;
 pub mod obsidian;
 pub mod projects;
 pub mod secrets;
+pub mod settings;
 pub mod status;
 pub mod store;

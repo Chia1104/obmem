@@ -35,6 +35,45 @@ pub fn cli_version() -> Option<String> {
     out.status.success().then(|| text.trim().trim_start_matches("obmem").trim().to_string())
 }
 
+const CODEX_CONFIG: &str = ".codex/config.toml";
+const CODEX_APPROVAL: &str = "default_tools_approval_mode";
+
+/// Whether Codex runs obmem's tools without asking (`default_tools_approval_mode = "approve"` on
+/// the project's `[mcp_servers.obmem]`). `None` when obmem is not set up for Codex. Codex asks
+/// before every MCP tool call by default, and `codex exec` cannot ask, so it cannot use obmem
+/// without this.
+pub fn codex_auto_approve(cfg: &Config) -> Result<Option<bool>> {
+    let doc = codex_config(cfg)?;
+    let Some(server) = doc.get("mcp_servers").and_then(|t| t.get("obmem")) else { return Ok(None) };
+    Ok(Some(server.get(CODEX_APPROVAL).and_then(|v| v.as_str()) == Some("approve")))
+}
+
+/// Turns Codex's approval of obmem's tools on or off for this project.
+pub fn set_codex_auto_approve(cfg: &Config, on: bool) -> Result<()> {
+    let path = cfg.project_root.join(CODEX_CONFIG);
+    let mut doc = codex_config(cfg)?;
+    let Some(server) = doc.get_mut("mcp_servers").and_then(|t| t.get_mut("obmem")).and_then(|t| t.as_table_like_mut())
+    else {
+        anyhow::bail!("obmem is not set up for Codex in this project; run `obmem setup codex` first");
+    };
+    if on {
+        server.insert(CODEX_APPROVAL, toml_edit::value("approve"));
+    } else {
+        server.remove(CODEX_APPROVAL);
+    }
+    std::fs::write(&path, doc.to_string()).with_context(|| format!("writing {}", path.display()))
+}
+
+fn codex_config(cfg: &Config) -> Result<toml_edit::DocumentMut> {
+    let path = cfg.project_root.join(CODEX_CONFIG);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    text.parse().with_context(|| format!("parsing {}", path.display()))
+}
+
 fn mentions(v: &Value, needle: &str) -> bool {
     v.to_string().contains(needle)
 }
@@ -222,7 +261,7 @@ fn run(cfg: &Config, agent: Agent, apply: bool) -> Result<Report> {
             r.manual.push("Start a new Claude Code session in this project and approve the `obmem` MCP server.".into());
         }
         Agent::Codex => {
-            let p = root.join(".codex/config.toml");
+            let p = root.join(CODEX_CONFIG);
             let block = "[mcp_servers.obmem]\ncommand = \"obmem\"\nargs = [\"serve\"]\n";
             r.note(&p, append_once(&p, apply, "[mcp_servers.obmem]", block)?);
             // Codex has SessionStart (also after compaction) and Stop; no PreCompact.
@@ -321,6 +360,9 @@ mod tests {
         assert_eq!(planned.changed.len(), 3, "{:?}", planned.changed);
         assert!(!root.join("AGENTS.md").exists(), "check writes nothing");
 
+        assert_eq!(codex_auto_approve(&c).unwrap(), None);
+        assert!(set_codex_auto_approve(&c, true).is_err());
+
         let first = setup(&c, Agent::Cursor).unwrap();
         assert_eq!(first.changed.len(), 3, "{:?}", first.changed); // mcp.json, hooks.json, AGENTS.md
         let hooks: Value = serde_json::from_str(&std::fs::read_to_string(root.join(".cursor/hooks.json")).unwrap()).unwrap();
@@ -339,6 +381,14 @@ mod tests {
         let codex: Value = serde_json::from_str(&std::fs::read_to_string(root.join(".codex/hooks.json")).unwrap()).unwrap();
         assert_eq!(codex["hooks"]["Stop"][0]["hooks"][0]["command"], "obmem hook stop --agent codex");
         assert!(setup(&c, Agent::Codex).unwrap().changed.is_empty());
+        // Auto-approval is off until switched on, and switching keeps the rest of the file.
+        assert_eq!(codex_auto_approve(&c).unwrap(), Some(false));
+        set_codex_auto_approve(&c, true).unwrap();
+        assert_eq!(codex_auto_approve(&c).unwrap(), Some(true));
+        assert!(std::fs::read_to_string(root.join(CODEX_CONFIG)).unwrap().contains("args = [\"serve\"]"));
+        set_codex_auto_approve(&c, false).unwrap();
+        assert_eq!(codex_auto_approve(&c).unwrap(), Some(false));
+        assert!(check(&c, Agent::Codex).unwrap().changed.is_empty());
         // AGENTS.md got the guide once, even though two agents asked for it
         setup(&c, Agent::Amp).unwrap();
         let agents = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();

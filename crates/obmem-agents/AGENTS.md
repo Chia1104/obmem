@@ -29,6 +29,7 @@ How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`) and `ob
 - `check` runs the same code without writing, and reports the files `setup` would change. Keep both behind the one `apply` flag so they cannot disagree.
 - Generated commands call `obmem` from `PATH`, so the files can be committed. `setup cursor` writes `serve --project ${workspaceFolder}`.
 - In `AGENTS.md`, only the block between `<!-- obmem:guide -->` and `<!-- /obmem:guide -->` is rewritten.
+- `setup codex` leaves Codex asking before each obmem tool call. `set_codex_auto_approve` turns on `default_tools_approval_mode = "approve"` per project (the GUI's switch); `codex exec` needs it.
 
 ## Tested in the real apps
 

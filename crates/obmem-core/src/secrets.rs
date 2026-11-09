@@ -130,21 +130,38 @@ fn merge_allowlist(into: &mut AllowlistDef, a: AllowlistDef, src: &Path, trusted
         return;
     }
     for r in a.regexes {
-        match Regex::new(&r) {
-            Ok(re) if ALLOWLIST_PROBES.iter().any(|p| re.is_match(p)) => {
-                tracing::warn!("{}: ignoring allowlist regex {r:?}, it matches almost anything", src.display())
-            }
-            Ok(_) => into.regexes.push(r),
-            Err(e) => tracing::warn!("{}: invalid allowlist regex {r:?}: {e}", src.display()),
+        match regex_problem(&r) {
+            Some(why) => tracing::warn!("{}: ignoring allowlist regex {r:?}: {why}", src.display()),
+            None => into.regexes.push(r),
         }
     }
     for w in a.stopwords {
         let w = w.trim().to_lowercase();
-        if w.chars().count() < MIN_STOPWORD_LEN || ALLOWLIST_PROBES.iter().any(|p| p.to_lowercase().contains(&w)) {
-            tracing::warn!("{}: ignoring stopword {w:?}, too short or too generic", src.display());
-        } else {
-            into.stopwords.push(w);
+        match stopword_problem(&w) {
+            Some(why) => tracing::warn!("{}: ignoring stopword {w:?}: {why}", src.display()),
+            None => into.stopwords.push(w),
         }
+    }
+}
+
+/// Why the scanner would ignore this allowlist regex, if it would.
+pub fn regex_problem(r: &str) -> Option<String> {
+    match Regex::new(r) {
+        Ok(re) if ALLOWLIST_PROBES.iter().any(|p| re.is_match(p)) => Some("it matches almost anything".into()),
+        Ok(_) => None,
+        Err(e) => Some(format!("it is not a valid regex: {e}")),
+    }
+}
+
+/// Why the scanner would ignore this allowlist stopword (compared lower-cased), if it would.
+pub fn stopword_problem(w: &str) -> Option<String> {
+    let w = w.trim().to_lowercase();
+    if w.chars().count() < MIN_STOPWORD_LEN {
+        Some(format!("it is shorter than {MIN_STOPWORD_LEN} characters"))
+    } else if ALLOWLIST_PROBES.iter().any(|p| p.to_lowercase().contains(&w)) {
+        Some("it is too generic".into())
+    } else {
+        None
     }
 }
 

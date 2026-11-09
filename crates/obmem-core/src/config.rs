@@ -152,26 +152,8 @@ impl Config {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "default".into())
         });
-        // `.obmem.toml` ships with the repo, so a clone must not be able to point writes elsewhere.
-        let vault_rel = pf.vault.as_deref().unwrap_or("docs/kb");
-        let vp = Path::new(vault_rel);
-        if vp.is_absolute()
-            || vault_rel.starts_with('~')
-            || vp.components().any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
-        {
-            anyhow::bail!(
-                "{}: `vault = \"{vault_rel}\"` must be a relative path inside the project (no `..`, `~` or absolute paths)",
-                project_root.join(PROJECT_CONFIG_FILE).display()
-            );
-        }
-        let project_vault = project_root.join(vp);
-        // Lexically fine is not enough: an existing component may be a symlink out of the repo.
-        ensure_within(&project_root, &project_vault)?;
-        let global_vault = std::env::var("OBMEM_GLOBAL_VAULT")
-            .ok()
-            .or(gf.vault)
-            .map(|s| expand_tilde(&s))
-            .unwrap_or_else(|| home().join("Obsidian/AgentMemory"));
+        let project_vault = project_vault_path(&project_root, pf.vault.as_deref().unwrap_or(DEFAULT_VAULT))?;
+        let global_vault = global_vault_from(gf.vault);
 
         let secrets = secrets_policy(&project_root, pf.secrets, &gf.secrets)?;
         Ok(Self {
@@ -197,11 +179,7 @@ impl Config {
 fn secrets_policy(project_root: &Path, repo: SecretsConfig, user: &GlobalSecrets) -> Result<SecretsConfig> {
     let mut env_files = SecretsConfig::default().env_files;
     for f in repo.env_files {
-        let p = Path::new(&f);
-        if p.is_absolute()
-            || f.starts_with('~')
-            || p.components().any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
-        {
+        if !is_plain_relative(&f) {
             anyhow::bail!(
                 "{}: secrets.env_files entry \"{f}\" must be a relative path inside the project",
                 project_root.join(PROJECT_CONFIG_FILE).display()
@@ -216,6 +194,47 @@ fn secrets_policy(project_root: &Path, repo: SecretsConfig, user: &GlobalSecrets
         env_files,
         scan_process_env: repo.scan_process_env || user.scan_process_env.unwrap_or(true),
     })
+}
+
+/// The personal vault: `OBMEM_GLOBAL_VAULT`, else the user's config, else `~/Obsidian/AgentMemory`.
+pub fn global_vault() -> Result<PathBuf> {
+    let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+    Ok(global_vault_from(gf.vault))
+}
+
+fn global_vault_from(configured: Option<String>) -> PathBuf {
+    std::env::var("OBMEM_GLOBAL_VAULT")
+        .ok()
+        .or(configured)
+        .map(|s| expand_tilde(&s))
+        .unwrap_or_else(|| home().join("Obsidian/AgentMemory"))
+}
+
+/// The project vault when `.obmem.toml` sets none.
+pub const DEFAULT_VAULT: &str = "docs/kb";
+
+/// A path relative to the project that stays inside it: no `..`, `~` or absolute paths.
+pub fn is_plain_relative(p: &str) -> bool {
+    let path = Path::new(p);
+    !p.is_empty()
+        && !path.is_absolute()
+        && !p.starts_with('~')
+        && path.components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+}
+
+/// The project vault for `.obmem.toml`'s `vault`. The file ships with the repo, so a clone must
+/// not be able to point writes elsewhere: the path must be plain relative, and must not leave the
+/// project through a symlink either.
+pub fn project_vault_path(project_root: &Path, vault: &str) -> Result<PathBuf> {
+    if !is_plain_relative(vault) {
+        anyhow::bail!(
+            "{}: `vault = \"{vault}\"` must be a relative path inside the project (no `..`, `~` or absolute paths)",
+            project_root.join(PROJECT_CONFIG_FILE).display()
+        );
+    }
+    let project_vault = project_root.join(vault);
+    ensure_within(project_root, &project_vault)?;
+    Ok(project_vault)
 }
 
 /// The deepest existing ancestor of `p` (or `p` itself), with symlinks resolved.

@@ -9,6 +9,11 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 - `audit` and `store` call each other, so they belong in the same crate.
 - `projects` is the machine's list of project roots (`~/.config/obmem/projects.toml`, next to the global config). Front ends record into it: the CLI's `init` and session-start hook, and the GUI. Library functions never record, because their tests would fill the user's real list with temp folders.
 
+## Settings and allowlists (`settings.rs`, `allowlist.rs`)
+
+- These edit the config files and the vaults' `_system/secret-allowlist.toml` the way a person does, through `toml_edit`: the rest of the file stays, comments included.
+- A save is checked by the same functions `Config::load` and the scanner use (`project_vault_path`, `is_plain_relative`, `secrets::regex_problem` / `stopword_problem`). Put a new rule there, not in the editor, so that what can be saved is exactly what loads.
+
 ## Obsidian (`obsidian.rs`)
 
 obmem keeps no index of its own. Search, backlinks, unresolved links and orphans all come from the Obsidian CLI.

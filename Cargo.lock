@@ -2664,6 +2664,7 @@ dependencies = [
  "dirs",
  "obmem-core",
  "serde_json",
+ "toml_edit",
 ]
 
 [[package]]
@@ -2682,6 +2683,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "toml",
+ "toml_edit",
  "tracing",
  "walkdir",
  "yaml_serde",
@@ -4438,6 +4440,7 @@ dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

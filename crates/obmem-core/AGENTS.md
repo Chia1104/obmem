@@ -14,12 +14,17 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 - These edit the config files and the vaults' `_system/secret-allowlist.toml` the way a person does, through `toml_edit`: the rest of the file stays, comments included.
 - A save is checked by the same functions `Config::load` and the scanner use (`project_vault_path`, `is_plain_relative`, `secrets::regex_problem` / `stopword_problem`). Put a new rule there, not in the editor, so that what can be saved is exactly what loads.
 
+## Review (`review.rs`)
+
+`Store::review` lists what waits for a person: drafts (except findings and session logs), and findings that are `open` or `accepted`. An audit finding's `target` is the vault-relative path of the note it is about, in the same vault. People act on items through `Store::approve`, `resolve_finding` and `verify`, naming the note by its vault-relative path.
+
 ## Obsidian (`obsidian.rs`)
 
 obmem keeps no index of its own. Search, backlinks, unresolved links and orphans all come from the Obsidian CLI.
 - Every call passes `vault=<id>`. The id is looked up by path in Obsidian's `obsidian.json`, because from a folder that is not a registered vault the CLI silently uses whichever vault is active.
 - When the app, the CLI or a vault is unavailable, skip the affected part and say what was skipped. Writes, the session-start context and the file-based audit rules read files directly and keep working.
 - Before changing how obmem calls the CLI, run memory_search `obsidian cli` for the quirks found so far.
+- `open_uri` builds the `obsidian://open?vault=<id>&file=<path>` link that front ends use to open a note.
 
 ## Writes (`store.rs`)
 

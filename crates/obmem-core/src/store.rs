@@ -108,6 +108,11 @@ impl Store {
         &self.cfg
     }
 
+    /// Every note in both vaults, as of the last sync.
+    pub(crate) fn notes(&self) -> &[crate::catalog::Meta] {
+        self.index.notes()
+    }
+
     /// How many notes in one vault have this status (as of the last sync).
     pub fn count_by_status(&self, status: &str, scope: Scope) -> usize {
         self.index.count_by_status(status, scope.as_str())

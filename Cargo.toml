@@ -31,6 +31,7 @@ clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
 env_logger = "0.11"
 hex = "0.4.3"
+percent-encoding = "2.3.2"
 regex = "1.13.1"
 rmcp = { version = "3.9.0", features = ["server", "transport-io", "macros"] }
 schemars = "1.2.3"

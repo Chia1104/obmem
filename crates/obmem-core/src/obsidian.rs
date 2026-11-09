@@ -55,6 +55,16 @@ impl Default for Cli {
     }
 }
 
+/// An `obsidian://` link that opens a note (vault-relative path) in the vault with this id.
+pub fn open_uri(vault_id: &str, rel: &str) -> String {
+    use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+    format!(
+        "obsidian://open?vault={}&file={}",
+        utf8_percent_encode(vault_id, NON_ALPHANUMERIC),
+        utf8_percent_encode(rel, NON_ALPHANUMERIC)
+    )
+}
+
 /// Obsidian's own vault registry.
 pub fn registry_path() -> PathBuf {
     if let Ok(p) = std::env::var("OBMEM_OBSIDIAN_CONFIG") {

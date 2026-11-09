@@ -14,6 +14,7 @@ pub mod init;
 pub mod note;
 pub mod obsidian;
 pub mod projects;
+pub mod review;
 pub mod secrets;
 pub mod settings;
 pub mod status;

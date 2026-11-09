@@ -114,6 +114,11 @@ impl Catalog {
         Ok(v.into_iter().take(limit).map(|m| (m.id.clone(), m.title.clone(), m.note_type.clone())).collect())
     }
 
+    /// Every note, as of the last sync.
+    pub fn notes(&self) -> &[Meta] {
+        &self.notes
+    }
+
     pub fn count_by_status(&self, status: &str, scope: &str) -> usize {
         self.notes.iter().filter(|m| m.status == status && m.scope == scope).count()
     }

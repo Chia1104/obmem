@@ -17,6 +17,7 @@ chrono.workspace = true
 clap = { workspace = true, optional = true }
 dirs.workspace = true
 hex.workspace = true
+percent-encoding.workspace = true
 regex.workspace = true
 schemars.workspace = true
 serde.workspace = true

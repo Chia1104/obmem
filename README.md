@@ -122,8 +122,9 @@ endpoint = "https://<account-id>.r2.cloudflarestorage.com"  # leave out for AWS 
 bucket = "my-obmem-vault"
 # region = "us-east-1"   # AWS needs the bucket's region; R2 uses "auto", the default
 # prefix = "obmem"       # key prefix inside the bucket
-# device = "work-mac"    # this machine's name; default: the host name
+# device = "work-mac"    # this machine's name; `setup` sets it to the host name plus 4 random hex digits
 # community_plugins = false
+# auto = true            # sync in the background as agent sessions start and turns end
 ```
 
 ```sh
@@ -132,6 +133,8 @@ obmem sync                        # sync now
 obmem sync list                   # snapshots: number, time, device, file count
 obmem sync restore --snapshot 12 --to ~/restored   # an older state, into an empty folder
 ```
+
+Once a device is set up, obmem syncs on its own: when an agent session starts in an obmem project, and when an agent turn ends, the hook starts `obmem sync` in the background, so the agent never waits on the network. Such syncs start at most once a minute; the last one always runs. `obmem status` and the desktop app's Personal settings show the last sync and why it failed, if it did. Set `auto = false` to sync only by hand. The desktop app can also edit `[sync]`, connect the device and sync now.
 
 `setup` keeps the access key and the unlocked vault key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the bucket cannot be read.**
 

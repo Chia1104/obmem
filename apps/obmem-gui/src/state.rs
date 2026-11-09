@@ -9,7 +9,7 @@ use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
 use obmem_core::allowlist::Kind;
-use obmem_core::settings::{GlobalSettings, ProjectSettings};
+use obmem_core::settings::{GlobalSettings, ProjectSettings, SyncSettings};
 use obmem_core::note::Scope;
 use obmem_core::store::Verdict;
 use std::path::PathBuf;
@@ -472,6 +472,44 @@ pub(crate) fn save_personal(s: GlobalSettings) {
             load_personal();
         },
     );
+}
+
+pub(crate) fn save_sync(s: SyncSettings) {
+    in_background(
+        move || data::save_sync(&s),
+        |r| match r {
+            Ok(()) => {
+                set_notice(Some(Notice::Done("Sync settings saved.".into())));
+                load_personal();
+            }
+            // Reloading would rebuild the form from the file and lose what the user typed.
+            Err(e) => fail(e),
+        },
+    );
+}
+
+pub(crate) fn connect_sync(access_key_id: String, secret: String, passphrase: String, repeat: String) {
+    in_background(
+        move || data::connect_sync(access_key_id, secret, passphrase, repeat),
+        |r| match r {
+            Ok(msg) => {
+                set_notice(Some(Notice::Done(msg)));
+                load_personal();
+            }
+            Err(e) => fail(e),
+        },
+    );
+}
+
+pub(crate) fn sync_now() {
+    set_notice(Some(Notice::Done("Syncing…".into())));
+    in_background(data::sync_now, |r| {
+        match r {
+            Ok(msg) => set_notice(Some(Notice::Done(format!("Synced: {msg}")))),
+            Err(e) => fail(e),
+        }
+        load_personal();
+    });
 }
 
 // --- Review ------------------------------------------------------------------

@@ -39,6 +39,20 @@ pub struct GlobalSettings {
     pub auto_approve: bool,
 }
 
+/// `[sync]` in the user's config, as the file states it; empty strings stand for unset keys.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SyncSettings {
+    pub endpoint: String,
+    pub region: String,
+    /// Empty: sync is off.
+    pub bucket: String,
+    pub prefix: String,
+    pub device: String,
+    /// Sync in the background when agent sessions start and stop.
+    pub auto: bool,
+    pub community_plugins: bool,
+}
+
 /// The env files obmem always scans for known secrets.
 pub fn default_env_files() -> Vec<String> {
     SecretsConfig::default().env_files
@@ -127,6 +141,78 @@ pub fn save_global(s: &GlobalSettings) -> Result<()> {
     save_global_at(&global_config_path(), s)
 }
 
+pub fn read_sync() -> Result<SyncSettings> {
+    read_sync_at(&global_config_path())
+}
+
+pub fn save_sync(s: &SyncSettings) -> Result<()> {
+    save_sync_at(&global_config_path(), s)
+}
+
+/// Set `[sync] device`, keeping the rest.
+pub fn set_sync_device(name: &str) -> Result<()> {
+    let mut s = read_sync()?;
+    s.device = name.to_string();
+    save_sync(&s)
+}
+
+fn read_sync_at(path: &Path) -> Result<SyncSettings> {
+    let file: GlobalFile = toml::from_str(&read_doc(path)?.to_string())?;
+    let sync = file.sync;
+    Ok(SyncSettings {
+        endpoint: sync.endpoint.unwrap_or_default(),
+        region: sync.region.unwrap_or_default(),
+        bucket: sync.bucket.unwrap_or_default(),
+        prefix: sync.prefix.unwrap_or_default(),
+        device: sync.device.unwrap_or_default(),
+        auto: sync.auto.unwrap_or(true),
+        community_plugins: sync.community_plugins.unwrap_or(false),
+    })
+}
+
+fn save_sync_at(path: &Path, s: &SyncSettings) -> Result<()> {
+    let endpoint = s.endpoint.trim();
+    if !endpoint.is_empty() && !(endpoint.starts_with("https://") || endpoint.starts_with("http://")) {
+        bail!("the endpoint must be a URL starting with https://");
+    }
+    let bucket = s.bucket.trim();
+    if bucket.contains('/') || bucket.contains(char::is_whitespace) {
+        bail!("the bucket is a name, without slashes or spaces");
+    }
+    let mut doc = read_doc(path)?;
+    let table = doc.entry("sync").or_insert(toml_edit::table());
+    let Some(table) = table.as_table_like_mut() else { bail!("[sync] in {} is not a table", path.display()) };
+    for (key, value) in [
+        ("endpoint", endpoint),
+        ("region", s.region.trim()),
+        ("bucket", bucket),
+        ("prefix", s.prefix.trim()),
+        ("device", s.device.trim()),
+    ] {
+        if value.is_empty() {
+            table.remove(key);
+        } else {
+            match table.get_mut(key) {
+                Some(slot) => assign(slot, value),
+                None => {
+                    table.insert(key, toml_edit::value(value));
+                }
+            }
+        }
+    }
+    for (key, value) in [("auto", s.auto), ("community_plugins", s.community_plugins)] {
+        match table.get_mut(key) {
+            Some(slot) => assign(slot, value),
+            None => {
+                table.insert(key, toml_edit::value(value));
+            }
+        }
+    }
+    let dir = path.parent().context("config path has no parent")?;
+    std::fs::create_dir_all(dir)?;
+    atomic_write(dir, path, &doc.to_string())
+}
+
 fn read_global_at(path: &Path) -> Result<GlobalSettings> {
     let file: GlobalFile = toml::from_str(&read_doc(path)?.to_string())?;
     Ok(GlobalSettings {
@@ -213,5 +299,42 @@ mod tests {
         save_global_at(&path, &GlobalSettings { vault: String::new(), scan_process_env: true, auto_approve: false }).unwrap();
         assert!(!std::fs::read_to_string(&path).unwrap().contains("vault"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sync_settings_round_trip_and_keep_the_rest() {
+        let dir = temp("sync");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "# mine\nvault = \"~/v\"\n\n[sync]\nbucket = \"old\" # the bucket\n").unwrap();
+        let mut s = read_sync_at(&path).unwrap();
+        assert_eq!((s.bucket.as_str(), s.auto, s.community_plugins), ("old", true, false));
+
+        s.endpoint = "https://acct.r2.cloudflarestorage.com".into();
+        s.bucket = "vault".into();
+        s.device = "work-mac".into();
+        s.auto = false;
+        save_sync_at(&path, &s).unwrap();
+        assert_eq!(read_sync_at(&path).unwrap(), s);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# mine") && text.contains("# the bucket") && text.contains("vault = \"~/v\""), "{text}");
+        let loaded = crate::config::sync_config_at(&path).unwrap();
+        assert_eq!(loaded.device.as_deref(), Some("work-mac"));
+        assert!(!loaded.auto_sync());
+
+        s.device = String::new();
+        save_sync_at(&path, &s).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("device"));
+        assert!(save_sync_at(&path, &SyncSettings { endpoint: "acct.r2.dev".into(), ..s.clone() }).is_err());
+        assert!(save_sync_at(&path, &SyncSettings { bucket: "a/b".into(), ..s.clone() }).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_device_names_differ_on_one_host() {
+        let (a, b) = (crate::config::new_device_name(), crate::config::new_device_name());
+        assert_ne!(a, b);
+        let (host_a, tag) = a.rsplit_once('-').unwrap();
+        assert_eq!(host_a, b.rsplit_once('-').unwrap().0);
+        assert!(tag.len() == 4 && tag.bytes().all(|c| c.is_ascii_hexdigit()), "{a}");
     }
 }

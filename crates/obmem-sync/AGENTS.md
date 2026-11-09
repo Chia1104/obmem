@@ -18,6 +18,12 @@ Under `[sync] prefix` (default `obmem`):
 - Before overwriting or deleting a local file, the sync checks it still has the content it hashed. If not, the file is left alone, and its base entry keeps the old value so the next sync sees both sides' changes.
 - A sync that would delete more than half of the vault (and more than 10 files) stops unless `allow_mass_delete` is set. One sync per state file runs at a time: an OS file lock (`File::try_lock`) on a `.lock` file next to it, which the OS releases when the process ends.
 
+## Running a sync (`run.rs`)
+
+- `run` is what front ends call. It loads the credentials from the keychain, syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. `connect` stores a device's credentials and unlocks the key, or creates it.
+- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `BACKGROUND_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records. At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
+- `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
+
 ## Invariants
 
 - Every write to the bucket is create-only (`PutMode::Create`). Nothing in the bucket is overwritten, so no device can destroy an earlier snapshot. Removing old snapshots and unreferenced blobs (retention) is the only way objects should ever disappear.

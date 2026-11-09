@@ -61,7 +61,7 @@ pub fn set_codex_auto_approve(cfg: &Config, on: bool) -> Result<()> {
     } else {
         server.remove(CODEX_APPROVAL);
     }
-    std::fs::write(&path, doc.to_string()).with_context(|| format!("writing {}", path.display()))
+    Writer { root: &cfg.project_root, apply: true }.write(&path, &doc.to_string())
 }
 
 fn codex_config(cfg: &Config) -> Result<toml_edit::DocumentMut> {
@@ -79,7 +79,7 @@ fn mentions(v: &Value, needle: &str) -> bool {
 }
 
 /// Read a JSON object (or start one), let `edit` change it, write it back if it changed.
-fn merge_json(path: &Path, apply: bool, edit: impl FnOnce(&mut Value) -> bool) -> Result<bool> {
+fn merge_json(path: &Path, w: &Writer, edit: impl FnOnce(&mut Value) -> bool) -> Result<bool> {
     let mut v: Value = if path.exists() {
         serde_json::from_str(&std::fs::read_to_string(path)?).with_context(|| format!("parsing {}", path.display()))?
     } else {
@@ -91,23 +91,20 @@ fn merge_json(path: &Path, apply: bool, edit: impl FnOnce(&mut Value) -> bool) -
     if !edit(&mut v) {
         return Ok(false);
     }
-    if !apply {
+    if !w.apply {
         return Ok(true);
     }
-    if let Some(d) = path.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::write(path, serde_json::to_string_pretty(&v)? + "\n")?;
+    w.write(path, &(serde_json::to_string_pretty(&v)? + "\n"))?;
     Ok(true)
 }
 
 /// `{"mcpServers": {"obmem": {...}}}` (Claude Code `.mcp.json`, Cursor `.cursor/mcp.json`).
-fn add_mcp_json(path: &Path, apply: bool) -> Result<bool> {
-    add_mcp_json_args(path, apply, &["serve"])
+fn add_mcp_json(path: &Path, w: &Writer) -> Result<bool> {
+    add_mcp_json_args(path, w, &["serve"])
 }
 
-fn add_mcp_json_args(path: &Path, apply: bool, args: &[&str]) -> Result<bool> {
-    merge_json(path, apply, |v| {
+fn add_mcp_json_args(path: &Path, w: &Writer, args: &[&str]) -> Result<bool> {
+    merge_json(path, w, |v| {
         let servers = v.as_object_mut().unwrap().entry("mcpServers").or_insert_with(|| json!({}));
         if mentions(servers, "obmem") {
             return false;
@@ -118,8 +115,8 @@ fn add_mcp_json_args(path: &Path, apply: bool, args: &[&str]) -> Result<bool> {
 }
 
 /// Claude Code / Codex shape: `hooks.<Event>[] = {matcher?, hooks: [{type, command}]}`.
-fn add_nested_hooks(path: &Path, apply: bool, events: &[(&str, String)]) -> Result<bool> {
-    merge_json(path, apply, |v| {
+fn add_nested_hooks(path: &Path, w: &Writer, events: &[(&str, String)]) -> Result<bool> {
+    merge_json(path, w, |v| {
         let hooks = v.as_object_mut().unwrap().entry("hooks").or_insert_with(|| json!({}));
         let mut changed = false;
         for (event, command) in events {
@@ -135,8 +132,8 @@ fn add_nested_hooks(path: &Path, apply: bool, events: &[(&str, String)]) -> Resu
 }
 
 /// Cursor / Copilot shape: `{"version": 1, "hooks": {"<event>": [{...entry}]}}`.
-fn add_flat_hooks(path: &Path, apply: bool, events: &[(&str, Value)]) -> Result<bool> {
-    merge_json(path, apply, |v| {
+fn add_flat_hooks(path: &Path, w: &Writer, events: &[(&str, Value)]) -> Result<bool> {
+    merge_json(path, w, |v| {
         let obj = v.as_object_mut().unwrap();
         obj.entry("version").or_insert(json!(1));
         let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
@@ -154,19 +151,16 @@ fn add_flat_hooks(path: &Path, apply: bool, events: &[(&str, Value)]) -> Result<
 }
 
 /// Append a block to a text file unless `marker` is already in it.
-fn append_once(path: &Path, apply: bool, marker: &str, block: &str) -> Result<bool> {
+fn append_once(path: &Path, w: &Writer, marker: &str, block: &str) -> Result<bool> {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     if existing.contains(marker) {
         return Ok(false);
     }
-    if !apply {
+    if !w.apply {
         return Ok(true);
     }
-    if let Some(d) = path.parent() {
-        std::fs::create_dir_all(d)?;
-    }
     let sep = if existing.is_empty() || existing.ends_with("\n\n") { "" } else if existing.ends_with('\n') { "\n" } else { "\n\n" };
-    std::fs::write(path, format!("{existing}{sep}{block}"))?;
+    w.write(path, &format!("{existing}{sep}{block}"))?;
     Ok(true)
 }
 
@@ -175,7 +169,7 @@ const AGENTS_END: &str = "<!-- /obmem:guide -->";
 
 /// Add the guide block to AGENTS.md, or refresh it in place when the guide changed. Text outside
 /// the markers is never touched.
-fn upsert_guide(path: &Path, apply: bool) -> Result<bool> {
+fn upsert_guide(path: &Path, w: &Writer) -> Result<bool> {
     let block = agents_md_block();
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     if let (Some(start), Some(end)) = (existing.find(AGENTS_MARKER), existing.find(AGENTS_END))
@@ -186,12 +180,12 @@ fn upsert_guide(path: &Path, apply: bool) -> Result<bool> {
         if updated == existing {
             return Ok(false);
         }
-        if apply {
-            std::fs::write(path, updated)?;
+        if w.apply {
+            w.write(path, &updated)?;
         }
         return Ok(true);
     }
-    append_once(path, apply, AGENTS_MARKER, &block)
+    append_once(path, w, AGENTS_MARKER, &block)
 }
 
 fn agents_md_block() -> String {
@@ -232,15 +226,29 @@ export default function (amp: PluginAPI) {
 
 /// Register obmem for `agent` in the project: write what is missing, keep everything else.
 pub fn setup(cfg: &Config, agent: Agent) -> Result<Report> {
-    run(cfg, agent, true)
+    run(cfg, agent, &Writer { root: &cfg.project_root, apply: true })
 }
 
 /// What `setup` would do, without writing anything: an empty `changed` means the agent is set up.
 pub fn check(cfg: &Config, agent: Agent) -> Result<Report> {
-    run(cfg, agent, false)
+    run(cfg, agent, &Writer { root: &cfg.project_root, apply: false })
 }
 
-fn run(cfg: &Config, agent: Agent, apply: bool) -> Result<Report> {
+/// Where setup writes and whether it may. The files are in the project, which may be an untrusted
+/// clone: a config file planted as a symlink must not redirect a write outside it (to the user's
+/// own `~/.codex/config.toml`, say), so every write goes through `atomic_write`.
+struct Writer<'a> {
+    root: &'a Path,
+    apply: bool,
+}
+
+impl Writer<'_> {
+    fn write(&self, path: &Path, content: &str) -> Result<()> {
+        obmem_core::store::atomic_write(self.root, path, content)
+    }
+}
+
+fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
     let root = &cfg.project_root;
     let mut r = Report::new();
     let cmd = |event: &str| match agent {
@@ -250,23 +258,23 @@ fn run(cfg: &Config, agent: Agent, apply: bool) -> Result<Report> {
     match agent {
         Agent::Claude => {
             let p = root.join(".mcp.json");
-            r.note(&p, add_mcp_json(&p, apply)?);
+            r.note(&p, add_mcp_json(&p, w)?);
             let p = root.join(".claude/settings.json");
             let events = [
                 ("SessionStart", cmd("session-start")),
                 ("Stop", cmd("stop")),
                 ("PreCompact", cmd("pre-compact")),
             ];
-            r.note(&p, add_nested_hooks(&p, apply, &events)?);
+            r.note(&p, add_nested_hooks(&p, w, &events)?);
             r.manual.push("Start a new Claude Code session in this project and approve the `obmem` MCP server.".into());
         }
         Agent::Codex => {
             let p = root.join(CODEX_CONFIG);
             let block = "[mcp_servers.obmem]\ncommand = \"obmem\"\nargs = [\"serve\"]\n";
-            r.note(&p, append_once(&p, apply, "[mcp_servers.obmem]", block)?);
+            r.note(&p, append_once(&p, w, "[mcp_servers.obmem]", block)?);
             // Codex has SessionStart (also after compaction) and Stop; no PreCompact.
             let p = root.join(".codex/hooks.json");
-            r.note(&p, add_nested_hooks(&p, apply, &[("SessionStart", cmd("session-start")), ("Stop", cmd("stop"))])?);
+            r.note(&p, add_nested_hooks(&p, w, &[("SessionStart", cmd("session-start")), ("Stop", cmd("stop"))])?);
             r.manual.push(format!(
                 "Codex loads project config only for trusted projects: trust {} when Codex asks (or set \
                  trust_level = \"trusted\" for it in ~/.codex/config.toml), then review and trust the two new hooks.",
@@ -277,18 +285,18 @@ fn run(cfg: &Config, agent: Agent, apply: bool) -> Result<Report> {
             // Some Cursor hosts (T3 Code's driver) start MCP servers in the home directory, so pin
             // the project; obmem ignores the placeholder if a host does not interpolate it.
             let p = root.join(".cursor/mcp.json");
-            r.note(&p, add_mcp_json_args(&p, apply, &["serve", "--project", "${workspaceFolder}"])?);
+            r.note(&p, add_mcp_json_args(&p, w, &["serve", "--project", "${workspaceFolder}"])?);
             let p = root.join(".cursor/hooks.json");
             let events = [
                 ("sessionStart", json!({ "command": cmd("session-start") })),
                 ("stop", json!({ "command": cmd("stop") })),
                 ("preCompact", json!({ "command": cmd("pre-compact") })),
             ];
-            r.note(&p, add_flat_hooks(&p, apply, &events)?);
+            r.note(&p, add_flat_hooks(&p, w, &events)?);
             // sessionStart context injection is unreliable in some Cursor builds; the guide in
             // AGENTS.md (which Cursor reads) covers that case.
             let p = root.join("AGENTS.md");
-            r.note(&p, upsert_guide(&p, apply)?);
+            r.note(&p, upsert_guide(&p, w)?);
             r.manual.push("In Cursor: Settings → MCP, enable `obmem` for this project.".into());
         }
         Agent::Copilot => {
@@ -299,9 +307,9 @@ fn run(cfg: &Config, agent: Agent, apply: bool) -> Result<Report> {
                 ("agentStop", entry("stop")),
                 ("preCompact", entry("pre-compact")),
             ];
-            r.note(&p, add_flat_hooks(&p, apply, &events)?);
+            r.note(&p, add_flat_hooks(&p, w, &events)?);
             let p = root.join("AGENTS.md");
-            r.note(&p, upsert_guide(&p, apply)?);
+            r.note(&p, upsert_guide(&p, w)?);
             r.manual.push(
                 "Register the MCP server for Copilot CLI: add {\"mcpServers\": {\"obmem\": {\"type\": \"local\", \
                  \"command\": \"obmem\", \"args\": [\"serve\"], \"tools\": [\"*\"]}}} to ~/.copilot/mcp-config.json \
@@ -312,13 +320,12 @@ fn run(cfg: &Config, agent: Agent, apply: bool) -> Result<Report> {
         Agent::Amp => {
             let p = root.join(".amp/plugins/obmem.ts");
             let changed = !p.exists();
-            if changed && apply {
-                std::fs::create_dir_all(p.parent().unwrap())?;
-                std::fs::write(&p, AMP_PLUGIN)?;
+            if changed && w.apply {
+                w.write(&p, AMP_PLUGIN)?;
             }
             r.note(&p, changed);
             let p = root.join("AGENTS.md");
-            r.note(&p, upsert_guide(&p, apply)?);
+            r.note(&p, upsert_guide(&p, w)?);
             r.manual.push(format!(
                 "Register the MCP server for this workspace: cd {} && amp mcp add obmem --workspace -- obmem serve",
                 root.display()
@@ -396,10 +403,36 @@ mod tests {
         // an outdated guide block is refreshed in place; surrounding text survives
         let stale = format!("# Team notes\n\n{AGENTS_MARKER}\nold guide\n{AGENTS_END}\n\nkeep me\n");
         std::fs::write(root.join("AGENTS.md"), stale).unwrap();
-        assert!(upsert_guide(&root.join("AGENTS.md"), true).unwrap());
+        let w = Writer { root: &root, apply: true };
+        assert!(upsert_guide(&root.join("AGENTS.md"), &w).unwrap());
         let fresh = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
         assert!(fresh.starts_with("# Team notes") && fresh.ends_with("keep me\n") && !fresh.contains("old guide"), "{fresh}");
-        assert!(!upsert_guide(&root.join("AGENTS.md"), true).unwrap());
+        assert!(!upsert_guide(&root.join("AGENTS.md"), &w).unwrap());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn never_writes_through_a_planted_symlink() {
+        let root = std::env::temp_dir().join(format!("obmem-setup-link-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!("obmem-setup-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(root.join(".codex")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        // A clone ships .codex/config.toml as a link to the user's own Codex config.
+        let theirs = "[mcp_servers.obmem]\ncommand = \"obmem\"\n";
+        std::fs::write(outside.join("config.toml"), theirs).unwrap();
+        std::os::unix::fs::symlink(outside.join("config.toml"), root.join(".codex/config.toml")).unwrap();
+        // And .cursor as a link to a folder outside the project.
+        std::os::unix::fs::symlink(&outside, root.join(".cursor")).unwrap();
+        let c = cfg(&root);
+
+        assert!(set_codex_auto_approve(&c, true).is_err());
+        assert!(setup(&c, Agent::Cursor).is_err());
+        assert_eq!(std::fs::read_to_string(outside.join("config.toml")).unwrap(), theirs);
+        assert!(!outside.join("mcp.json").exists() && !outside.join("hooks.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 }

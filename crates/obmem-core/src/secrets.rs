@@ -21,6 +21,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::LazyLock;
 
 const BUILTIN_RULES: &str = include_str!("secret_rules.toml");
 
@@ -346,15 +347,41 @@ impl Scanner {
         });
     }
 
-    /// Replace every hit with `[REDACTED:<rule>]`.
+    /// Replace every hit with `[REDACTED:<rule>]`. A private key is redacted through its END
+    /// line (see [`redaction_end`]). Spans that overlap become one, named after the first hit.
     pub fn redact(text: &str, hits: &[SecretHit]) -> String {
-        let mut out = text.to_string();
-        let mut sorted: Vec<&SecretHit> = hits.iter().collect();
-        sorted.sort_by_key(|h| std::cmp::Reverse(h.start));
-        for h in sorted {
-            out.replace_range(h.start..h.end, &format!("[REDACTED:{}]", h.rule));
+        let mut spans: Vec<(usize, usize, &str)> =
+            hits.iter().map(|h| (h.start, redaction_end(text, h), h.rule.as_str())).collect();
+        spans.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
+        let mut out = String::with_capacity(text.len());
+        let mut pos = 0;
+        for (start, end, rule) in spans {
+            if start >= pos {
+                out.push_str(&text[pos..start]);
+                out.push_str(&format!("[REDACTED:{rule}]"));
+            }
+            pos = pos.max(end);
         }
+        out.push_str(&text[pos..]);
         out
+    }
+}
+
+/// The BEGIN line of a PEM private key, as the built-in `private-key` rule matches it, and the
+/// END line that closes the key.
+static KEY_BEGIN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----").unwrap());
+static KEY_END: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----").unwrap());
+
+/// Where the redaction of a hit ends. A hit that holds a private key's BEGIN line (the
+/// `private-key` rule, or a known value that is that line) is followed by the key material,
+/// laid out however the text lays it out. So the redaction runs through the next END line, or
+/// to the end of the text when there is none: whatever the layout, no part of the key is kept.
+fn redaction_end(text: &str, h: &SecretHit) -> usize {
+    match KEY_BEGIN.find_iter(&text[h.start..h.end]).last() {
+        Some(b) => KEY_END.find_at(text, h.start + b.end()).map_or(text.len(), |e| e.end().max(h.end)),
+        None => h.end,
     }
 }
 
@@ -511,6 +538,76 @@ mod tests {
         let t = concat!("use sk_li", "ve_abcdefghijklmnopqrstuvwx now");
         let hits = s.scan(t);
         assert_eq!(Scanner::redact(t, &hits), "use [REDACTED:stripe-key] now");
+    }
+
+    const KEY_HEAD: &str = concat!("-----BEGIN ", "RSA PRIVATE KEY-----");
+    const KEY_TAIL: &str = concat!("-----END ", "RSA PRIVATE KEY-----");
+    const KEY_BODY: [&str; 2] =
+        ["Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3Bx", "cXdlcnR5dWlvcGFzZGZnaGprbHp4Y3Zibm0xMjM0NTY3ODkwUVdF"];
+
+    fn assert_no_key(redacted: &str) {
+        assert!(KEY_BODY.iter().all(|b| !redacted.contains(b)) && !redacted.contains("-----END"), "{redacted}");
+    }
+
+    #[test]
+    fn redact_removes_the_whole_private_key_in_any_layout() {
+        let s = scanner_with_env("");
+        let [b1, b2] = KEY_BODY;
+        let layouts = [
+            format!("{KEY_HEAD}\n{b1}\n{b2}\n{KEY_TAIL}"),
+            format!("{KEY_HEAD} \n{b1}\n{b2}\n{KEY_TAIL}"),
+            format!("{KEY_HEAD} {b1} {b2} {KEY_TAIL}"),
+            format!("> {KEY_HEAD}\n> {b1}\n> {b2}\n> {KEY_TAIL}"),
+            format!("# {KEY_HEAD}\n# {b1}\n# {b2}\n# {KEY_TAIL}"),
+            format!("{KEY_HEAD}\r{b1}\r{b2}\r{KEY_TAIL}"),
+            format!("{{\"key\": \"{KEY_HEAD}\\\\n{b1}\\\\n{b2}\\\\n{KEY_TAIL}\\\\n\"}}"),
+            format!("{KEY_HEAD}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0A1B2C\n\n{b1}\n{b2}\n{KEY_TAIL}"),
+        ];
+        for key in layouts {
+            let t = format!("before the key\n{key}\nafter the key");
+            let hits = s.scan(&t);
+            assert_eq!(hits.len(), 1, "{t}");
+            // Allowlists and fingerprints still see only the BEGIN line.
+            assert_eq!(&t[hits[0].start..hits[0].end], KEY_HEAD);
+            let red = Scanner::redact(&t, &hits);
+            assert_no_key(&red);
+            assert!(red.starts_with("before the key\n") && red.ends_with("\nafter the key"), "{red}");
+            assert!(red.contains("[REDACTED:private-key]"), "{red}");
+        }
+    }
+
+    #[test]
+    fn redact_stops_at_each_keys_end_line() {
+        let s = scanner_with_env("");
+        let [b1, b2] = KEY_BODY;
+        let t = format!("a\n{KEY_HEAD}\n{b1}\n{KEY_TAIL}\nmiddle\n{KEY_HEAD}\n{b2}\n{KEY_TAIL}\nz");
+        let hits = s.scan(&t);
+        assert_eq!(Scanner::redact(&t, &hits), "a\n[REDACTED:private-key]\nmiddle\n[REDACTED:private-key]\nz");
+    }
+
+    #[test]
+    fn redact_without_an_end_line_removes_the_rest_of_the_text() {
+        let s = scanner_with_env("");
+        let [b1, b2] = KEY_BODY;
+        let t = format!(concat!("note\n{}\n{}\n{} see also gh", "p_abcdefghijklmnopqrstuvwxyz0123456789 ok"), KEY_HEAD, b1, b2);
+        let hits = s.scan(&t);
+        // Both secrets are still reported on their own.
+        let ids: Vec<_> = hits.iter().map(|h| h.rule.as_str()).collect();
+        assert_eq!(ids, ["private-key", "github-token"]);
+        assert_eq!(Scanner::redact(&t, &hits), "note\n[REDACTED:private-key]");
+    }
+
+    #[test]
+    fn redact_removes_the_key_when_its_begin_line_is_a_known_value() {
+        // A multi-line .env value: the line parser keeps only the BEGIN line as a known value,
+        // and that hit replaces the identical `private-key` one.
+        let [b1, b2] = KEY_BODY;
+        let s = scanner_with_env(&format!("JWT_PRIVATE_KEY=\"{KEY_HEAD}\n{b1}\n{b2}\n{KEY_TAIL}\"\n"));
+        let t = format!("x\n{KEY_HEAD}\n{b1}\n{b2}\n{KEY_TAIL}\ny");
+        let hits = s.scan(&t);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule, "known-secret-value");
+        assert_eq!(Scanner::redact(&t, &hits), "x\n[REDACTED:known-secret-value]\ny");
     }
 
     #[test]

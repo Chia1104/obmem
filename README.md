@@ -132,6 +132,7 @@ obmem sync setup                  # access key, then choose (first device) or en
 obmem sync                        # sync now
 obmem sync list                   # snapshots: number, time, device, file count
 obmem sync restore --snapshot 12 --to ~/restored   # an older state, into an empty folder
+obmem sync prune --dry-run        # what retention would remove (it runs by itself daily)
 ```
 
 Once a device is set up, obmem syncs on its own: when an agent session starts in an obmem project, and when an agent turn ends, the hook starts `obmem sync` in the background, so the agent never waits on the network. Such syncs start at most once a minute; the last one always runs. `obmem status` and the desktop app's Personal settings show the last sync and why it failed, if it did. Set `auto = false` to sync only by hand. The desktop app can also edit `[sync]`, connect the device and sync now.
@@ -148,7 +149,9 @@ How a sync decides:
 
 Session logs carry the machine's name (`2026-11-09-work-mac.md`), so two machines never write the same log.
 
-A sync covers the notes, `_system/`, and Obsidian's settings, themes and snippets from `.obsidian/`. It leaves out the workspace layout, other dot-folders and symlinks, plus community plugins unless `community_plugins = true`. A file whose name Windows cannot hold (`:` or `?`, a name like `con`, a trailing dot) is skipped with a warning. Older snapshots stay in the bucket as restore points.
+A sync covers the notes, `_system/`, and Obsidian's settings, themes and snippets from `.obsidian/`. It leaves out the workspace layout, other dot-folders and symlinks, plus community plugins unless `community_plugins = true`. A file whose name Windows cannot hold (`:` or `?`, a name like `con`, a trailing dot) is skipped with a warning.
+
+Older snapshots stay in the bucket as restore points: every snapshot from the last 7 days, the newest of each day for 30 days, the newest of each week for a year, and always the latest. Once a day, after a sync, obmem removes the rest and the content only they needed. Run `obmem sync prune --dry-run` to see what would go.
 
 ## Import Claude Code memory
 

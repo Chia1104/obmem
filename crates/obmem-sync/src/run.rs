@@ -31,20 +31,51 @@ pub fn run(cfg: &SyncConfig, allow_mass_delete: bool, wait: std::time::Duration)
         let remote = Remote::s3(cfg, &creds)?;
         let device = config::device_name(cfg);
         let opts = SyncOptions { device: &device, community_plugins: cfg.community_plugins.unwrap_or(false), allow_mass_delete, wait };
-        sync(&remote, &key, &vault, &state, &opts)
+        let report = sync(&remote, &key, &vault, &state, &opts)?;
+        Ok::<_, anyhow::Error>((report, prune_if_due(&remote, &key, &state)))
     })();
     match result {
         Err(e) if e.downcast_ref::<Queued>().is_some() => Ok(None),
         result => {
             let status = match &result {
-                Ok(r) => Status { at: now(), ok: true, message: summary(r) },
+                Ok((r, cleanup)) => Status { at: now(), ok: true, message: format!("{}{}", summary(r), cleanup) },
                 Err(e) => Status { at: now(), ok: false, message: format!("{e:#}") },
             };
             if let Err(e) = write_status(&status_path(&state), &status) {
                 tracing::warn!("could not record the sync status: {e:#}");
             }
-            result.map(Some)
+            result.map(|(r, _)| Some(r))
         }
+    }
+}
+
+/// How often a device prunes after a sync.
+const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Prune once a day per device, after a sync. A failed prune does not fail the sync; the status
+/// says what happened (empty when nothing worth saying did).
+fn prune_if_due(remote: &Remote, key: &crate::VaultKey, state: &Path) -> String {
+    let marker = state.with_extension("pruned");
+    let due = std::fs::metadata(&marker)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_none_or(|age| age >= PRUNE_EVERY);
+    if !due {
+        return String::new();
+    }
+    match crate::prune(remote, key, chrono::Utc::now(), false) {
+        Ok(p) => {
+            if let Err(e) = std::fs::write(&marker, b"") {
+                tracing::warn!("could not record the prune: {e}");
+            }
+            if p.deleted_snapshots.is_empty() && p.deleted_blobs == 0 {
+                String::new()
+            } else {
+                format!("; removed {} old snapshots and {} unused blobs", p.deleted_snapshots.len(), p.deleted_blobs)
+            }
+        }
+        Err(e) => format!("; cleaning up old snapshots failed: {e:#}"),
     }
 }
 

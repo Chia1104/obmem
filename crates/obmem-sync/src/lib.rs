@@ -7,6 +7,9 @@
 //! - `blobs/<id[..2]>/<id>.age`: file content, encrypted. `id` is an HMAC of the content, so a
 //!   blob is written once and never changes, and unchanged files are not uploaded again.
 //!
+//! Old snapshots and the blobs only they needed are removed by `prune`, the only code that
+//! deletes objects.
+//!
 //! A snapshot takes the next sequence number with a create-only write, so two devices syncing at
 //! the same moment cannot overwrite each other: the one that loses merges again on top of the
 //! winner's snapshot (see `sync`).
@@ -15,11 +18,13 @@ pub mod files;
 pub mod key;
 pub mod keychain;
 pub mod remote;
+mod prune;
 mod run;
 mod sync;
 
 pub use key::VaultKey;
 pub use remote::{Credentials, Remote};
+pub use prune::{PruneReport, prune};
 pub use run::{BACKGROUND_WAIT, Status, connect, last_status, run, summary};
 pub use sync::{Queued, SyncOptions, SyncReport, state_path, sync};
 

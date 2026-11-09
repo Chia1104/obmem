@@ -6,12 +6,14 @@ obmem's desktop control panel for macOS and Windows, built with Native Shell (NS
 
 - `data.rs`: everything the window reads or changes, through obmem-core and obmem-agents. All of it blocks.
 - `state.rs`: the window's signals and the actions that change them. Views call actions; actions run `data` on a blocking thread and write the result back.
-- `sidebar.rs`, `project_page.rs`, `widgets.rs`: views only.
+- `sidebar.rs`, `project_page.rs` (header, tabs, Overview), `settings_tab.rs`, `secrets_tab.rs`, `personal_page.rs`, `widgets.rs`: views only.
 - `login_env.rs`: on macOS, the PATH from a login shell (see below).
 
 Logic another front end could use belongs in obmem-core or obmem-agents, not here.
 
 ## NSH rules that bit
+
+- A region re-renders whenever a signal it read changes. So each part of the state has its own signal, and a region that holds a form reads only what the form is built from. If it also read the notice, a failed save would rebuild the form and lose what the user typed. Seed a form's signals with untracked reads (`get_untracked`) for the same reason.
 
 - A task started with `spawn` ends with its owner, and the button that starts one is usually re-rendered away when the task updates the page. Start tasks through `state::run_task` / `in_background`, which run them under the window's owner.
 - `nsh_core::blocking` moves work off the engine thread. Every `data` call goes through it.

@@ -1,8 +1,9 @@
-//! One project: its health and each agent's setup.
+//! One project: its overview (health and each agent's setup), settings and secrets.
 
 use crate::data::{AgentState, Detail};
-use crate::state::{self, Load, Notice};
-use crate::widgets::{Level, action, card, check, heading, muted, primary};
+use crate::state::{self, Load, Tab};
+use crate::widgets::{Level, action, card, check, choice, heading, muted, notice_area, primary};
+use crate::{secrets_tab, settings_tab};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 use obmem_core::status::{Registration, VaultStatus};
@@ -10,64 +11,79 @@ use obmem_core::status::{Registration, VaultStatus};
 const REVEAL: &str = if cfg!(windows) { "Show in Explorer" } else { "Show in Finder" };
 
 pub(crate) fn project_page() -> impl IntoElement {
-    scroll().flex_1().child(view().gap_4().p_6().child(dynamic(move || match state::detail() {
+    scroll().flex_1().child(
+        view()
+            .gap_4()
+            .p_6()
+            .child(dynamic(header))
+            .child(notice_area())
+            .child(dynamic(move || {
+                let ready = matches!(state::detail(), Load::Ready(ref d) if d.status.initialized);
+                ready.then(tab_bar)
+            }))
+            .child(dynamic(content)),
+    )
+}
+
+/// The project's name and actions; also what shows before it loads or when it cannot.
+fn header() -> Vec<AnyElement> {
+    match state::detail() {
         Load::Loading if state::selected().is_none() => vec![muted("Add a project to see its memory setup.").into_element()],
         Load::Loading => vec![muted("Loading…").into_element()],
         Load::Failed(e) => vec![
             check(Level::Error, "Could not read this project", e).into_element(),
-            view().flex_row().gap_2().child(action("Try again", state::refresh)).child(action("Remove from list", state::remove_selected)).into_element(),
+            view()
+                .flex_row()
+                .gap_2()
+                .child(action("Try again", state::refresh))
+                .child(action("Remove from list", state::remove_selected))
+                .into_element(),
         ],
-        Load::Ready(d) => page(d),
-    })))
+        Load::Ready(d) => {
+            let root = d.status.project_root.clone();
+            vec![
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        view()
+                            .flex_1()
+                            .gap_1()
+                            .child(text(d.status.project_name.clone()).text_xl().font_weight(FontWeight::SEMIBOLD))
+                            .child(muted(root.display().to_string())),
+                    )
+                    .child(action("Refresh", state::refresh))
+                    .child(action(REVEAL, move || drop(reveal_path(root.clone()))))
+                    .child(action("Remove from list", state::remove_selected))
+                    .into_element(),
+            ]
+        }
+    }
 }
 
-fn page(d: Detail) -> Vec<AnyElement> {
-    let st = &d.status;
-    let root = st.project_root.clone();
-    let mut out = vec![
-        view()
-            .flex_row()
-            .items_center()
-            .gap_3()
-            .child(view().flex_1().gap_1().child(text(st.project_name.clone()).text_xl().font_weight(FontWeight::SEMIBOLD)).child(muted(root.display().to_string())))
-            .child(action("Refresh", state::refresh))
-            .child(action(REVEAL, move || drop(reveal_path(root.clone()))))
-            .child(action("Remove from list", state::remove_selected))
-            .into_element(),
-    ];
-    if let Some(n) = state::notice() {
-        out.push(notice(n).into_element());
-    }
-    if !st.initialized {
-        out.push(
+fn tab_bar() -> View {
+    choice(&[(Tab::Overview, "Overview"), (Tab::Settings, "Settings"), (Tab::Secrets, "Secrets")], state::tab, state::show_tab)
+}
+
+/// The shown tab. It re-renders when the project is read again (after a save) or the tab changes,
+/// never for a notice, so a form keeps what the user typed when a save fails.
+fn content() -> Vec<AnyElement> {
+    let Load::Ready(d) = state::detail() else { return vec![] };
+    if !d.status.initialized {
+        return vec![
             card()
                 .child(text("obmem is not set up in this folder"))
                 .child(muted("Setting it up creates the project vault and .obmem.toml. Until then, hooks do nothing here."))
                 .child(view().flex_row().pt_2().child(primary("Set up obmem here", state::initialize)))
                 .into_element(),
-        );
-        return out;
+        ];
     }
-    out.push(health(&d).into_element());
-    out.push(agents(d.agents).into_element());
-    out
-}
-
-fn notice(n: Notice) -> impl IntoElement {
-    let body = match n {
-        Notice::Error(e) => card().child(check(Level::Error, "That did not work", e)),
-        Notice::SetUp(done) => {
-            let mut c = card().child(text(format!("{} is set up", done.agent.label())).font_weight(FontWeight::MEDIUM));
-            for f in &done.changed {
-                c = c.child(muted(format!("Updated {f}")));
-            }
-            for m in &done.manual {
-                c = c.child(muted(format!("Next: {m}")));
-            }
-            c
-        }
-    };
-    body.child(view().flex_row().pt_2().child(action("Dismiss", state::dismiss_notice)))
+    match state::tab() {
+        Tab::Overview => vec![health(&d).into_element(), agents(d.agents).into_element()],
+        Tab::Settings => vec![settings_tab::settings_tab(&d).into_element()],
+        Tab::Secrets => vec![secrets_tab::secrets_tab(&d).into_element()],
+    }
 }
 
 fn health(d: &Detail) -> View {

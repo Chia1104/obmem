@@ -1,7 +1,7 @@
 //! The project list: every project obmem has seen, and adding one by hand.
 
 use crate::data::ProjectRow;
-use crate::state::{self, Load};
+use crate::state::{self, Load, Screen};
 use crate::widgets::{action, heading, muted};
 use nsh_base::{button, theme};
 use nsh_core::prelude::*;
@@ -36,6 +36,16 @@ pub(crate) fn sidebar() -> impl IntoElement {
                 }))
                 .child(each(rows, |r: &ProjectRow| r.path.clone(), |row, _| project_row(row))),
         )
+        .child(
+            button()
+                .px_2()
+                .py_2()
+                .rounded(move || theme().radius)
+                .bg(move || if state::screen() == Screen::Personal { theme().sidebar_accent } else { theme().sidebar })
+                .active(|s| s.opacity(0.7))
+                .on_press(state::show_personal)
+                .child(text("Personal settings")),
+        )
 }
 
 /// The listed projects; none while loading.
@@ -48,7 +58,7 @@ fn rows() -> Vec<ProjectRow> {
 
 fn project_row(row: ReadSignal<ProjectRow>) -> impl IntoElement {
     let path = move || row.with(|r| r.path.clone());
-    let chosen = move || state::selected().is_some_and(|p| p == path());
+    let chosen = move || state::screen() == Screen::Project && state::selected().is_some_and(|p| p == path());
     button()
         .gap_1()
         .px_2()

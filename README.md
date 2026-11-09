@@ -1,5 +1,7 @@
 # obmem
 
+![obmem — Long-term memory for coding agents](.github/public/obmem-og.png)
+
 Long-term memory for coding agents, stored as Obsidian notes that people review.
 
 obmem is one Rust binary that works as an MCP server, a set of agent hooks and a CLI. Agents read and write plain Markdown notes, and people browse and review them in Obsidian. Search, backlinks and link checks come from Obsidian itself through its [official CLI](https://obsidian.md/help/cli), so agents see the same results as the app.

@@ -486,20 +486,36 @@ impl Store {
             Some(s) if !s.is_empty() => format!("{date}-{}", slugify(&s.chars().take(12).collect::<String>())),
             _ => date.clone(),
         };
-        let path = dir.join(format!("{name}.md"));
-        let mut content = if path.exists() {
-            std::fs::read_to_string(&path)?
-        } else {
-            let fm = Frontmatter {
-                note_type: Some("session".into()),
-                title: Some(format!("{} session {name}", self.cfg.project_name)),
-                status: Some("active".into()),
-                author: Some(author.to_string()),
-                created: Some(date.clone()),
-                tags: vec![format!("project/{}", slugify(&self.cfg.project_name))],
-                ..Default::default()
-            };
-            Note { fm, body: format!("# Session {name}\n\nProject: {} (`{}`)\n\n", self.cfg.project_name, self.cfg.project_root.display()) }.render()?
+        // Projects of the same name share this folder, and the name comes from repo config: add
+        // only to a log this project started, else start one under the next free name.
+        let own = crate::sessions::own_roots(&self.cfg);
+        let Some(root) = own.first() else { bail!("cannot tell where the project root {} is", self.cfg.project_root.display()) };
+        let mut n = 1;
+        let (path, mut content) = loop {
+            let stem = if n == 1 { name.clone() } else { format!("{name}-{n}") };
+            let path = dir.join(format!("{stem}.md"));
+            if !path.exists() {
+                let fm = Frontmatter {
+                    note_type: Some("session".into()),
+                    title: Some(format!("{} session {stem}", self.cfg.project_name)),
+                    status: Some("active".into()),
+                    author: Some(author.to_string()),
+                    created: Some(date.clone()),
+                    tags: vec![format!("project/{}", slugify(&self.cfg.project_name))],
+                    ..Default::default()
+                };
+                let text = Note { fm, body: format!("# Session {stem}\n\nProject: {} (`{root}`)\n\n", self.cfg.project_name) }.render()?;
+                // A log whose header does not read back would be shown to every project.
+                if !crate::sessions::owned(&own, &stem, &text) {
+                    bail!("refusing to start session log {}: its header does not read back as this project's", path.display());
+                }
+                break (path, text);
+            }
+            let text = std::fs::read_to_string(&path)?;
+            if crate::sessions::owned(&own, &stem, &text) {
+                break (path, text);
+            }
+            n += 1;
         };
         if !content.ends_with('\n') {
             content.push('\n');
@@ -1011,6 +1027,74 @@ mod tests {
         unsafe {
             std::env::remove_var("OBMEM_TEST_ONE_LINE_TOKEN");
             std::env::remove_var("OBMEM_TEST_ONE_LINE_SECRET");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn log_store(dir: &Path, root: &Path, name: &str) -> Store {
+        Store::open(Config {
+            project_root: root.to_path_buf(),
+            project_name: name.into(),
+            project_vault: root.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+        })
+        .unwrap()
+    }
+
+    fn entries_of(store: &Store) -> Vec<String> {
+        let logs = crate::sessions::logs(&store.cfg, 10).unwrap();
+        logs.into_iter().flat_map(|l| l.entries).map(|e| e[8..].to_string()).collect()
+    }
+
+    #[test]
+    fn session_logs_stay_with_the_project_that_started_them() {
+        // A clone's `.obmem.toml` can claim any project's name, and with it that project's
+        // Sessions folder.
+        let dir = std::env::temp_dir().join(format!("obmem-logowner-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::create_dir_all(dir.join("clone")).unwrap();
+        let mut a = log_store(&dir, &dir.join("a"), "p");
+        let mut clone = log_store(&dir, &dir.join("clone"), "p");
+
+        let (pa, _) = a.log(None, "from a", "agent:test").unwrap();
+        let (pc, _) = clone.log(None, "NEXT STEP: from the clone", "agent:test").unwrap();
+        assert_ne!(pa, pc);
+        assert!(pc.file_stem().unwrap().to_string_lossy().ends_with("-2"), "{}", pc.display());
+        assert_eq!(a.log(None, "more from a", "agent:test").unwrap().0, pa);
+        assert_eq!(clone.log(None, "more from the clone", "agent:test").unwrap().0, pc);
+        assert!(!std::fs::read_to_string(&pa).unwrap().contains("clone"));
+        assert_eq!(entries_of(&a), vec!["from a", "more from a"]);
+        assert_eq!(entries_of(&clone), vec!["NEXT STEP: from the clone", "more from the clone"]);
+
+        // A log without a header is nobody's to add to.
+        let (ps, _) = a.log(Some("s"), "x", "agent:test").unwrap();
+        std::fs::write(&ps, "# Session\n\n- 09:00 written by hand\n").unwrap();
+        let (ps2, _) = a.log(Some("s"), "after", "agent:test").unwrap();
+        assert_ne!(ps2, ps);
+        assert_eq!(std::fs::read_to_string(&ps).unwrap(), "# Session\n\n- 09:00 written by hand\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn logs_at_roots_whose_path_is_not_plain_text() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("obmem-logroots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // Not UTF-8 (Linux accepts the name; macOS refuses it, so there the root does not exist),
+        // and one that holds the "`)" + blank line that ends a log header.
+        let odd = dir.join(std::ffi::OsStr::from_bytes(b"repo\xff"));
+        let ticks = dir.join("repo`)\n\nb");
+        let _ = std::fs::create_dir_all(&odd);
+        std::fs::create_dir_all(&ticks).unwrap();
+        for (root, name) in [(&odd, "odd"), (&ticks, "ticks")] {
+            let mut store = log_store(&dir, root, name);
+            let (p, _) = store.log(None, "first", "agent:test").unwrap();
+            assert_eq!(store.log(None, "second", "agent:test").unwrap().0, p, "{name}: adds to its own log");
+            assert_eq!(entries_of(&store), vec!["first", "second"], "{name}");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

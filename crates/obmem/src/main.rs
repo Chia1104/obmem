@@ -1,5 +1,5 @@
 use obmem_agents::{hooks, setup};
-use obmem_core::{audit, config, context, guide, import, init, note, obsidian, store};
+use obmem_core::{audit, config, context, guide, import, init, note, projects, status, store};
 use obmem_mcp as server;
 
 use anyhow::Result;
@@ -101,11 +101,29 @@ enum Cmd {
     Setup {
         #[arg(value_enum, required = true)]
         agents: Vec<hooks::Agent>,
+        /// Only report what is missing or outdated; write nothing.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Accept an agent's draft note: draft → active.
+    Approve { id: String },
+    /// The projects obmem has seen on this machine (recorded by `init` and the session-start hook).
+    Projects {
+        #[command(subcommand)]
+        action: Option<ProjectsCmd>,
     },
     /// Print the agent usage guide (paste into AGENTS.md / CLAUDE.md for agents without hooks).
     Guide,
     /// Show resolved paths and counts.
     Status,
+}
+
+#[derive(Subcommand)]
+enum ProjectsCmd {
+    /// Add a project folder to the list.
+    Add { path: PathBuf },
+    /// Remove a project folder from the list (its files are not touched).
+    Remove { path: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -152,6 +170,9 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
         let now = std::time::SystemTime::now();
         Ok(match which {
             HookCmd::SessionStart { max_chars, .. } => {
+                if let Err(e) = projects::record(&cfg.project_root) {
+                    eprintln!("obmem: could not record the project: {e:#}");
+                }
                 let mut store = store::Store::open(cfg)?;
                 hooks::session_start(&mut store, &input, agent, *max_chars, now)?
             }
@@ -196,6 +217,7 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Init => {
             let created = init::run(&cfg)?;
+            projects::record(&cfg.project_root)?;
             println!("Project vault: {}\nGlobal vault:  {}", cfg.project_vault.display(), cfg.global_vault.display());
             if created.is_empty() {
                 println!("Nothing to do, everything already exists.");
@@ -308,12 +330,12 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Cmd::Setup { agents } => {
+        Cmd::Setup { agents, check } => {
             for agent in agents {
-                let r = setup::setup(&cfg, agent)?;
-                println!("{agent:?}:");
+                let r = if check { setup::check(&cfg, agent)? } else { setup::setup(&cfg, agent)? };
+                println!("{}:", agent.label());
                 for p in &r.changed {
-                    println!("  updated   {p}");
+                    println!("  {} {p}", if check { "missing  " } else { "updated  " });
                 }
                 for p in &r.unchanged {
                     println!("  unchanged {p}");
@@ -326,28 +348,56 @@ fn main() -> Result<()> {
         Cmd::Guide => {
             println!("## Project memory (obmem)\n\n{}", guide::GUIDE);
         }
+        Cmd::Approve { id } => {
+            let mut store = store::Store::open(cfg)?;
+            println!("{}", store.approve(&id, "human (cli)")?);
+        }
+        Cmd::Projects { action } => match action {
+            None => {
+                for p in projects::list()? {
+                    println!("{}  {}", p.last_seen, p.path.display());
+                }
+            }
+            Some(ProjectsCmd::Add { path }) => {
+                projects::record(&path)?;
+                println!("added {}", std::path::absolute(&path)?.display());
+            }
+            Some(ProjectsCmd::Remove { path }) => {
+                if projects::remove(&path)? {
+                    println!("removed {}", path.display());
+                } else {
+                    println!("{} was not listed", path.display());
+                }
+            }
+        },
         Cmd::Verify { id } => {
             let mut store = store::Store::open(cfg)?;
             println!("{}", store.verify(&id, "human (cli)", true)?);
         }
         Cmd::Hook { .. } => unreachable!("handled before loading config"),
         Cmd::Status => {
-            let store = store::Store::open(cfg.clone())?;
-            println!("project root:   {}", cfg.project_root.display());
-            println!("project name:   {}", cfg.project_name);
-            println!("project vault:  {}", cfg.project_vault.display());
-            println!("global vault:   {}", cfg.global_vault.display());
-            for (name, v) in [("project", &cfg.project_vault), ("global", &cfg.global_vault)] {
-                let state = match obsidian::vault_id(v) {
-                    Ok(Some(id)) => format!("registered (id {id})"),
-                    Ok(None) => "NOT registered: open the folder in Obsidian (\"Open folder as vault\")".into(),
-                    Err(e) => format!("unknown ({e:#})"),
+            let st = status::status(&store::Store::open(cfg)?);
+            println!("project root:   {}", st.project_root.display());
+            println!("project name:   {}", st.project_name);
+            if !st.initialized {
+                println!("not initialized: run `obmem init` here");
+            }
+            for (name, v) in [("project", &st.project_vault), ("global", &st.global_vault)] {
+                println!("{:<16}{}", format!("{name} vault:"), v.path.display());
+                let state = match &v.obsidian {
+                    status::Registration::Registered { id } => format!("registered (id {id})"),
+                    status::Registration::NotRegistered => {
+                        "NOT registered: open the folder in Obsidian (\"Open folder as vault\")".into()
+                    }
+                    status::Registration::Unknown(e) => format!("unknown ({e})"),
                 };
                 println!("obsidian {name:<7} {state}");
             }
-            println!("secret rules:   {}", store.scanner().rule_count());
-            println!("known secrets:  {} values loaded (from .env files / env vars, memory only)", store.scanner().known_value_count());
-            println!("secret mode:    {:?}", cfg.secrets.mode);
+            println!("drafts:         {} waiting for review", st.drafts);
+            println!("findings:       {} open", st.open_findings);
+            println!("secret rules:   {}", st.secret_rules);
+            println!("known secrets:  {} values loaded (from .env files / env vars, memory only)", st.known_secrets);
+            println!("secret mode:    {:?}", st.secret_mode);
         }
     }
     Ok(())

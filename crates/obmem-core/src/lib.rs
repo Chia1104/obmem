@@ -12,5 +12,7 @@ pub mod import;
 pub mod init;
 pub mod note;
 pub mod obsidian;
+pub mod projects;
 pub mod secrets;
+pub mod status;
 pub mod store;

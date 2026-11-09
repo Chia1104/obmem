@@ -45,6 +45,30 @@ pub enum Agent {
 }
 
 impl Agent {
+    pub const ALL: [Agent; 5] = [Agent::Claude, Agent::Codex, Agent::Cursor, Agent::Copilot, Agent::Amp];
+
+    /// The name on the command line (`--agent codex`).
+    pub fn id(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude",
+            Agent::Codex => "codex",
+            Agent::Cursor => "cursor",
+            Agent::Copilot => "copilot",
+            Agent::Amp => "amp",
+        }
+    }
+
+    /// The product's name, for people.
+    pub fn label(self) -> &'static str {
+        match self {
+            Agent::Claude => "Claude Code",
+            Agent::Codex => "Codex",
+            Agent::Cursor => "Cursor",
+            Agent::Copilot => "GitHub Copilot CLI",
+            Agent::Amp => "Amp",
+        }
+    }
+
     /// Output that means "nothing to do" (some agents require JSON on stdout).
     pub fn empty(self) -> &'static str {
         match self {

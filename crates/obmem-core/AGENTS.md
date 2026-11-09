@@ -7,6 +7,7 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 - This crate has no transport and no UI, so there is no rmcp, tokio or terminal output here. An enum that the CLI takes as an argument derives clap only behind the `clap` feature: `#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]`.
 - `schemars::JsonSchema` derives become the MCP tool schemas. The doc comments on those enums and their variants are the descriptions agents read.
 - `audit` and `store` call each other, so they belong in the same crate.
+- `projects` is the machine's list of project roots (`~/.config/obmem/projects.toml`, next to the global config). Front ends record into it: the CLI's `init` and session-start hook, and the GUI. Library functions never record, because their tests would fill the user's real list with temp folders.
 
 ## Obsidian (`obsidian.rs`)
 
@@ -22,6 +23,7 @@ obmem keeps no index of its own. Search, backlinks, unresolved links and orphans
 - Human-authored notes (`author` not `agent:*`) are read-only for agents.
 - New notes start as `draft`. An agent edit of an `active` note sets it back to `draft`. `superseded` and `archived` notes cannot be edited.
 - Findings change only through resolve, never through write.
+- Only a person approves a draft (`Store::approve`: `draft` → `active`). The CLI and GUI offer it; the MCP server does not.
 - `code_refs` record `verified_commit` = HEAD.
 - Every persisted field is secret-scanned.
 

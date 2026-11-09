@@ -297,17 +297,20 @@ mod tests {
             assert!(load_with(bad).is_err(), "{bad} should be rejected");
         }
         // a symlinked vault folder that points outside the repo
-        let dir = std::env::temp_dir().join(format!("obmem-cfg-link-{}", std::process::id()));
-        let outside = std::env::temp_dir().join(format!("obmem-cfg-outside-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("docs")).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        std::os::unix::fs::symlink(&outside, dir.join("docs/kb")).unwrap();
-        let err = Config::load(Some(&dir)).unwrap_err().to_string();
-        assert!(err.contains("symlink"), "{err}");
-        assert!(ensure_within(&dir, &dir.join("docs/kb/Decisions/x.md")).is_err());
-        assert!(ensure_within(&dir, &dir.join("ok/new/dir/x.md")).is_ok());
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&outside);
+        #[cfg(unix)]
+        {
+            let dir = std::env::temp_dir().join(format!("obmem-cfg-link-{}", std::process::id()));
+            let outside = std::env::temp_dir().join(format!("obmem-cfg-outside-{}", std::process::id()));
+            std::fs::create_dir_all(dir.join("docs")).unwrap();
+            std::fs::create_dir_all(&outside).unwrap();
+            std::os::unix::fs::symlink(&outside, dir.join("docs/kb")).unwrap();
+            let err = Config::load(Some(&dir)).unwrap_err().to_string();
+            assert!(err.contains("symlink"), "{err}");
+            assert!(ensure_within(&dir, &dir.join("docs/kb/Decisions/x.md")).is_err());
+            assert!(ensure_within(&dir, &dir.join("ok/new/dir/x.md")).is_ok());
+            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::remove_dir_all(&outside);
+        }
 
         let c = load_with("vault = \"./docs/kb\"\nname = \"../../evil\"").unwrap();
         let dir = c.global_project_dir();

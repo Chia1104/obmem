@@ -114,6 +114,10 @@ impl Catalog {
         Ok(v.into_iter().take(limit).map(|m| (m.id.clone(), m.title.clone(), m.note_type.clone())).collect())
     }
 
+    pub fn count_by_status(&self, status: &str, scope: &str) -> usize {
+        self.notes.iter().filter(|m| m.status == status && m.scope == scope).count()
+    }
+
     /// Feedback and preference notes from the global vault (always relevant).
     pub fn global_guidance(&self) -> Result<Vec<(String, String)>> {
         let mut v = Vec::new();

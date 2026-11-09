@@ -104,6 +104,15 @@ impl Store {
         &self.scanner
     }
 
+    pub fn config(&self) -> &Config {
+        &self.cfg
+    }
+
+    /// How many notes in one vault have this status (as of the last sync).
+    pub fn count_by_status(&self, status: &str, scope: Scope) -> usize {
+        self.index.count_by_status(status, scope.as_str())
+    }
+
     fn roots(&self) -> (PathBuf, PathBuf) {
         (self.cfg.project_vault.clone(), self.cfg.global_vault.clone())
     }
@@ -553,6 +562,32 @@ impl Store {
         })
     }
 
+    /// A person accepts an agent's draft: `draft` → `active`. For people only (CLI, GUI); the MCP
+    /// server does not offer it, because an agent must not promote its own notes.
+    pub fn approve(&mut self, key: &str, by: &str) -> Result<String> {
+        self.sync()?;
+        let (path, scope) = self.resolve_one(key)?;
+        let root = if scope == "project" { self.cfg.project_vault.clone() } else { self.cfg.global_vault.clone() };
+        let mut note = Note::parse(&std::fs::read_to_string(&path)?)?;
+        if note.fm.note_type.as_deref() == Some("finding") {
+            bail!("'{key}' is a finding; use `obmem resolve` instead.");
+        }
+        match note.fm.status.as_deref() {
+            Some("draft") => {}
+            other => bail!("'{key}' is not a draft (status: {}).", other.unwrap_or("-")),
+        }
+        let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        note.fm.status = Some("active".into());
+        note.fm.updated = Some(date.clone());
+        let s = |x: &str| yaml_serde::Value::String(x.to_string());
+        note.fm.extra.insert("approved_at".into(), s(&date));
+        note.fm.extra.insert("approved_by".into(), s(by));
+        let path = PathBuf::from(path);
+        atomic_write(&root, &path, &note.render()?)?;
+        self.sync()?;
+        Ok(format!("[[{}]] is now active.", path.file_stem().unwrap().to_string_lossy()))
+    }
+
     /// The last `n` entries of the most recently modified session log of this project.
     fn last_session_log(&self, n: usize) -> Option<(String, String)> {
         let dir = self.cfg.global_project_dir().join("Sessions");
@@ -732,6 +767,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_write_uses_fresh_temp_files_and_refuses_symlink_targets() {
         let dir = std::env::temp_dir().join(format!("obmem-aw-{}", std::process::id()));
@@ -785,6 +821,36 @@ mod tests {
         // opting in makes it a project
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         assert!(store.project_ready());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_person_approves_drafts_only() {
+        let dir = std::env::temp_dir().join(format!("obmem-approve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        let cfg = Config {
+            project_root: dir.clone(),
+            project_name: "p".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+        };
+        let mut store = Store::open(cfg).unwrap();
+        let Ok(WriteOutcome::Written { id, path, .. }) = store.write(req(Scope::Project)) else { panic!("write") };
+        assert_eq!(store.count_by_status("draft", Scope::Project), 1);
+
+        store.approve(&id, "human:test").unwrap();
+        let fm = Note::parse(&std::fs::read_to_string(&path).unwrap()).unwrap().fm;
+        assert_eq!(fm.status.as_deref(), Some("active"));
+        assert!(fm.extra.contains_key("approved_at") && fm.extra.contains_key("approved_by"));
+        assert_eq!(store.count_by_status("draft", Scope::Project), 0);
+        assert_eq!(store.count_by_status("active", Scope::Project), 1);
+
+        let err = store.approve(&id, "human:test").unwrap_err().to_string();
+        assert!(err.contains("not a draft"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

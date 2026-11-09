@@ -196,6 +196,7 @@ pub fn setup_snippets(bin: &str, cfg: &Config) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn put_never_follows_symlinks() {
         let dir = std::env::temp_dir().join(format!("obmem-put-{}", std::process::id()));

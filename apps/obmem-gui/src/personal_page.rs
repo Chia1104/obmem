@@ -3,24 +3,23 @@
 
 use crate::data::{Personal, Vault};
 use crate::state::{self, Load};
-use crate::widgets::{Level, action, card, check, choice, field, heading, muted, notice_area, primary, text_box};
+use crate::widgets::{Level, action, card, check, choice, field, heading, muted, notice_area, page, page_header, primary, text_box};
 use nsh_core::prelude::*;
 use obmem_core::allowlist::{Allowlist, Kind};
 use obmem_core::settings::GlobalSettings;
 
 pub(crate) fn personal_page() -> impl IntoElement {
-    scroll().flex_1().child(
-        view()
-            .gap_4()
-            .p_6()
-            .child(text("Personal settings").text_xl().font_weight(FontWeight::SEMIBOLD))
-            .child(muted("Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault."))
-            .child(notice_area())
-            .child(dynamic(move || match state::personal() {
-                Load::Loading => vec![muted("Loading…").into_element()],
-                Load::Failed(e) => vec![check(Level::Error, "Could not read your settings", e).into_element()],
-                Load::Ready(p) => vec![form(&p).into_element(), allowlist(&p).into_element()],
-            })),
+    page(
+        page_header(
+            "Personal settings",
+            muted("Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault."),
+            vec![],
+        ),
+        view().gap_4().child(notice_area()).child(view().gap_4().child(dynamic(move || match state::personal() {
+            Load::Loading => vec![muted("Loading…").into_element()],
+            Load::Failed(e) => vec![check(Level::Error, "Could not read your settings", e).into_element()],
+            Load::Ready(p) => vec![form(&p).into_element(), allowlist(&p).into_element()],
+        }))),
     )
 }
 

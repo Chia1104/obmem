@@ -1,7 +1,7 @@
 ---
 type: fact
 title: T3 Code's Cursor driver starts MCP servers in the home directory
-status: draft
+status: active
 author: agent
 confidence: high
 created: 2026-11-09
@@ -15,6 +15,8 @@ tags:
 - cursor
 - gotcha
 - mcp
+approved_at: 2026-11-09
+approved_by: human (gui)
 verified_at: 2026-11-09
 verified_by: agent
 ---

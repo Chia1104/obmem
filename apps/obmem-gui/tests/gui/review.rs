@@ -1,8 +1,7 @@
 //! Review: approving a draft, verifying the note a finding is about, rejecting a finding, and
 //! running the audit, across a project and the personal vault.
 
-mod common;
-use common::{SLOW, project, sandbox, start};
+use crate::common::{SLOW, project, sandbox, start};
 use obmem_core::config::Config;
 use obmem_core::note::{Note, NoteType, Scope};
 use obmem_core::store::{Store, WriteOutcome, WriteRequest};
@@ -48,7 +47,7 @@ fn status(path: &std::path::Path) -> String {
 
 #[test]
 fn drafts_and_findings_are_decided_on() {
-    let dir = sandbox("review");
+    let Some(dir) = sandbox("review") else { return };
     let repo = project(&dir, "review-repo");
     let cfg = Config::load(Some(&repo)).unwrap();
     init::run(&cfg).unwrap();

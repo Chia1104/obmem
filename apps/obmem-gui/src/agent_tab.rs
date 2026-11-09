@@ -39,7 +39,7 @@ fn as_given(text: Load<String>) -> AnyElement {
             .p_3()
             .rounded(move || theme().radius)
             .bg(move || theme().muted)
-            .child(nsh_core::prelude::text(t).text_sm())
+            .child(nsh_core::prelude::text(t).text_xs().font_family("monospace"))
             .into_element(),
     }
 }

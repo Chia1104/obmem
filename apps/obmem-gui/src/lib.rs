@@ -4,6 +4,7 @@
 
 mod agent_tab;
 mod data;
+mod icons;
 mod login_env;
 mod personal_page;
 mod project_page;
@@ -32,13 +33,21 @@ pub fn prepare_process() {
     ONCE.call_once(login_env::adopt_login_path);
 }
 
+/// The app's palette over NSH's default theme: blue-black ink on paper.
+const THEME: &str = include_str!("theme.json");
+
 /// The window: the project list beside the shown project.
 #[component]
 pub fn App() -> impl IntoElement {
+    set_tokens(nsh_base::Theme::from_json(THEME).expect("theme.json parses (see the test below)"));
+    // The sidebar and the page run up to the window's top edge; each keeps a strip there that
+    // drags the window (`widgets::title_strip`).
+    nsh_core::element::desktop::set_title_bar(nsh_core::desktop::TitleBarStyle::Hidden, Some(px(40.0)));
     state::own_tasks();
     state::load_projects(None);
     view()
         .flex_1()
+        .relative()
         .flex_row()
         .bg(move || theme().background)
         .text_color(move || theme().foreground)
@@ -48,4 +57,16 @@ pub fn App() -> impl IntoElement {
             state::Screen::Personal => personal_page::personal_page().into_element(),
             state::Screen::Review => review_page::review_page().into_element(),
         }))
+        .child(sidebar::drawer())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_theme_parses_and_has_the_app_tokens() {
+        let t = nsh_base::Theme::from_json(super::THEME).unwrap();
+        for name in ["ok", "warn", "highlight"] {
+            assert!(t.color(name).is_some(), "{name}");
+        }
+    }
 }

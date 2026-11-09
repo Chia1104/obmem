@@ -1,7 +1,7 @@
 ---
 type: fact
 title: Cursor hook payloads and agent transcript format (seen 2026-11-09)
-status: draft
+status: active
 author: agent
 confidence: medium
 created: 2026-11-09
@@ -15,6 +15,8 @@ tags:
 - cursor
 - hooks
 - multi-agent
+approved_at: 2026-11-09
+approved_by: human (gui)
 ---
 # Cursor hook payloads and agent transcript format (seen 2026-11-09)
 

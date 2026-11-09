@@ -10,6 +10,11 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/Chia1104/obmem"
 
+# No debug info for dependencies in dev builds: it is most of each rlib's size (a Native Shell
+# rlib is hundreds of MB with it) and of link time. Workspace crates keep full debug info.
+[profile.dev.package."*"]
+debug = false
+
 [workspace.dependencies]
 obmem-core = { path = "crates/obmem-core" }
 obmem-mcp = { path = "crates/obmem-mcp" }

@@ -1,7 +1,7 @@
 ---
 type: fact
 title: obmem in a git worktree cannot reach Obsidian
-status: draft
+status: active
 author: agent
 confidence: medium
 created: 2026-11-09
@@ -13,6 +13,8 @@ tags:
 - obsidian
 - gotcha
 - worktree
+approved_at: 2026-11-09
+approved_by: human (gui)
 verified_at: 2026-11-09
 verified_by: agent
 ---

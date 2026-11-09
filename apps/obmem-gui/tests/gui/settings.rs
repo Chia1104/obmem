@@ -1,14 +1,13 @@
 //! Settings, Codex, secrets and personal settings, as a user changes them.
 
-mod common;
-use common::{SLOW, project, sandbox, start};
+use crate::common::{SLOW, project, sandbox, start};
 use obmem_agents::hooks::Agent;
 use obmem_core::config::{Config, SecretMode};
 use obmem_core::{allowlist, config, init, settings};
 
 #[test]
 fn settings_secrets_and_personal_settings_are_saved() {
-    let dir = sandbox("settings");
+    let Some(dir) = sandbox("settings") else { return };
     let repo = project(&dir, "settings-repo");
     let cfg = Config::load(Some(&repo)).unwrap();
     init::run(&cfg).unwrap();

@@ -3,7 +3,7 @@
 
 use crate::data::ReviewGroup;
 use crate::state::{self, Load};
-use crate::widgets::{Level, action, card, check, heading, muted, notice_area, primary};
+use crate::widgets::{Level, action, card, check, heading, muted, notice_area, page, page_header, primary};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 use obmem_core::note::Scope;
@@ -13,38 +13,23 @@ use obmem_core::store::Verdict;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn review_page() -> impl IntoElement {
-    scroll().flex_1().child(
-        view()
-            .gap_4()
-            .p_6()
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        view()
-                            .flex_1()
-                            .gap_1()
-                            .child(text("Review").text_xl().font_weight(FontWeight::SEMIBOLD))
-                            .child(muted("Agent drafts to approve and findings to resolve. Read a note in Obsidian, decide here.")),
-                    )
-                    .child(action("Refresh", state::load_review)),
-            )
-            .child(notice_area())
-            .child(dynamic(move || match state::review() {
-                Load::Loading => vec![muted("Loading…").into_element()],
-                Load::Failed(e) => vec![check(Level::Error, "Could not read the review list", e).into_element()],
-                Load::Ready(groups) if groups.is_empty() => {
-                    vec![muted("No projects are set up yet.").into_element()]
-                }
-                Load::Ready(groups) => groups.into_iter().map(|g| group(g).into_element()).collect(),
-            })),
+    page(
+        page_header(
+            "Review",
+            muted("Agent drafts to approve and findings to resolve. Read a note in Obsidian, decide here."),
+            vec![action("Refresh", state::load_review).into_element()],
+        ),
+        view().gap_4().child(notice_area()).child(view().gap_4().child(dynamic(move || match state::review() {
+            Load::Loading => vec![muted("Loading…").into_element()],
+            Load::Failed(e) => vec![check(Level::Error, "Could not read the review list", e).into_element()],
+            Load::Ready(groups) if groups.is_empty() => vec![muted("No projects are set up yet.").into_element()],
+            Load::Ready(groups) => groups.into_iter().map(|g| group(g).into_element()).collect(),
+        }))),
     )
 }
 
 fn group(g: ReviewGroup) -> View {
-    let mut head = view().flex_row().items_center().gap_3().child(view().flex_1().child(heading(g.title.clone())));
+    let mut head = view().flex_row().items_center().gap_3().pb_1().child(view().flex_1().child(heading(g.title.clone())));
     if let Some(project) = g.project.clone() {
         head = head.child(action("Run audit", move || state::run_audit(project.clone())));
     }
@@ -82,7 +67,7 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
             _ => format!("finding · {} · by {} · {}", item.status, item.author, item.updated),
         },
     };
-    let mut actions = view().flex_row().gap_2().pt_1();
+    let mut actions = view().flex_row().flex_wrap().gap_2().pt_1();
     match item.kind {
         Kind::Draft => {
             let a = at.clone();

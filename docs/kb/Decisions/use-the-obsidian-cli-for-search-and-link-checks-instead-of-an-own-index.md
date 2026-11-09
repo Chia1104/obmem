@@ -1,7 +1,7 @@
 ---
 type: decision
 title: Use the Obsidian CLI for search and link checks instead of an own index
-status: draft
+status: active
 author: agent
 confidence: high
 created: 2026-11-09
@@ -14,6 +14,8 @@ code_refs:
 tags:
 - obsidian
 - architecture
+approved_at: 2026-11-09
+approved_by: human (gui)
 verified_at: 2026-11-09
 verified_by: agent
 ---

@@ -2,7 +2,7 @@
 
 use crate::data::{AgentState, Detail};
 use crate::state::{self, Load, Tab};
-use crate::widgets::{Level, action, card, check, choice, heading, muted, notice_area, primary};
+use crate::widgets::{Level, action, card, check, heading, muted, notice_area, page, page_header, path_text, primary, tabs};
 use crate::data::ClaudeMemory;
 use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
 use nsh_base::theme;
@@ -12,17 +12,16 @@ use obmem_core::status::{Registration, VaultStatus};
 const REVEAL: &str = if cfg!(windows) { "Show in Explorer" } else { "Show in Finder" };
 
 pub(crate) fn project_page() -> impl IntoElement {
-    scroll().flex_1().child(
+    page(
+        dynamic(header),
         view()
             .gap_4()
-            .p_6()
-            .child(dynamic(header))
-            .child(notice_area())
             .child(dynamic(move || {
                 let ready = matches!(state::detail(), Load::Ready(ref d) if d.status.initialized);
                 ready.then(tab_bar)
             }))
-            .child(dynamic(content)),
+            .child(notice_area())
+            .child(view().gap_4().child(dynamic(content))),
     )
 }
 
@@ -42,29 +41,25 @@ fn header() -> Vec<AnyElement> {
         ],
         Load::Ready(d) => {
             let root = d.status.project_root.clone();
+            let shown = root.display().to_string();
             vec![
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        view()
-                            .flex_1()
-                            .gap_1()
-                            .child(text(d.status.project_name.clone()).text_xl().font_weight(FontWeight::SEMIBOLD))
-                            .child(muted(root.display().to_string())),
-                    )
-                    .child(action("Refresh", state::refresh))
-                    .child(action(REVEAL, move || drop(reveal_path(root.clone()))))
-                    .child(action("Remove from list", state::remove_selected))
-                    .into_element(),
+                page_header(
+                    d.status.project_name.clone(),
+                    path_text(shown),
+                    vec![
+                        action("Refresh", state::refresh).into_element(),
+                        action(REVEAL, move || drop(reveal_path(root.clone()))).into_element(),
+                        action("Remove from list", state::remove_selected).into_element(),
+                    ],
+                )
+                .into_element(),
             ]
         }
     }
 }
 
 fn tab_bar() -> View {
-    choice(
+    tabs(
         &[
             (Tab::Overview, "Overview"),
             (Tab::Agent, "Agent view"),
@@ -159,11 +154,12 @@ fn agents(list: Vec<AgentState>) -> View {
             .items_center()
             .gap_3()
             .py_2()
-            .child(text(agent.label()).w(px(170.0)));
+            .flex_wrap()
+            .child(text(agent.label()).text_sm().font_weight(FontWeight::MEDIUM).w(px(170.0)));
         row = match a.missing {
-            Ok(files) if files.is_empty() => row.child(view().flex_1().child(muted("Set up"))),
+            Ok(files) if files.is_empty() => row.child(view().flex_1().child(text("Set up").text_sm().text_color(crate::widgets::tone("ok")))),
             Ok(files) => row
-                .child(view().flex_1().child(muted(format!("Not set up: {} file(s) to update", files.len()))))
+                .child(view().flex_1().min_w(px(160.0)).child(muted(format!("Not set up: {} file(s) to update", files.len()))))
                 .child(primary("Set up", move || state::set_up(agent))),
             Err(e) => row.child(view().flex_1().child(text(e).text_sm().text_color(move || theme().destructive))),
         };

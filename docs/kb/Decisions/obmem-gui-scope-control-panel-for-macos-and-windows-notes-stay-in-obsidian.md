@@ -1,7 +1,7 @@
 ---
 type: decision
 title: 'obmem GUI scope: control panel for macOS and Windows, notes stay in Obsidian'
-status: draft
+status: active
 author: agent
 confidence: high
 created: 2026-11-09
@@ -20,6 +20,8 @@ tags:
 - nsh
 - windows
 - tray
+approved_at: 2026-11-09
+approved_by: human (gui)
 ---
 Decided with the user on 2026-11-09. This builds on [[split-obmem-into-a-cargo-workspace-so-a-gui-can-reuse-the-core]].
 

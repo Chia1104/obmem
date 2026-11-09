@@ -30,7 +30,7 @@ pub(crate) fn sessions_tab() -> AnyElement {
                             .flex_row()
                             .gap_3()
                             .py_1()
-                            .child(muted(time.to_string()).w(px(44.0)))
+                            .child(muted(time.to_string()).font_family("monospace").w(px(44.0)))
                             .child(text(what.to_string()).text_sm().flex_1()),
                     );
                 }

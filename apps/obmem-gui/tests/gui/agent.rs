@@ -1,16 +1,16 @@
 //! Agent view, session logs, and importing Claude Code memory.
 
-mod common;
-use common::{SLOW, project, sandbox, start};
+use crate::common::{SLOW, project, sandbox, start};
 use obmem_core::config::Config;
 use obmem_core::store::Store;
 use obmem_core::{import, init};
 
 #[test]
 fn agent_view_sessions_and_claude_memory() {
-    let dir = sandbox("agent");
+    let Some(dir) = sandbox("agent") else { return };
     // Claude Code's memory lives under ~/.claude: point HOME at the sandbox so the real one is
-    // never read or written. SAFETY: one test in this binary, set before the app starts.
+    // never read or written. SAFETY: this test has its own process (see `sandbox`) and the app
+    // has not started yet.
     unsafe { std::env::set_var("HOME", &dir) };
     let repo = project(&dir, "agent-repo");
     let cfg = Config::load(Some(&repo)).unwrap();

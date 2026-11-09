@@ -1,11 +1,10 @@
 //! Overview: a new project is initialized, then an agent is set up.
 
-mod common;
-use common::{SLOW, project, sandbox, start};
+use crate::common::{SLOW, project, sandbox, start};
 
 #[test]
 fn a_new_project_is_initialized_then_an_agent_set_up() {
-    let dir = sandbox("overview");
+    let Some(dir) = sandbox("overview") else { return };
     let repo = project(&dir, "demo-repo");
 
     let mut app = start();

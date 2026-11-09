@@ -1,7 +1,7 @@
 ---
 type: decision
 title: Split obmem into a Cargo workspace so a GUI can reuse the core
-status: draft
+status: active
 author: agent
 confidence: high
 created: 2026-11-09
@@ -18,6 +18,8 @@ tags:
 - workspace
 - gui
 - nsh
+approved_at: 2026-11-09
+approved_by: human (gui)
 ---
 **Context.** obmem was a single binary crate (16 modules, ~12.7k lines). The user plans a GUI settings and management app built with Native Shell (NSH, github.com/longbridge/nsh, nsh.dev). NSH Rust apps are ordinary Cargo crates with an `nsh.json` next to them, and they depend on `nsh-core` / `nsh-base` from crates.io. So the GUI needs obmem's logic as a library.
 

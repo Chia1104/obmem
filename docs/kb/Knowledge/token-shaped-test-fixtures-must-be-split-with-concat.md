@@ -1,7 +1,7 @@
 ---
 type: fact
 title: Token-shaped test fixtures must be split with concat!
-status: draft
+status: active
 author: agent
 confidence: high
 created: 2026-11-09
@@ -14,6 +14,8 @@ tags:
 - github
 - secrets
 - tests
+approved_at: 2026-11-09
+approved_by: human (gui)
 ---
 # Token-shaped test fixtures must be split with concat!
 

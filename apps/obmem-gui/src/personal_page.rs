@@ -26,7 +26,14 @@ pub(crate) fn personal_page() -> impl IntoElement {
 fn form(p: &Personal) -> View {
     let vault = signal(p.settings.vault.clone());
     let scan_env = signal(p.settings.scan_process_env);
-    let save = move || state::save_personal(GlobalSettings { vault: vault.get_untracked(), scan_process_env: scan_env.get_untracked() });
+    let auto_approve = signal(p.settings.auto_approve);
+    let save = move || {
+        state::save_personal(GlobalSettings {
+            vault: vault.get_untracked(),
+            scan_process_env: scan_env.get_untracked(),
+            auto_approve: auto_approve.get_untracked(),
+        })
+    };
     card()
         .test_id("personal-settings")
         .child(heading("Settings"))
@@ -39,6 +46,11 @@ fn form(p: &Personal) -> View {
             "Scan environment variables",
             "Treat the values of sensitive-looking environment variables as known secrets. Only you can turn this off; a project's settings cannot.",
             switch_control(move || scan_env.get(), "Scan environment variables", move |v| scan_env.set(v)),
+        ))
+        .child(field(
+            "Approve agent notes automatically",
+            "Agents' notes are saved active instead of waiting in Review as drafts. Only you can turn this on; a project's .obmem.toml can turn it off with [review] auto_approve = false.",
+            switch_control(move || auto_approve.get(), "Approve agent notes automatically", move |v| auto_approve.set(v)),
         ))
         .child(view().flex_row().pt_2().child(primary("Save", save)))
 }

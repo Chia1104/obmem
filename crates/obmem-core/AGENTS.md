@@ -41,6 +41,7 @@ obmem keeps no index of its own. Search, backlinks, unresolved links and orphans
 - New notes start as `draft`. An agent edit of an `active` note sets it back to `draft`. `superseded` and `archived` notes cannot be edited.
 - Findings change only through resolve, never through write.
 - Only a person approves a draft (`Store::approve`: `draft` → `active`). The CLI and GUI offer it; the MCP server does not.
+- The exception is the user's own choice: with `[review] auto_approve = true` in their config, `write` approves new notes and edits itself (`approved_by: auto-approve`). Findings keep their own lifecycle.
 - `code_refs` record `verified_commit` = HEAD.
 - Every persisted field is secret-scanned.
 
@@ -49,6 +50,7 @@ obmem keeps no index of its own. Search, backlinks, unresolved links and orphans
 The project vault and `.obmem.toml` may come from an untrusted clone. Input the repo controls can only make obmem stricter:
 - Vault rule files add rules but cannot override built-in rule ids. Allowlist files cannot add rules.
 - Project-vault allowlists contribute exact fingerprints only. `regexes` and `stopwords` count only in the personal global vault, and even there, stopwords shorter than 4 characters and regexes that match almost anything are ignored.
+- `[review] auto_approve` is on only when the user's config turns it on. The repo's `.obmem.toml` can turn it off for that project, never on.
 - In `.obmem.toml`, `vault` must be a relative path inside the repo. `secrets.env_files` entries are added to the defaults, never replace them, and must be relative paths inside the repo; symlinks that leave the repo are skipped. `scan_process_env = false` from the repo is ignored.
 - Files are written to an exclusively created, randomly named temp file, then renamed into place. The real (symlink-resolved) folder must stay inside its vault, and obmem never writes through a symlinked file. `init` does not write through any symlink, dangling ones included. A global-vault `name` is reduced to one path component.
 - Projects with the same `name` share `Projects/<name>/Sessions`. A session log's header records the real project root, compared as text and never resolved. `Store::log` adds only to a log that records this project's root, else starts `<log>-2.md`, and `sessions::logs` leaves out logs that record another root.

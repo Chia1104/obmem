@@ -1089,6 +1089,7 @@ mod tests {
                 global_vault: dir.join("global"),
                 secrets: SecretsConfig::default(),
                 audit: AuditConfig::default(),
+                auto_approve: false,
             };
             Self { dir, cfg, obs: FakeObsidian::default() }
         }

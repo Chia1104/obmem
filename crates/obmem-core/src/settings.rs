@@ -34,6 +34,9 @@ pub struct GlobalSettings {
     /// Treat sensitive-looking environment variables as known secrets. Only the user's config can
     /// turn this off; a repo's `.obmem.toml` cannot.
     pub scan_process_env: bool,
+    /// Write agents' notes `active` instead of `draft`. Only the user's config can turn this on;
+    /// a repo's `.obmem.toml` can only turn it off for that project.
+    pub auto_approve: bool,
 }
 
 /// The env files obmem always scans for known secrets.
@@ -129,6 +132,7 @@ fn read_global_at(path: &Path) -> Result<GlobalSettings> {
     Ok(GlobalSettings {
         vault: file.vault.unwrap_or_default(),
         scan_process_env: file.secrets.scan_process_env.unwrap_or(true),
+        auto_approve: file.review.auto_approve.unwrap_or(false),
     })
 }
 
@@ -140,6 +144,7 @@ fn save_global_at(path: &Path, s: &GlobalSettings) -> Result<()> {
     let mut doc = read_doc(path)?;
     assign_or_remove(&mut doc, "vault", (!vault.is_empty()).then_some(vault));
     assign(&mut doc["secrets"]["scan_process_env"], s.scan_process_env);
+    assign(&mut doc["review"]["auto_approve"], s.auto_approve);
     let dir = path.parent().context("config path has no parent")?;
     std::fs::create_dir_all(dir)?;
     atomic_write(dir, path, &doc.to_string())
@@ -195,14 +200,17 @@ mod tests {
     fn global_settings_round_trip() {
         let dir = temp("global");
         let path = dir.join("config.toml");
-        assert_eq!(read_global_at(&path).unwrap(), GlobalSettings { vault: String::new(), scan_process_env: true });
+        assert_eq!(
+            read_global_at(&path).unwrap(),
+            GlobalSettings { vault: String::new(), scan_process_env: true, auto_approve: false }
+        );
 
-        let s = GlobalSettings { vault: "~/Notes/Agents".into(), scan_process_env: false };
+        let s = GlobalSettings { vault: "~/Notes/Agents".into(), scan_process_env: false, auto_approve: true };
         save_global_at(&path, &s).unwrap();
         assert_eq!(read_global_at(&path).unwrap(), s);
         assert!(save_global_at(&path, &GlobalSettings { vault: "relative/path".into(), ..s.clone() }).is_err());
 
-        save_global_at(&path, &GlobalSettings { vault: String::new(), scan_process_env: true }).unwrap();
+        save_global_at(&path, &GlobalSettings { vault: String::new(), scan_process_env: true, auto_approve: false }).unwrap();
         assert!(!std::fs::read_to_string(&path).unwrap().contains("vault"));
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -114,6 +114,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         })
         .unwrap();
         let req = WriteRequest {

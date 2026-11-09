@@ -119,6 +119,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         };
         let sessions = cfg.global_project_dir().join("Sessions");
         std::fs::create_dir_all(&sessions).unwrap();
@@ -154,6 +155,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         };
         let sessions = cfg.global_project_dir().join("Sessions");
         std::fs::create_dir_all(&sessions).unwrap();

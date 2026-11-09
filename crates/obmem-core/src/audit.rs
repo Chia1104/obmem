@@ -24,7 +24,11 @@ use walkdir::WalkDir;
 
 pub const AUDIT_AUTHOR: &str = "agent:obmem-audit";
 pub const SUPPRESSIONS_FILE: &str = "_system/audit-suppressions.toml";
-pub const RULES: &[&str] = &["broken-link", "orphan", "schema", "stale", "supersede", "duplicate", "code-drift"];
+pub const RULES: &[&str] =
+    &["broken-link", "orphan", "schema", "stale", "supersede", "duplicate", "code-drift", "sync-conflict"];
+/// In the name of a sync conflict copy, `<stem>.sync-conflict-<device>-<time>.<ext>`, which
+/// obmem-sync writes when two devices changed the same file.
+pub const SYNC_CONFLICT_MARK: &str = ".sync-conflict-";
 
 /// Always skipped as audit subjects (they still count as link targets).
 const DEFAULT_IGNORE: &[&str] = &["Templates/", "_system/"];
@@ -39,7 +43,7 @@ pub const SUPPRESSIONS_TEMPLATE: &str = r#"# obmem audit settings and suppressio
 # Keep top-level keys above the first [[suppressed]] entry (TOML puts later keys in that table).
 
 # Rules to skip entirely in this vault, e.g. ["orphan"].
-# Available: broken-link, orphan, schema, stale, supersede, duplicate, code-drift
+# Available: broken-link, orphan, schema, stale, supersede, duplicate, code-drift, sync-conflict
 disabled_rules = []
 # Vault-relative path prefixes to skip. Templates/ and _system/ are always skipped.
 ignore_paths = []
@@ -293,7 +297,8 @@ impl Vault {
             };
             let links = wikilinks(&format!("{fm_text}{}", strip_code(body)));
             v.docs.push(Doc {
-                ignored: ignore.iter().any(|i| rel.starts_with(i.as_str())),
+                // A conflict copy is reported once, by `sync-conflict`, not as a duplicate or orphan too.
+                ignored: ignore.iter().any(|i| rel.starts_with(i.as_str())) || rel.contains(SYNC_CONFLICT_MARK),
                 has_frontmatter: !fm_text.trim_start_matches('\u{feff}').is_empty(),
                 rel,
                 id,
@@ -556,6 +561,23 @@ impl Vault {
         }
     }
 
+    /// Conflict copies that sync left next to a note: a person merges and deletes them.
+    fn check_sync_conflicts(&self, out: &mut Vec<Issue>) {
+        for d in self.docs.iter().filter(|d| !d.is_audit_finding()) {
+            let Some(at) = d.rel.find(SYNC_CONFLICT_MARK) else { continue };
+            let original = format!("{}.md", &d.rel[..at]);
+            out.push(self.issue(
+                "sync-conflict",
+                Severity::Warn,
+                d,
+                "",
+                format!("{} is another device's version of {original}: both changed it before syncing", d.rel),
+                &format!("Merge what you need from this copy into {original}, then delete the copy."),
+                Some(original.clone()),
+            ));
+        }
+    }
+
     fn check_supersede(&self, out: &mut Vec<Issue>) {
         let status: HashMap<String, &str> = self.docs.iter().map(|d| (d.id.to_lowercase(), d.status())).collect();
         let mut replaced_by: HashMap<String, String> = HashMap::new();
@@ -782,6 +804,7 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
                 // code_refs are relative to this project; global-vault notes may describe others.
                 "code-drift" if v.scope == "project" => v.check_code_drift(&cfg.project_root, &mut found),
                 "code-drift" => {}
+                "sync-conflict" => v.check_sync_conflicts(&mut found),
                 _ => unreachable!(),
             }
         }
@@ -1090,6 +1113,7 @@ mod tests {
                 secrets: SecretsConfig::default(),
                 audit: AuditConfig::default(),
                 auto_approve: false,
+                device: "test".into(),
             };
             Self { dir, cfg, obs: FakeObsidian::default() }
         }
@@ -1258,5 +1282,18 @@ mod tests {
         f.unresolved("kb", &[("gone", &["a.md"]), ("also-gone", &["a.md"])]);
         let st = f.audit("2026-01-04").write_findings(Severity::Warn, today).unwrap();
         assert_eq!((st.reopened.len(), st.created.len()), (0, 0), "{st:?}"); // already open again
+    }
+
+    #[test]
+    fn sync_conflict_copies_are_reported_once() {
+        let f = Fixture::new("conflict");
+        f.put("global", "Global/a.md", &note("fact", "active", "", "mine"));
+        f.put("global", "Global/a.sync-conflict-win-20261109-101500.md", &note("fact", "active", "", "theirs"));
+        let a = f.audit("2026-01-01");
+        let rel = "Global/a.sync-conflict-win-20261109-101500.md";
+        assert_eq!(rules_for(&a, rel), vec![("sync-conflict", Severity::Warn)]);
+        let i = a.issues.iter().find(|i| i.rule == "sync-conflict").unwrap();
+        assert_eq!(i.related.as_deref(), Some("Global/a.md"));
+        assert!(rules_for(&a, "Global/a.md").iter().all(|(r, _)| *r != "duplicate"), "{:?}", a.issues);
     }
 }

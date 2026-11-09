@@ -54,6 +54,7 @@ The project vault and `.obmem.toml` may come from an untrusted clone. Input the 
 - In `.obmem.toml`, `vault` must be a relative path inside the repo. `secrets.env_files` entries are added to the defaults, never replace them, and must be relative paths inside the repo; symlinks that leave the repo are skipped. `scan_process_env = false` from the repo is ignored.
 - Files are written to an exclusively created, randomly named temp file, then renamed into place. The real (symlink-resolved) folder must stay inside its vault, and obmem never writes through a symlinked file. `init` does not write through any symlink, dangling ones included. A global-vault `name` is reduced to one path component.
 - Projects with the same `name` share `Projects/<name>/Sessions`. A session log's header records the real project root, compared as text and never resolved. `Store::log` adds only to a log that records this project's root, else starts `<log>-2.md`, and `sessions::logs` leaves out logs that record another root.
+- A session log's name holds the device (`<date>-<device>[-<session>]`, `Config::device` from `config::device_name`). The personal vault is synced between machines, and two machines writing one file would conflict every day.
 
 Any change on these paths keeps an existing test for the invariant, or adds one.
 
@@ -72,3 +73,4 @@ Each note is ranked by how many distinct terms it contains, with title matches c
 - A finding names its note by path, never with a `[[link]]`. Obsidian counts a link as a backlink, so a linked note would stop being an orphan.
 - When a human sets a finding to `rejected`, its fingerprint goes into `_system/audit-suppressions.toml` for good. Agents cannot reject.
 - A code-drift fingerprint includes the commit. After `verify`, the next `audit --write` closes the old finding.
+- `sync-conflict` reports files whose name holds `SYNC_CONFLICT_MARK`, the copies obmem-sync writes when two devices changed the same file. Every other rule ignores those copies, so a conflict is reported once. The catalog and `Store::search` leave them out too, so agents never take another device's unmerged version for a note.

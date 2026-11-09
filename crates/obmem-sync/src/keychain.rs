@@ -3,7 +3,7 @@
 //! key. One entry per bucket location, so the keychain asks for access once.
 
 use crate::key::VaultKey;
-use crate::remote::{Credentials, prefix};
+use crate::remote::{Credentials, location};
 use age::secrecy::ExposeSecret;
 use anyhow::{Context, Result, anyhow};
 use obmem_core::config::SyncConfig;
@@ -18,18 +18,8 @@ struct Stored {
     vault_key: String,
 }
 
-/// `<endpoint>/<bucket>/<prefix>`: a different bucket or prefix is a different backup.
-fn account(cfg: &SyncConfig) -> String {
-    format!(
-        "{}/{}/{}",
-        cfg.endpoint.as_deref().unwrap_or("aws").trim_end_matches('/'),
-        cfg.bucket.as_deref().unwrap_or(""),
-        prefix(cfg)
-    )
-}
-
 fn entry(cfg: &SyncConfig) -> Result<keyring::Entry> {
-    keyring::Entry::new(SERVICE, &account(cfg)).context("opening the OS keychain")
+    keyring::Entry::new(SERVICE, &location(cfg)).context("opening the OS keychain")
 }
 
 pub fn save(cfg: &SyncConfig, creds: &Credentials, key: &VaultKey) -> Result<()> {
@@ -45,7 +35,7 @@ pub fn load(cfg: &SyncConfig) -> Result<(Credentials, VaultKey)> {
     let json = match entry(cfg)?.get_password() {
         Ok(s) => s,
         Err(keyring::Error::NoEntry) => {
-            return Err(anyhow!("this device is not set up for {}: run `obmem sync setup`", account(cfg)));
+            return Err(anyhow!("this device is not set up for {}: run `obmem sync setup`", location(cfg)));
         }
         Err(e) => return Err(anyhow::Error::from(e).context("reading the OS keychain")),
     };

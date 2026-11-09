@@ -16,6 +16,7 @@ anyhow.workspace = true
 chrono.workspace = true
 clap = { workspace = true, optional = true }
 dirs.workspace = true
+gethostname.workspace = true
 hex.workspace = true
 percent-encoding.workspace = true
 regex.workspace = true

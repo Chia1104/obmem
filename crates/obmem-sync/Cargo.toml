@@ -12,7 +12,6 @@ age = "0.12.1"
 anyhow.workspace = true
 chrono.workspace = true
 futures = "0.3"
-gethostname = "1.1.0"
 hex.workspace = true
 hmac = "0.13.0"
 keyring = "4.2.0"

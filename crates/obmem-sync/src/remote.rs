@@ -80,6 +80,16 @@ impl Remote {
     }
 }
 
+/// `<endpoint>/<bucket>/<prefix>`: a different bucket or prefix is a different backup.
+pub fn location(cfg: &SyncConfig) -> String {
+    format!(
+        "{}/{}/{}",
+        cfg.endpoint.as_deref().unwrap_or("aws").trim_end_matches('/'),
+        cfg.bucket.as_deref().unwrap_or(""),
+        prefix(cfg)
+    )
+}
+
 pub fn prefix(cfg: &SyncConfig) -> &str {
     cfg.prefix.as_deref().map(|p| p.trim_matches('/')).filter(|p| !p.is_empty()).unwrap_or(DEFAULT_PREFIX)
 }

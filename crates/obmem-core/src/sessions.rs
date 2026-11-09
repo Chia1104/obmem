@@ -1,6 +1,6 @@
 //! Reading a project's session logs (`<personal vault>/Projects/<name>/Sessions/*.md`), which
-//! `memory_log` and the hooks append to: one file per day, or per day and session when sessions
-//! run side by side.
+//! `memory_log` and the hooks append to: one file per day and device, or per day, device and
+//! session when sessions run side by side.
 
 use crate::config::Config;
 use crate::note::Note;
@@ -9,7 +9,8 @@ use std::time::SystemTime;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionLog {
-    /// The file's name: the day, maybe with a session suffix (`2026-11-09`, `2026-11-09-abc`).
+    /// The file's name: the day and device, maybe with a session suffix (`2026-11-09-mac`,
+    /// `2026-11-09-mac-abc`).
     pub name: String,
     /// Path inside the personal vault.
     pub rel: String,
@@ -120,6 +121,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let sessions = cfg.global_project_dir().join("Sessions");
         std::fs::create_dir_all(&sessions).unwrap();
@@ -156,6 +158,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let sessions = cfg.global_project_dir().join("Sessions");
         std::fs::create_dir_all(&sessions).unwrap();

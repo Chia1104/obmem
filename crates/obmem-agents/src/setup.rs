@@ -348,6 +348,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         }
     }
 

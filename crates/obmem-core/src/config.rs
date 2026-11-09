@@ -128,6 +128,8 @@ pub struct Config {
     pub audit: AuditConfig,
     /// Writes land `active` instead of `draft` (see [`auto_approve`]).
     pub auto_approve: bool,
+    /// This machine's name (see [`device_name`]).
+    pub device: String,
 }
 
 pub fn home() -> PathBuf {
@@ -190,6 +192,7 @@ impl Config {
 
         let secrets = secrets_policy(&project_root, pf.secrets, &gf.secrets)?;
         let auto_approve = auto_approve(&pf.review, &gf.review);
+        let device = device_name(&gf.sync);
         Ok(Self {
             project_root,
             project_name,
@@ -198,6 +201,7 @@ impl Config {
             secrets,
             audit: pf.audit,
             auto_approve,
+            device,
         })
     }
 
@@ -241,6 +245,16 @@ fn auto_approve(repo: &ReviewConfig, user: &ReviewConfig) -> bool {
 pub fn global_vault() -> Result<PathBuf> {
     let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
     Ok(global_vault_from(gf.vault))
+}
+
+/// This machine's name, which keeps what two devices write to the synced personal vault apart:
+/// `[sync] device`, else the host name without its domain.
+pub fn device_name(sync: &SyncConfig) -> String {
+    sync.device.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(|| {
+        let host = gethostname::gethostname().to_string_lossy().into_owned();
+        let host = host.split('.').next().unwrap_or_default();
+        if host.is_empty() { "device".into() } else { host.into() }
+    })
 }
 
 /// The user's `[sync]` settings.

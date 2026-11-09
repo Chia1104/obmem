@@ -33,9 +33,7 @@ pub fn scan(vault: &Path, community_plugins: bool) -> Result<Scan> {
             skipped.push((rel.to_string_lossy().into_owned(), "the name is not valid Unicode".into()));
             continue;
         };
-        if let Some(rest) = name.strip_prefix(".obsidian/")
-            && !obsidian_setting(rest, community_plugins)
-        {
+        if !included(&name, community_plugins) {
             continue;
         }
         if entry.file_type().is_symlink() {
@@ -50,6 +48,15 @@ pub fn scan(vault: &Path, community_plugins: bool) -> Result<Scan> {
     }
     files.sort();
     Ok(Scan { files, skipped })
+}
+
+/// Whether this device syncs `name`. Names it does not sync are left alone on both sides, so a
+/// device without community plugins neither downloads nor deletes another device's plugins.
+pub fn included(name: &str, community_plugins: bool) -> bool {
+    match name.strip_prefix(".obsidian/") {
+        Some(rest) => obsidian_setting(rest, community_plugins),
+        None => !name.split('/').any(|part| part.starts_with('.')),
+    }
 }
 
 fn is_hidden(name: &std::ffi::OsStr) -> bool {

@@ -60,6 +60,11 @@ impl Catalog {
                 if !entry.file_type().is_file() || p.extension().is_none_or(|e| e != "md") {
                     continue;
                 }
+                // A sync conflict copy is another device's unmerged version: the audit reports it to
+                // a person, and agents must not take it for a note (`sync-conflict`).
+                if entry.file_name().to_string_lossy().contains(crate::audit::SYNC_CONFLICT_MARK) {
+                    continue;
+                }
                 let Ok(src) = std::fs::read_to_string(p) else { continue };
                 let fm = Note::parse(&src).map(|n| n.fm).unwrap_or_default();
                 let id = p.file_stem().unwrap().to_string_lossy().into_owned();

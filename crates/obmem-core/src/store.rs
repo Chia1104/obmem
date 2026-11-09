@@ -219,7 +219,8 @@ impl Store {
             tried += 1;
             match self.obs.search(&root, &query, limit) {
                 Ok(found) => {
-                    for r in found {
+                    // Sync conflict copies are left to a person (see the catalog).
+                    for r in found.into_iter().filter(|r| !r.file.contains(crate::audit::SYNC_CONFLICT_MARK)) {
                         let meta = self.index.by_rel(sc.as_str(), &r.file);
                         let id = meta.map(|m| m.id.clone()).unwrap_or_else(|| {
                             Path::new(&r.file).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
@@ -501,9 +502,12 @@ impl Store {
         let date = now.format("%Y-%m-%d").to_string();
         let dir = self.cfg.global_project_dir().join("Sessions");
         crate::config::ensure_within(&self.cfg.global_vault, &dir)?;
+        // The device is in the name: with the personal vault synced, two machines writing the same
+        // day's log would otherwise conflict every day.
+        let device = slugify(&self.cfg.device);
         let name = match session {
-            Some(s) if !s.is_empty() => format!("{date}-{}", slugify(&s.chars().take(12).collect::<String>())),
-            _ => date.clone(),
+            Some(s) if !s.is_empty() => format!("{date}-{device}-{}", slugify(&s.chars().take(12).collect::<String>())),
+            _ => format!("{date}-{device}"),
         };
         // Projects of the same name share this folder, and the name comes from repo config: add
         // only to a log this project started, else start one under the next free name.
@@ -897,6 +901,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
         assert!(!store.project_ready());
@@ -915,6 +920,31 @@ mod tests {
     }
 
     #[test]
+    fn sync_conflict_copies_are_not_notes() {
+        let dir = std::env::temp_dir().join(format!("obmem-conflictcopy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let global = dir.join("global/Global");
+        std::fs::create_dir_all(&global).unwrap();
+        let note = "---\ntype: fact\ntitle: JWT rotation\nstatus: active\nauthor: human\n---\nmine\n";
+        std::fs::write(global.join("jwt-rotation.md"), note).unwrap();
+        std::fs::write(global.join("jwt-rotation.sync-conflict-win-20261110-090000.md"), note.replace("mine", "theirs")).unwrap();
+        let cfg = Config {
+            project_root: dir.clone(),
+            project_name: "p".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: false,
+            device: "test".into(),
+        };
+        let store = Store::open(cfg).unwrap();
+        let rels: Vec<&str> = store.notes().iter().map(|m| m.rel.as_str()).collect();
+        assert_eq!(rels, ["Global/jwt-rotation.md"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_person_approves_drafts_only() {
         let dir = std::env::temp_dir().join(format!("obmem-approve-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -928,6 +958,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
         let Ok(WriteOutcome::Written { id, path, .. }) = store.write(req(Scope::Project)) else { panic!("write") };
@@ -968,6 +999,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: true,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
         let fm = |p: &Path| Note::parse(&std::fs::read_to_string(p).unwrap()).unwrap().fm;
@@ -1013,6 +1045,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
 
@@ -1075,6 +1108,7 @@ mod tests {
             secrets: crate::config::SecretsConfig { mode, ..Default::default() },
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let titles = [format!("Use {multi_line} for auth"), format!("Use {} for auth", spaced.replace(' ', "\n"))];
 
@@ -1111,6 +1145,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         })
         .unwrap()
     }
@@ -1132,6 +1167,7 @@ mod tests {
         let mut clone = log_store(&dir, &dir.join("clone"), "p");
 
         let (pa, _) = a.log(None, "from a", "agent:test").unwrap();
+        assert!(pa.file_stem().unwrap().to_string_lossy().ends_with("-test"), "the device is in the name: {}", pa.display());
         let (pc, _) = clone.log(None, "NEXT STEP: from the clone", "agent:test").unwrap();
         assert_ne!(pa, pc);
         assert!(pc.file_stem().unwrap().to_string_lossy().ends_with("-2"), "{}", pc.display());

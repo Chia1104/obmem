@@ -347,6 +347,7 @@ mod tests {
             global_vault: root.join("g"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         }
     }
 

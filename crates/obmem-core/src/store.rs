@@ -94,8 +94,20 @@ impl std::fmt::Display for NoteRef<'_> {
     }
 }
 
+/// Who `approved_by` names when `[review] auto_approve` approved a write.
+pub const AUTO_APPROVER: &str = "auto-approve";
+
+/// `draft` → `active`, recording when and by whom.
+fn mark_approved(fm: &mut Frontmatter, by: &str, date: &str) {
+    let s = |x: &str| yaml_serde::Value::String(x.to_string());
+    fm.status = Some("active".into());
+    fm.extra.insert("approved_at".into(), s(date));
+    fm.extra.insert("approved_by".into(), s(by));
+}
+
 pub enum WriteOutcome {
-    Written { id: String, path: PathBuf, created: bool, redactions: Vec<SecretHit>, warnings: Vec<String> },
+    /// `status` is the note's status after the write: `draft`, `active` (auto-approved) or `open`.
+    Written { id: String, path: PathBuf, created: bool, status: String, redactions: Vec<SecretHit>, warnings: Vec<String> },
     Duplicate { candidates: Vec<(String, String, f64)> },
 }
 
@@ -401,6 +413,8 @@ impl Store {
                 Some(st @ ("superseded" | "archived")) => bail!(
                     "'{id}' is {st}; write a new note (and link it) instead of editing a retired one."
                 ),
+                // The user turned review off: the edit is approved like a new note would be.
+                _ if self.cfg.auto_approve => mark_approved(&mut note.fm, AUTO_APPROVER, &today),
                 // A human promoted this note; an agent edit needs a fresh review.
                 Some("draft") | None => {}
                 Some(_) => note.fm.status = Some("draft".into()),
@@ -408,6 +422,7 @@ impl Store {
             note.body = ensure_trailing_newline(body);
             note.fm.title = Some(title);
             note.fm.updated = Some(today);
+            let status = note.fm.status.clone().unwrap_or_default();
             if !tags.is_empty() {
                 note.fm.tags = tags;
             }
@@ -422,7 +437,7 @@ impl Store {
             atomic_write(&upd_root, &path, &note.render()?)?;
             self.sync()?;
             let id = path.file_stem().unwrap().to_string_lossy().into_owned();
-            return Ok(WriteOutcome::Written { id, path, created: false, redactions, warnings });
+            return Ok(WriteOutcome::Written { id, path, created: false, status, redactions, warnings });
         }
 
         // Duplicate check: same type + scope, similar title.
@@ -454,7 +469,7 @@ impl Store {
             path = dir.join(format!("{base}-{n}.md"));
             n += 1;
         }
-        let fm = Frontmatter {
+        let mut fm = Frontmatter {
             note_type: Some(req.note_type.as_str().into()),
             title: Some(title.clone()),
             // Findings follow their own lifecycle (open → accepted / fixed / rejected).
@@ -462,17 +477,21 @@ impl Store {
             author: Some(req.author),
             confidence: Some(confidence.unwrap_or_else(|| "medium".into())),
             created: Some(today.clone()),
-            updated: Some(today),
+            updated: Some(today.clone()),
             verified_commit: if code_refs.is_empty() { None } else { commit },
             code_refs,
             tags,
             extra: Default::default(),
         };
+        if self.cfg.auto_approve && req.note_type != NoteType::Finding {
+            mark_approved(&mut fm, AUTO_APPROVER, &today);
+        }
+        let status = fm.status.clone().unwrap_or_default();
         let note = Note { fm, body: ensure_trailing_newline(format!("# {title}\n\n{body}")) };
         atomic_write(&root, &path, &note.render()?)?;
         self.sync()?;
         let id = path.file_stem().unwrap().to_string_lossy().into_owned();
-        Ok(WriteOutcome::Written { id, path, created: true, redactions, warnings })
+        Ok(WriteOutcome::Written { id, path, created: true, status, redactions, warnings })
     }
 
     /// Append a timestamped entry to today's session log (global vault, per project).
@@ -640,7 +659,8 @@ impl Store {
     }
 
     /// A person accepts an agent's draft: `draft` → `active`. For people only (CLI, GUI); the MCP
-    /// server does not offer it, because an agent must not promote its own notes.
+    /// server does not offer it, because an agent must not promote its own notes. (A user who
+    /// turns on `[review] auto_approve` in their own config has `write` do it instead.)
     pub fn approve<'a>(&mut self, note: impl Into<NoteRef<'a>>, by: &str) -> Result<String> {
         self.sync()?;
         let note = note.into();
@@ -657,11 +677,8 @@ impl Store {
             other => bail!("'{key}' is not a draft (status: {}).", other.unwrap_or("-")),
         }
         let date = chrono::Local::now().format("%Y-%m-%d").to_string();
-        note.fm.status = Some("active".into());
         note.fm.updated = Some(date.clone());
-        let s = |x: &str| yaml_serde::Value::String(x.to_string());
-        note.fm.extra.insert("approved_at".into(), s(&date));
-        note.fm.extra.insert("approved_by".into(), s(by));
+        mark_approved(&mut note.fm, by, &date);
         let path = PathBuf::from(path);
         atomic_write(&root, &path, &note.render()?)?;
         self.sync()?;
@@ -874,6 +891,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         };
         let mut store = Store::open(cfg).unwrap();
         assert!(!store.project_ready());
@@ -904,6 +922,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         };
         let mut store = Store::open(cfg).unwrap();
         let Ok(WriteOutcome::Written { id, path, .. }) = store.write(req(Scope::Project)) else { panic!("write") };
@@ -931,6 +950,51 @@ mod tests {
     }
 
     #[test]
+    fn auto_approve_writes_notes_active() {
+        let dir = std::env::temp_dir().join(format!("obmem-autoapprove-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        let cfg = Config {
+            project_root: dir.clone(),
+            project_name: "p".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: true,
+        };
+        let mut store = Store::open(cfg).unwrap();
+        let fm = |p: &Path| Note::parse(&std::fs::read_to_string(p).unwrap()).unwrap().fm;
+
+        let Ok(WriteOutcome::Written { id, path, status, .. }) = store.write(req(Scope::Project)) else { panic!("write") };
+        assert_eq!(status, "active");
+        let written = fm(&path);
+        assert_eq!(written.status.as_deref(), Some("active"));
+        assert_eq!(written.extra.get("approved_by").and_then(|v| v.as_str()), Some(AUTO_APPROVER));
+        assert_eq!(store.count_by_status("draft", Scope::Project), 0);
+
+        // An edit keeps it active, and an older draft is approved when edited.
+        let edit = WriteRequest { update_id: Some(id.clone()), body: "edited".into(), ..req(Scope::Project) };
+        let Ok(WriteOutcome::Written { status, .. }) = store.write(edit) else { panic!("update") };
+        assert_eq!(status, "active");
+        let old = WriteRequest { title: "An older draft".into(), ..req(Scope::Project) };
+        store.cfg.auto_approve = false;
+        let Ok(WriteOutcome::Written { id: old_id, path: old_path, status, .. }) = store.write(old) else { panic!("write") };
+        assert_eq!(status, "draft");
+        store.cfg.auto_approve = true;
+        let edit = WriteRequest { update_id: Some(old_id), body: "edited".into(), ..req(Scope::Project) };
+        assert!(matches!(store.write(edit), Ok(WriteOutcome::Written { .. })));
+        assert_eq!(fm(&old_path).status.as_deref(), Some("active"));
+
+        // Findings keep their own lifecycle.
+        let finding = WriteRequest { note_type: NoteType::Finding, title: "Something is off".into(), ..req(Scope::Project) };
+        let Ok(WriteOutcome::Written { status, .. }) = store.write(finding) else { panic!("finding") };
+        assert_eq!(status, "open");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn session_start_lists_keep_titles_on_one_line_and_mark_draft_guidance() {
         let dir = std::env::temp_dir().join(format!("obmem-oneline-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -943,6 +1007,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         };
         let mut store = Store::open(cfg).unwrap();
 
@@ -1004,6 +1069,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: crate::config::SecretsConfig { mode, ..Default::default() },
             audit: Default::default(),
+            auto_approve: false,
         };
         let titles = [format!("Use {multi_line} for auth"), format!("Use {} for auth", spaced.replace(' ', "\n"))];
 
@@ -1039,6 +1105,7 @@ mod tests {
             global_vault: dir.join("global"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         })
         .unwrap()
     }

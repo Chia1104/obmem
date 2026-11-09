@@ -54,13 +54,25 @@ Once set up:
 | `memory_context` | The notes most relevant to a task description, in any language |
 | `memory_search` | Obsidian search across both vaults, with the same syntax as the app's search box |
 | `memory_get` | One note, with its backlinks |
-| `memory_write` | Create or update a note. New notes start as `draft`, notes written by people are read-only for agents, and near-duplicates and secrets are refused |
+| `memory_write` | Create or update a note. New notes start as `draft` (or `active`, with [auto-approve](#auto-approve)), notes written by people are read-only for agents, and near-duplicates and secrets are refused |
 | `memory_log` | Append to today's session log |
 | `memory_audit` | Run the audit, optionally writing finding notes |
 | `memory_resolve` | Mark a finding `fixed`, `accepted` or `open` |
 | `memory_verify` | Record that a note still matches the code |
 
 The CLI has the same features, plus what only people may do: `obmem approve <note>` accepts a draft, and `obmem resolve <finding> rejected` silences a false positive. Run `obmem --help` to list the commands.
+
+## Auto-approve
+
+Every note an agent writes waits as a `draft` until you approve it. To skip that review, turn on auto-approve in your own config, or in the desktop app's Personal settings:
+
+```toml
+# ~/.config/obmem/config.toml
+[review]
+auto_approve = true
+```
+
+Agent notes are then written `active`, with `approved_by: auto-approve`, and so are agent edits and Claude Code imports. Findings still start `open`. A project's `.obmem.toml` can turn auto-approve off for that project with the same `[review]` setting set to `false`, but it cannot turn it on: a cloned repo must not decide that what agents write skips your review.
 
 ## Audit
 
@@ -100,7 +112,7 @@ For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks t
 
 ## Import Claude Code memory
 
-`obmem import-claude` imports `~/.claude/projects/<project>/memory/*.md` as draft notes. User and feedback memories go to the global vault, project and reference memories to the project vault. Files that already exist are skipped.
+`obmem import-claude` imports `~/.claude/projects/<project>/memory/*.md` as draft notes (active with auto-approve). User and feedback memories go to the global vault, project and reference memories to the project vault. Files that already exist are skipped.
 
 ## Desktop app
 

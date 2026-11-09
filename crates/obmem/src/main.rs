@@ -461,6 +461,7 @@ mod tests {
             global_vault: root.join("g"),
             secrets: Default::default(),
             audit: Default::default(),
+            auto_approve: false,
         };
         let token = concat!("gh", "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA");
 

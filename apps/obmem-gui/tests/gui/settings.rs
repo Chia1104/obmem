@@ -60,10 +60,13 @@ fn settings_secrets_and_personal_settings_are_saved() {
     let personal_vault = config::global_vault().unwrap();
     assert_eq!(allowlist::read(&personal_vault).unwrap().stopwords, vec!["sandbox-only"]);
 
-    app.press("id:personal-settings >> role:switch").unwrap();
+    app.press("id:personal-settings >> role:switch[Scan environment variables]").unwrap();
+    app.press("id:personal-settings >> role:switch[Approve agent notes automatically]").unwrap();
     app.press("id:personal-settings >> role:button[Save]").unwrap();
     app.wait_for_within("Personal settings saved.", SLOW).unwrap();
-    assert!(!settings::read_global().unwrap().scan_process_env);
+    let saved = settings::read_global().unwrap();
+    assert!(!saved.scan_process_env);
+    assert!(saved.auto_approve);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

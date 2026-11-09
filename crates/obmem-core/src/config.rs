@@ -19,6 +19,16 @@ pub struct ProjectFile {
     pub name: Option<String>,
     pub secrets: SecretsConfig,
     pub audit: AuditConfig,
+    pub review: ReviewConfig,
+}
+
+/// `[review]`: whether agent writes skip the review queue. Only the user's own config can turn
+/// auto-approve on; a repo's `.obmem.toml` arrives with a clone and can only turn it off.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ReviewConfig {
+    /// Notes are written `active` instead of `draft`, as if a person had approved them.
+    pub auto_approve: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +51,7 @@ impl Default for AuditConfig {
 pub struct GlobalFile {
     pub vault: Option<String>,
     pub secrets: GlobalSecrets,
+    pub review: ReviewConfig,
 }
 
 /// Secret-scanning switches that may only come from the user's own config: a repo's
@@ -95,6 +106,8 @@ pub struct Config {
     pub global_vault: PathBuf,
     pub secrets: SecretsConfig,
     pub audit: AuditConfig,
+    /// Writes land `active` instead of `draft` (see [`auto_approve`]).
+    pub auto_approve: bool,
 }
 
 pub fn home() -> PathBuf {
@@ -156,6 +169,7 @@ impl Config {
         let global_vault = global_vault_from(gf.vault);
 
         let secrets = secrets_policy(&project_root, pf.secrets, &gf.secrets)?;
+        let auto_approve = auto_approve(&pf.review, &gf.review);
         Ok(Self {
             project_root,
             project_name,
@@ -163,6 +177,7 @@ impl Config {
             global_vault,
             secrets,
             audit: pf.audit,
+            auto_approve,
         })
     }
 
@@ -194,6 +209,12 @@ fn secrets_policy(project_root: &Path, repo: SecretsConfig, user: &GlobalSecrets
         env_files,
         scan_process_env: repo.scan_process_env || user.scan_process_env.unwrap_or(true),
     })
+}
+
+/// Auto-approve is on only when the user's config turns it on and the repo's does not turn it off:
+/// a clone must not be able to skip the review of what agents write, in the personal vault least of all.
+fn auto_approve(repo: &ReviewConfig, user: &ReviewConfig) -> bool {
+    user.auto_approve.unwrap_or(false) && repo.auto_approve.unwrap_or(true)
 }
 
 /// The personal vault: `OBMEM_GLOBAL_VAULT`, else the user's config, else `~/Obsidian/AgentMemory`.
@@ -308,6 +329,19 @@ mod tests {
         }
         let empty = load_with("[secrets]\nenv_files = []\n").unwrap();
         assert_eq!(empty.secrets.env_files, SecretsConfig::default().env_files);
+    }
+
+    #[test]
+    fn only_the_user_turns_auto_approve_on() {
+        let on = ReviewConfig { auto_approve: Some(true) };
+        let off = ReviewConfig { auto_approve: Some(false) };
+        let unset = ReviewConfig::default();
+        assert!(!auto_approve(&unset, &unset), "off by default");
+        assert!(!auto_approve(&on, &unset), "a repo cannot turn it on");
+        assert!(!auto_approve(&on, &off));
+        assert!(auto_approve(&unset, &on));
+        assert!(auto_approve(&on, &on));
+        assert!(!auto_approve(&off, &on), "a repo can turn it off");
     }
 
     #[test]

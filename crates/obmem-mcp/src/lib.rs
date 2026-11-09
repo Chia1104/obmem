@@ -327,7 +327,8 @@ impl MemoryServer {
 
     #[tool(description = "Record durable knowledge as an Obsidian note: decisions (with rationale), \
         facts, architecture, procedures, user feedback/preferences, or findings (problems you noticed in \
-        code or docs). New notes start as status=draft for human review. Refuses near-duplicates (update \
+        code or docs). New notes start as status=draft for human review, or active if the user turned on \
+        auto-approve. Refuses near-duplicates (update \
         the existing note via update_id instead), edits to human-authored notes (write a finding instead), \
         and content containing secrets. Do not record things derivable from the code or git history.")]
     async fn memory_write(&self, peer: Peer<RoleServer>, Parameters(a): Parameters<WriteArgs>) -> Result<CallToolResult, McpError> {
@@ -350,9 +351,9 @@ impl MemoryServer {
             file_stem: None,
         };
         match s.write(req) {
-            Ok(WriteOutcome::Written { id, path, created, redactions, warnings }) => {
+            Ok(WriteOutcome::Written { id, path, created, status, redactions, warnings }) => {
                 let mut msg = format!(
-                    "{} [[{id}]] at {}",
+                    "{} [[{id}]] ({status}) at {}",
                     if created { "Created" } else { "Updated" },
                     path.display()
                 );

@@ -1,0 +1,25 @@
+[package]
+name = "obmem-sync"
+description = "Encrypted backup of obmem's personal vault to S3-compatible storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+obmem-core.workspace = true
+age = "0.12.1"
+anyhow.workspace = true
+chrono.workspace = true
+futures = "0.3"
+gethostname = "1.1.0"
+hex.workspace = true
+hmac = "0.13.0"
+keyring = "4.2.0"
+object_store = { version = "0.14.2", features = ["aws"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["rt"] }
+unicode-normalization = "0.1.26"
+walkdir.workspace = true

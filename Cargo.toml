@@ -19,6 +19,7 @@ debug = false
 obmem-core = { path = "crates/obmem-core" }
 obmem-mcp = { path = "crates/obmem-mcp" }
 obmem-agents = { path = "crates/obmem-agents" }
+obmem-sync = { path = "crates/obmem-sync" }
 
 # Native Shell (apps/obmem-gui). The nsh CLI builds against its own version of these crates, so
 # upgrade the CLI and these together.

@@ -123,11 +123,16 @@ impl Catalog {
         self.notes.iter().filter(|m| m.status == status && m.scope == scope).count()
     }
 
-    /// Feedback and preference notes from the global vault (always relevant).
-    pub fn global_guidance(&self) -> Result<Vec<(String, String)>> {
+    /// Feedback and preference notes from the global vault (always relevant): (id, title, status).
+    pub fn global_guidance(&self) -> Result<Vec<(String, String, String)>> {
         let mut v = Vec::new();
         for ty in ["feedback", "preference"] {
-            v.extend(self.titles(ty, "global")?.into_iter().map(|(id, t, _)| (id, t)));
+            v.extend(
+                self.notes
+                    .iter()
+                    .filter(|m| m.note_type == ty && m.scope == "global")
+                    .map(|m| (m.id.clone(), m.title.clone(), m.status.clone())),
+            );
         }
         Ok(v)
     }

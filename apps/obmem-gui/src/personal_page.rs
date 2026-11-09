@@ -3,7 +3,7 @@
 
 use crate::data::{Personal, Vault};
 use crate::state::{self, Load};
-use crate::widgets::{Level, action, card, check, choice, field, heading, muted, notice_area, page, page_header, primary, text_box};
+use crate::widgets::{Level, action, card, check, field, heading, muted, notice_area, page, page_header, primary, switch_control, text_box};
 use nsh_core::prelude::*;
 use obmem_core::allowlist::{Allowlist, Kind};
 use obmem_core::settings::GlobalSettings;
@@ -38,7 +38,7 @@ fn form(p: &Personal) -> View {
         .child(field(
             "Scan environment variables",
             "Treat the values of sensitive-looking environment variables as known secrets. Only you can turn this off; a project's settings cannot.",
-            choice(&[(true, "On"), (false, "Off")], move || scan_env.get(), move |v| scan_env.set(v)),
+            switch_control(move || scan_env.get(), "Scan environment variables", move |v| scan_env.set(v)),
         ))
         .child(view().flex_row().pt_2().child(primary("Save", save)))
 }

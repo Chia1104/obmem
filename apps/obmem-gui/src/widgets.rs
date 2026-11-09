@@ -209,21 +209,26 @@ pub(crate) fn card() -> View {
         .rounded(move || theme().radius)
 }
 
-/// A row of tabs over the page, the shown one underlined in ink. Tabs that do not fit wrap.
+/// A row of tabs over the page (NSH's `Tabs`): the shown one is underlined in ink, and the
+/// underline travels to the next one. Tabs that do not fit wrap.
 pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
     options: &[(T, &'static str)],
     current: impl Fn() -> T + Copy + 'static,
     pick: impl Fn(T) + Copy + 'static,
-) -> View {
-    let mut row = view().flex_row().flex_wrap().gap_x_4().border_b_1().border_b_color(move || theme().border);
+) -> impl IntoElement {
+    let mut list = nsh_base::tabs()
+        .indicator_class(Some("bottom-0 h-[2px] rounded-full bg-primary".into()))
+        .flex_row()
+        .flex_wrap()
+        .gap_x_4()
+        .border_b_1()
+        .border_b_color(move || theme().border);
     for &(value, label) in options {
         let on = move || current() == value;
-        row = row.child(
-            button()
+        list = list.child(
+            nsh_base::tab()
+                .selected(on)
                 .py_2()
-                .mb(px(-1.0))
-                .border_b(px(2.0))
-                .border_b_color(move || if on() { theme().primary } else { AdaptiveColor::TRANSPARENT })
                 .hover(|s| s.opacity(0.8))
                 .on_press(move || pick(value))
                 .child(
@@ -234,16 +239,16 @@ pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
                 ),
         );
     }
-    row
+    list
 }
 
-/// One choice among a few, as a segmented control; the chosen one is filled.
+/// One choice among a few, as a segmented control of NSH `Toggle`s; the chosen one is raised.
 pub(crate) fn choice<T: Copy + PartialEq + 'static>(
     options: &[(T, &'static str)],
     current: impl Fn() -> T + Copy + 'static,
     pick: impl Fn(T) + Copy + 'static,
-) -> View {
-    let mut row = view()
+) -> impl IntoElement {
+    let mut group = nsh_base::toggle_group()
         .flex_row()
         .self_start()
         .p(px(2.0))
@@ -252,15 +257,17 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
         .bg(move || theme().muted);
     for &(value, label) in options {
         let on = move || current() == value;
-        row = row.child(
-            button()
+        group = group.child(
+            nsh_base::toggle()
+                .pressed(on)
                 .px_3()
                 .py_1()
                 .rounded(move || theme().radius - px(2.0))
                 .bg(move || if on() { theme().card } else { AdaptiveColor::TRANSPARENT })
                 .style_when(on, |s| s.shadow_xs())
                 .active(|s| s.opacity(0.7))
-                .on_press(move || pick(value))
+                // Pressing the chosen one again keeps it: one of them is always chosen.
+                .on_change(move |_: &bool| pick(value))
                 .child(
                     text(label)
                         .text_sm()
@@ -269,7 +276,46 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
                 ),
         );
     }
-    row
+    group
+}
+
+/// An on/off setting that takes effect when the form is saved or at once, as `change` does
+/// (NSH's `Switch`).
+pub(crate) fn switch_control(on: impl Fn() -> bool + Copy + 'static, label: &str, change: impl Fn(bool) + 'static) -> impl IntoElement {
+    nsh_base::switch()
+        .checked(on)
+        .accessibility_label(label.to_string())
+        .self_start()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .on_change(move |v: &bool| change(*v))
+        .track_class(Some("w-9 h-5 p-[2px] rounded-full bg-input checked:bg-primary transition-colors".into()))
+        .thumb_class(Some("w-4 h-4 rounded-full bg-background shadow-xs checked:translate-x-4 transition-transform".into()))
+        .child(text(move || if on() { "On" } else { "Off" }).text_sm().text_color(move || theme().muted_foreground))
+}
+
+/// A box to tick (NSH's `Checkbox`) with its label after it.
+pub(crate) fn checkbox_control(
+    on: impl Fn() -> bool + Clone + 'static,
+    change: impl Fn(bool) + 'static,
+    label: impl IntoElement,
+) -> impl IntoElement {
+    let shown = on.clone();
+    nsh_base::checkbox()
+        .checked(on)
+        .flex_row()
+        .items_start()
+        .gap_3()
+        .on_change(move |v: &bool| change(*v))
+        .indicator_class(Some(
+            "mt-[2px] w-4 h-4 rounded-[4px] border border-input bg-background items-center justify-center checked:bg-primary checked:border-primary"
+                .into(),
+        ))
+        .indicator(
+            dynamic(move || shown().then(|| view().text_color(move || theme().primary_foreground).child(crate::icons::icon(crate::icons::CHECK, 12.0)))),
+        )
+        .child(view().flex_1().min_w(px(0.0)).child(label))
 }
 
 /// A labelled form row: what it is, what it does, and its control. In a narrow page the label
@@ -311,44 +357,51 @@ pub(crate) fn text_box(value: Signal<String>, placeholder: &str) -> Input {
         .focus(|s| s.border_color(move || theme().ring))
 }
 
+/// A card with a slim bar of `color` along the inside of its left edge, for what stands out from
+/// the page (notices). The bar and what follows it sit close to that edge.
+pub(crate) fn callout(color: impl Fn() -> AdaptiveColor + Copy + 'static, body: impl IntoElement) -> View {
+    card()
+        .flex_row()
+        .gap_2()
+        .pl_2()
+        .child(view().w(px(3.0)).self_stretch().rounded_full().bg(move || color().opacity(0.55)))
+        .child(view().flex_1().min_w(px(0.0)).gap_1().child(body))
+}
+
 /// What the last action reported, with a way to dismiss it.
 pub(crate) fn notice_area() -> AnyElement {
     use crate::state::{self, Notice};
     dynamic(move || {
         state::notice().map(|n| {
-            let (body, level) = match n {
-                Notice::Error(e) => (card().child(check(Level::Error, "That did not work", e)), Level::Error),
-                Notice::Done(msg) => (card().child(check(Level::Ok, msg, "")), Level::Ok),
-                Notice::Lines(title, lines) => {
-                    let mut c = card().child(check(Level::Ok, title, ""));
-                    for l in lines {
-                        c = c.child(muted(l).pl(px(30.0)));
-                    }
-                    (c, Level::Ok)
+            let mut lines: Vec<String> = Vec::new();
+            let (level, title, detail) = match n {
+                Notice::Error(e) => (Level::Error, "That did not work".to_string(), e),
+                Notice::Done(msg) => (Level::Ok, msg, String::new()),
+                Notice::Lines(title, l) => {
+                    lines = l;
+                    (Level::Ok, title, String::new())
                 }
                 Notice::Audit(done) => {
-                    let mut c = card().child(check(Level::Ok, done.summary, ""));
-                    for n in done.notes {
-                        c = c.child(muted(n).pl(px(30.0)));
-                    }
-                    (c, Level::Ok)
+                    lines = done.notes;
+                    (Level::Ok, done.summary, String::new())
                 }
                 Notice::SetUp(done) => {
-                    let mut c = card().child(check(Level::Ok, format!("{} is set up", done.agent.label()), ""));
-                    for f in &done.changed {
-                        c = c.child(muted(format!("Updated {f}")).pl(px(30.0)));
-                    }
-                    for m in &done.manual {
-                        c = c.child(muted(format!("Next: {m}")).pl(px(30.0)));
-                    }
-                    (c, Level::Ok)
+                    lines.extend(done.changed.iter().map(|f| format!("Updated {f}")));
+                    lines.extend(done.manual.iter().map(|m| format!("Next: {m}")));
+                    (Level::Ok, format!("{} is set up", done.agent.label()), String::new())
                 }
             };
-            let edge = tone(if level == Level::Error { "destructive" } else { "ok" });
-            body.test_id("notice")
-                .border_l_color(edge)
-                .border_l(px(3.0))
-                .child(view().flex_row().pt_2().pl(px(30.0)).child(action("Dismiss", state::dismiss_notice)))
+            let mut body = view().child(check(level, title, detail).py_0());
+            for l in lines {
+                body = body.child(muted(l).pl(px(30.0)));
+            }
+            let body = body.child(view().flex_row().pt_3().pl(px(30.0)).child(action("Dismiss", state::dismiss_notice)));
+            let color = tone(match level {
+                Level::Ok => "ok",
+                Level::Warn => "warn",
+                Level::Error => "destructive",
+            });
+            callout(color, body).test_id("notice")
         })
     })
 }

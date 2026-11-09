@@ -1,7 +1,7 @@
 ---
 type: fact
 title: target grows because -p obmem-gui and --workspace build Native Shell with different features
-status: draft
+status: active
 author: agent
 confidence: high
 created: 2026-11-09
@@ -14,6 +14,8 @@ tags:
 - build
 - cargo
 - gui
+approved_at: 2026-11-09
+approved_by: human (gui)
 ---
 On 2026-11-09 `target/` was 29G, plus 3.9G in `apps/obmem-gui/target`. `target/debug/deps` held 7 copies of `libnsh_base` (347M each) and 8 copies of `nsh_platform_macos`. Every copy had the same rustc, features, profile and rustflags; they differed only in the hashes of their dependencies.
 

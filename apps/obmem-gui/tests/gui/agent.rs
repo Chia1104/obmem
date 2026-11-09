@@ -32,7 +32,7 @@ fn agent_view_sessions_and_claude_memory() {
     let pending = |n: usize| format!("{n} of the 2 memories in {} are not in the vaults yet. They come in as drafts for you to approve.", memory.display());
     assert!(app.screen().shows(&pending(2)), "{:?}", app.screen().texts());
     // Leave one out, import the other.
-    app.press("id:memory-staging-url >> role:button").unwrap();
+    app.press("id:memory-staging-url >> role:checkbox").unwrap();
     app.press("id:claude-memory >> role:button[Import selected]").unwrap();
     app.wait_for_within("Claude Code memory imported", SLOW).unwrap();
     assert!(cfg.global_vault.join("Global/Feedback/keep-replies-short.md").exists(), "the feedback memory is imported");
@@ -40,7 +40,7 @@ fn agent_view_sessions_and_claude_memory() {
     // The card now offers only what is left.
     app.wait_for_within(&format!("text:{}", pending(1)), SLOW).unwrap();
 
-    app.press("role:button[Agent view]").unwrap();
+    app.press("role:tab[Agent view]").unwrap();
     app.wait_until("the session-start context", SLOW, |s| s.texts().iter().any(|t| t.starts_with("# Project memory (agent-repo)")))
         .unwrap();
     app.type_text("id:task-input", "tune the sync job backoff").unwrap();
@@ -53,7 +53,7 @@ fn agent_view_sessions_and_claude_memory() {
     })
     .unwrap();
 
-    app.press("role:button[Sessions]").unwrap();
+    app.press("role:tab[Sessions]").unwrap();
     app.wait_for_within("text:Added the retry to the sync job; the backoff is still to tune.", SLOW).unwrap();
 
     let _ = std::fs::remove_dir_all(&dir);

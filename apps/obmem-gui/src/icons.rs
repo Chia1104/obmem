@@ -7,6 +7,7 @@ use nsh_core::prelude::*;
 /// Shows or hides the sidebar.
 pub(crate) const SIDEBAR: &str =
     r#"<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>"#;
+pub(crate) const CHECK: &str = r#"<path d="M20 6 9 17l-5-5"/>"#;
 pub(crate) const PLUS: &str = r#"<path d="M5 12h14"/><path d="M12 5v14"/>"#;
 /// Drafts and findings waiting for a person.
 pub(crate) const INBOX: &str = r#"<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>"#;

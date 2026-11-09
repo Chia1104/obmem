@@ -14,8 +14,8 @@ fn settings_secrets_and_personal_settings_are_saved() {
     obmem_agents::setup::setup(&cfg, Agent::Codex).unwrap();
 
     let mut app = start();
-    app.wait_for_within("role:button[Settings]", SLOW).unwrap();
-    app.press("role:button[Settings]").unwrap();
+    app.wait_for_within("role:tab[Settings]", SLOW).unwrap();
+    app.press("role:tab[Settings]").unwrap();
     app.wait_for_within("id:project-settings", SLOW).unwrap();
 
     // A save the rules refuse reports why and keeps what the user typed.
@@ -36,13 +36,13 @@ fn settings_secrets_and_personal_settings_are_saved() {
     assert_eq!((saved.name.as_str(), saved.secret_mode), ("renamed", SecretMode::Redact));
     assert_eq!(Config::load(Some(&repo)).unwrap().project_name, "renamed");
 
-    app.press("id:codex >> role:button[On]").unwrap();
+    app.press("id:codex >> role:switch").unwrap();
     app.wait_for_within("Codex now runs obmem's tools without asking.", SLOW).unwrap();
     assert_eq!(obmem_agents::setup::codex_auto_approve(&cfg).unwrap(), Some(true));
 
     // A token-shaped test value (split so the source holds no literal token).
     let token = concat!("gh", "p_", "Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmAq9W");
-    app.press("role:button[Secrets]").unwrap();
+    app.press("role:tab[Secrets]").unwrap();
     app.wait_for_within("id:scan-input", SLOW).unwrap();
     app.type_text("id:scan-input", &format!("deploy with {token}")).unwrap();
     app.press("role:button[Scan]").unwrap();
@@ -60,7 +60,7 @@ fn settings_secrets_and_personal_settings_are_saved() {
     let personal_vault = config::global_vault().unwrap();
     assert_eq!(allowlist::read(&personal_vault).unwrap().stopwords, vec!["sandbox-only"]);
 
-    app.press("id:personal-settings >> role:button[Off]").unwrap();
+    app.press("id:personal-settings >> role:switch").unwrap();
     app.press("id:personal-settings >> role:button[Save]").unwrap();
     app.wait_for_within("Personal settings saved.", SLOW).unwrap();
     assert!(!settings::read_global().unwrap().scan_process_env);

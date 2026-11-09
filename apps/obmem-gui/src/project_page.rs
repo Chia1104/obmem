@@ -2,7 +2,7 @@
 
 use crate::data::{AgentState, Detail};
 use crate::state::{self, Load, Tab};
-use crate::widgets::{Level, action, card, check, heading, muted, notice_area, page, page_header, path_text, primary, tabs};
+use crate::widgets::{Level, action, card, check, checkbox_control, heading, muted, notice_area, page, page_header, path_text, primary, tabs};
 use crate::data::ClaudeMemory;
 use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
 use nsh_base::theme;
@@ -58,7 +58,7 @@ fn header() -> Vec<AnyElement> {
     }
 }
 
-fn tab_bar() -> View {
+fn tab_bar() -> AnyElement {
     tabs(
         &[
             (Tab::Overview, "Overview"),
@@ -70,6 +70,7 @@ fn tab_bar() -> View {
         state::tab,
         state::show_tab,
     )
+    .into_element()
 }
 
 /// The shown tab. It re-renders when the project is read again (after a save) or the tab changes,
@@ -186,9 +187,10 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
     )));
     for item in &m.items {
         let stem = item.source.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-        let mut row = view().test_id(&format!("memory-{stem}")).flex_row().items_center().gap_3().py_1();
-        row = if item.exists {
-            row.child(view().w(px(28.0))).child(view().flex_1().child(text(item.title.clone()).text_sm()))
+        let row = view().test_id(&format!("memory-{stem}")).flex_row().flex_wrap().items_start().gap_x_3().gap_y_1().py_1();
+        let row = if item.exists {
+            row.child(view().w(px(16.0)))
+                .child(view().flex_1().min_w(px(200.0)).child(text(item.title.clone()).text_sm()))
                 .child(muted("already imported"))
         } else {
             let source = item.source.clone();
@@ -196,17 +198,17 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
                 let source = source.clone();
                 move || chosen.with(|c| c.contains(&source))
             };
-            row.child(
-                nsh_base::button()
-                    .w(px(28.0))
-                    .on_press(move || {
-                        let source = source.clone();
-                        chosen.update(|c| if c.contains(&source) { c.retain(|s| s != &source) } else { c.push(source) })
-                    })
-                    .child(text(move || if on() { "☑" } else { "☐" })),
-            )
-            .child(view().flex_1().child(text(item.title.clone()).text_sm()))
-            .child(muted(item.destination.clone()))
+            let toggle = move |pick: bool| {
+                let source = source.clone();
+                chosen.update(|c| {
+                    c.retain(|s| s != &source);
+                    if pick {
+                        c.push(source);
+                    }
+                })
+            };
+            row.child(view().flex_1().min_w(px(200.0)).child(checkbox_control(on, toggle, text(item.title.clone()).text_sm())))
+                .child(muted(item.destination.clone()))
         };
         c = c.child(row);
     }

@@ -3,7 +3,8 @@
 use crate::data::{AgentState, Detail};
 use crate::state::{self, Load, Tab};
 use crate::widgets::{Level, action, card, check, choice, heading, muted, notice_area, primary};
-use crate::{secrets_tab, settings_tab};
+use crate::data::ClaudeMemory;
+use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 use obmem_core::status::{Registration, VaultStatus};
@@ -63,7 +64,17 @@ fn header() -> Vec<AnyElement> {
 }
 
 fn tab_bar() -> View {
-    choice(&[(Tab::Overview, "Overview"), (Tab::Settings, "Settings"), (Tab::Secrets, "Secrets")], state::tab, state::show_tab)
+    choice(
+        &[
+            (Tab::Overview, "Overview"),
+            (Tab::Agent, "Agent view"),
+            (Tab::Sessions, "Sessions"),
+            (Tab::Settings, "Settings"),
+            (Tab::Secrets, "Secrets"),
+        ],
+        state::tab,
+        state::show_tab,
+    )
 }
 
 /// The shown tab. It re-renders when the project is read again (after a save) or the tab changes,
@@ -80,7 +91,13 @@ fn content() -> Vec<AnyElement> {
         ];
     }
     match state::tab() {
-        Tab::Overview => vec![health(&d).into_element(), agents(d.agents).into_element()],
+        Tab::Overview => {
+            let mut out = vec![health(&d).into_element(), agents(d.agents).into_element()];
+            out.extend(claude_memory(&d.claude_memory).map(IntoElement::into_element));
+            out
+        }
+        Tab::Agent => vec![agent_tab::agent_tab().into_element()],
+        Tab::Sessions => vec![sessions_tab::sessions_tab()],
         Tab::Settings => vec![settings_tab::settings_tab(&d).into_element()],
         Tab::Secrets => vec![secrets_tab::secrets_tab(&d).into_element()],
     }
@@ -153,4 +170,49 @@ fn agents(list: Vec<AgentState>) -> View {
         c = c.child(row);
     }
     c
+}
+
+/// Claude Code's own memory for this project, offered for import while some of it is not in the
+/// vaults yet. Imported memories arrive as drafts, for review like any agent's.
+fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
+    let m = match m {
+        Err(e) => return Some(card().child(check(Level::Error, "Could not read Claude Code's memory", e.clone()))),
+        Ok(m) if m.items.iter().all(|i| i.exists) => return None,
+        Ok(m) => m,
+    };
+    let fresh: Vec<std::path::PathBuf> = m.items.iter().filter(|i| !i.exists).map(|i| i.source.clone()).collect();
+    let chosen = signal(fresh.clone());
+    let mut c = card().test_id("claude-memory").child(heading("Claude Code memory")).child(muted(format!(
+        "{} of the {} memories in {} are not in the vaults yet. They come in as drafts for you to approve.",
+        fresh.len(),
+        m.items.len(),
+        m.dir.display()
+    )));
+    for item in &m.items {
+        let stem = item.source.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        let mut row = view().test_id(&format!("memory-{stem}")).flex_row().items_center().gap_3().py_1();
+        row = if item.exists {
+            row.child(view().w(px(28.0))).child(view().flex_1().child(text(item.title.clone()).text_sm()))
+                .child(muted("already imported"))
+        } else {
+            let source = item.source.clone();
+            let on = {
+                let source = source.clone();
+                move || chosen.with(|c| c.contains(&source))
+            };
+            row.child(
+                nsh_base::button()
+                    .w(px(28.0))
+                    .on_press(move || {
+                        let source = source.clone();
+                        chosen.update(|c| if c.contains(&source) { c.retain(|s| s != &source) } else { c.push(source) })
+                    })
+                    .child(text(move || if on() { "☑" } else { "☐" })),
+            )
+            .child(view().flex_1().child(text(item.title.clone()).text_sm()))
+            .child(muted(item.destination.clone()))
+        };
+        c = c.child(row);
+    }
+    Some(c.child(view().flex_row().pt_2().child(primary("Import selected", move || state::import_claude(chosen.get_untracked())))))
 }

@@ -2,12 +2,14 @@
 //! secret scanning, and reviewing what agents wrote.
 //! `nsh.json` `"root"` names [`App`]. Notes themselves are read and edited in Obsidian.
 
+mod agent_tab;
 mod data;
 mod login_env;
 mod personal_page;
 mod project_page;
 mod review_page;
 mod secrets_tab;
+mod sessions_tab;
 mod settings_tab;
 mod sidebar;
 mod state;

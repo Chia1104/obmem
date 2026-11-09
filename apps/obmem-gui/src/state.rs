@@ -4,7 +4,7 @@
 //! which run obmem's blocking work off the engine thread and write the result back. A global is
 //! per surface, so each test has its own.
 
-use crate::data::{self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, SetupDone, Vault};
+use crate::data::{self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, SetupDone, Vault};
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
@@ -28,6 +28,8 @@ pub(crate) enum Load<T> {
 pub(crate) enum Notice {
     SetUp(SetupDone),
     Audit(AuditDone),
+    /// A title and one line per thing that happened.
+    Lines(String, Vec<String>),
     Done(String),
     Error(String),
 }
@@ -49,6 +51,9 @@ pub(crate) enum Screen {
 pub(crate) enum Tab {
     #[default]
     Overview,
+    /// What an agent is given at session start and for a task.
+    Agent,
+    Sessions,
     Settings,
     Secrets,
 }
@@ -69,6 +74,13 @@ struct Tabs(Tab);
 struct PersonalState(Load<Personal>);
 #[derive(Clone, Default)]
 struct ReviewState(Load<Vec<ReviewGroup>>);
+#[derive(Clone, Default)]
+struct SessionStart(Load<String>);
+/// The task last previewed and what `memory_context` gave for it.
+#[derive(Clone, Default)]
+struct TaskPreview(Option<(String, Load<String>)>);
+#[derive(Clone, Default)]
+struct SessionsState(Load<Sessions>);
 /// The text last scanned and what the scanner found in it.
 #[derive(Clone, Default)]
 struct ScanResult(Option<(String, Vec<Hit>)>);
@@ -103,6 +115,23 @@ pub(crate) fn personal() -> Load<Personal> {
 
 pub(crate) fn review() -> Load<Vec<ReviewGroup>> {
     global::<ReviewState>().with(|v| v.0.clone())
+}
+
+pub(crate) fn session_start() -> Load<String> {
+    global::<SessionStart>().with(|v| v.0.clone())
+}
+
+pub(crate) fn task_preview() -> Option<Load<String>> {
+    global::<TaskPreview>().with(|v| v.0.as_ref().map(|(_, r)| r.clone()))
+}
+
+/// The task last previewed, to seed the box when the tab is drawn again (untracked).
+pub(crate) fn last_task() -> String {
+    global::<TaskPreview>().get_untracked().0.map(|(t, _)| t).unwrap_or_default()
+}
+
+pub(crate) fn sessions() -> Load<Sessions> {
+    global::<SessionsState>().with(|v| v.0.clone())
 }
 
 /// The secrets the last test found; `None` before a test.
@@ -216,6 +245,7 @@ fn select(path: PathBuf) {
         }
         global::<Tabs>().set(Tabs(Tab::Overview));
         global::<ScanResult>().set(ScanResult(None));
+        global::<TaskPreview>().set(TaskPreview(None));
         global::<Shown>().set(Shown(Load::Loading));
     }
     global::<Selected>().set(Selected(Some(path.clone())));
@@ -248,6 +278,48 @@ pub(crate) fn refresh() {
 
 pub(crate) fn show_tab(t: Tab) {
     global::<Tabs>().set(Tabs(t));
+    let Some(path) = selected() else { return };
+    match t {
+        Tab::Agent => {
+            global::<SessionStart>().set(SessionStart(Load::Loading));
+            in_background(move || data::session_start(&path), |r| {
+                global::<SessionStart>().set(SessionStart(r.map_or_else(Load::Failed, Load::Ready)));
+            });
+        }
+        Tab::Sessions => {
+            global::<SessionsState>().set(SessionsState(Load::Loading));
+            in_background(move || data::sessions(&path), |r| {
+                global::<SessionsState>().set(SessionsState(r.map_or_else(Load::Failed, Load::Ready)));
+            });
+        }
+        _ => {}
+    }
+}
+
+/// Shows what `memory_context` gives an agent for `task` in the shown project.
+pub(crate) fn preview_task(task: String) {
+    let Some(path) = selected() else { return };
+    global::<TaskPreview>().set(TaskPreview(Some((task.clone(), Load::Loading))));
+    let wanted = task.clone();
+    in_background(move || data::context_for(&path, &task), move |r| {
+        // A newer preview may have started meanwhile.
+        if last_task() == wanted {
+            global::<TaskPreview>().set(TaskPreview(Some((wanted, r.map_or_else(Load::Failed, Load::Ready)))));
+        }
+    });
+}
+
+/// Imports the chosen Claude Code memory files as drafts.
+pub(crate) fn import_claude(chosen: Vec<PathBuf>) {
+    let Some(path) = selected() else { return };
+    let again = path.clone();
+    in_background(move || data::import_claude(&path, &chosen), move |r| {
+        set_notice(Some(match r {
+            Ok(lines) => Notice::Lines("Claude Code memory imported".into(), lines),
+            Err(e) => Notice::Error(e),
+        }));
+        reload(again);
+    });
 }
 
 /// Asks for a folder and lists the project it is in.

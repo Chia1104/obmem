@@ -6,7 +6,8 @@ obmem's desktop control panel for macOS and Windows, built with Native Shell (NS
 
 - `data.rs`: everything the window reads or changes, through obmem-core and obmem-agents. All of it blocks.
 - `state.rs`: the window's signals and the actions that change them. Views call actions; actions run `data` on a blocking thread and write the result back.
-- `sidebar.rs`, `project_page.rs` (header, tabs, Overview), `settings_tab.rs`, `secrets_tab.rs`, `review_page.rs`, `personal_page.rs`, `widgets.rs`: views only.
+- `sidebar.rs`, `project_page.rs` (header, tabs, Overview with the Claude Code import), `agent_tab.rs`, `sessions_tab.rs`, `settings_tab.rs`, `secrets_tab.rs`, `review_page.rs`, `personal_page.rs`, `widgets.rs`: views only.
+- The Agent view shows the session-start context and `memory_context` output as plain text, exactly as an agent receives them. Rendering them as Markdown would merge lines and show something no agent sees.
 - `login_env.rs`: on macOS, the PATH from a login shell (see below).
 
 Logic another front end could use belongs in obmem-core or obmem-agents, not here.
@@ -26,7 +27,7 @@ Logic another front end could use belongs in obmem-core or obmem-agents, not her
 
 ## Commands
 
-- `cargo test -p obmem-gui`: headless flow tests. They point `OBMEM_CONFIG` at a temp folder, so the real project list and vaults are never touched.
+- `cargo test -p obmem-gui`: headless flow tests, one per file, because each file is its own process and sets the environment for it. They point `OBMEM_CONFIG` (and, for the Claude Code import, `HOME`) at a temp folder, so the real project list, vaults and `~/.claude` are never touched.
 - `cargo run -p obmem-gui`: the window on this machine.
 - `nsh run` / `nsh package --target macos|windows`: run these inside `apps/obmem-gui`. Output goes to `.nsh/` under the current directory, and runner builds use `apps/obmem-gui/target` (several GB).
 - The nsh CLI builds against NSH crates of its own version. Upgrade it together with the `nsh-*` versions in the root `Cargo.toml`. NSH needs the latest stable Rust.

@@ -104,7 +104,9 @@ For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks t
 
 `apps/obmem-gui` is a control panel for macOS and Windows:
 - **Projects:** every project obmem has seen (each agent session records its project), and adding one by hand.
-- **Overview:** each project's health, and setting up agents with one click.
+- **Overview:** each project's health, setting up agents with one click, and importing the project's Claude Code memory (pick which).
+- **Agent view:** what the session-start hook gives an agent, and what `memory_context` returns for a task you type.
+- **Sessions:** the project's session logs, newest first.
 - **Settings:** `.obmem.toml`, and whether Codex runs obmem's tools without asking.
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
 - **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.

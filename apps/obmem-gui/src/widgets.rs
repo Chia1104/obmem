@@ -135,6 +135,13 @@ pub(crate) fn notice_area() -> AnyElement {
             let body = match n {
                 Notice::Error(e) => card().child(check(Level::Error, "That did not work", e)),
                 Notice::Done(msg) => card().child(check(Level::Ok, msg, "")),
+                Notice::Lines(title, lines) => {
+                    let mut c = card().child(check(Level::Ok, title, ""));
+                    for l in lines {
+                        c = c.child(muted(l));
+                    }
+                    c
+                }
                 Notice::Audit(done) => {
                     let mut c = card().child(check(Level::Ok, done.summary, ""));
                     for n in done.notes {

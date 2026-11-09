@@ -10,7 +10,7 @@ use obmem_core::status::{self, Status};
 use obmem_core::audit::{AuditOptions, Severity};
 use obmem_core::note::Scope;
 use obmem_core::store::{NoteRef, Store, Verdict};
-use obmem_core::{init, obsidian, projects, review};
+use obmem_core::{import, init, obsidian, projects, review, sessions};
 use std::path::{Path, PathBuf};
 
 /// A project in the sidebar.
@@ -35,6 +35,8 @@ pub struct Detail {
     pub codex_auto_approve: Result<Option<bool>, String>,
     /// The project vault's allowlist (fingerprints only count there).
     pub allowlist: Result<Allowlist, String>,
+    /// Claude Code's memory for this project, to import.
+    pub claude_memory: Result<ClaudeMemory, String>,
 }
 
 /// The user's own settings and their personal vault's allowlist.
@@ -123,6 +125,7 @@ pub fn detail(path: &Path) -> Result<Detail, String> {
         settings: settings::read_project(root).map_err(text),
         codex_auto_approve: setup::codex_auto_approve(&cfg).map_err(text),
         allowlist: allowlist::read(&cfg.project_vault).map_err(text),
+        claude_memory: claude_memory(&store, root),
     })
 }
 
@@ -282,4 +285,84 @@ pub fn run_audit(root: &Path) -> Result<AuditDone, String> {
         ));
     }
     Ok(AuditDone { summary, notes: report.notices })
+}
+
+// --- What agents see, session logs, importing Claude Code memory -------------------------------
+
+/// The context the session-start hook gives an agent in this project.
+pub fn session_start(root: &Path) -> Result<String, String> {
+    store_at(root)?.session_context(6000).map_err(text)
+}
+
+/// What `memory_context` returns for a task in this project.
+pub fn context_for(root: &Path, task: &str) -> Result<String, String> {
+    obmem_core::context::context(&mut store_at(root)?, task, 8, 5000).map_err(text)
+}
+
+/// The project's session logs, newest first, and the personal vault's id to open them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sessions {
+    pub logs: Vec<sessions::SessionLog>,
+    pub vault_id: Option<String>,
+}
+
+pub fn sessions(root: &Path) -> Result<Sessions, String> {
+    let cfg = Config::load(Some(root)).map_err(text)?;
+    Ok(Sessions {
+        logs: sessions::logs(&cfg, 60).map_err(text)?,
+        vault_id: obsidian::vault_id(&cfg.global_vault).ok().flatten(),
+    })
+}
+
+/// Claude Code's memory for this project, as `obmem import-claude` would bring it in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClaudeMemory {
+    pub dir: PathBuf,
+    pub items: Vec<ImportItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportItem {
+    pub source: PathBuf,
+    pub title: String,
+    /// Where it goes: `project/fact`, `global/feedback`, ...
+    pub destination: String,
+    /// A note with its name is already there, so importing skips it.
+    pub exists: bool,
+}
+
+fn claude_memory(store: &Store, root: &Path) -> Result<ClaudeMemory, String> {
+    let dir = import::default_dir(root);
+    if !dir.is_dir() {
+        return Ok(ClaudeMemory { dir, items: vec![] });
+    }
+    let items = import::plan(&dir)
+        .map_err(text)?
+        .into_iter()
+        .map(|p| ImportItem {
+            exists: import::target(store, &p).exists(),
+            destination: format!("{}/{}", p.scope.as_str(), p.note_type.as_str()),
+            title: p.title,
+            source: p.source,
+        })
+        .collect();
+    Ok(ClaudeMemory { dir, items })
+}
+
+/// Imports the chosen memory files as drafts. Returns what happened, one line per file.
+pub fn import_claude(root: &Path, chosen: &[PathBuf]) -> Result<Vec<String>, String> {
+    let mut store = store_at(root)?;
+    let dir = import::default_dir(&store.config().project_root);
+    let items = import::plan(&dir).map_err(text)?.into_iter().filter(|p| chosen.contains(&p.source)).collect();
+    Ok(import::run(&mut store, items)
+        .map_err(text)?
+        .into_iter()
+        .map(|(src, r)| {
+            let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            match r {
+                import::ImportResult::Imported(p) => format!("Imported {name} as {p}"),
+                import::ImportResult::Skipped(why) => format!("Skipped {name}: {why}"),
+            }
+        })
+        .collect())
 }

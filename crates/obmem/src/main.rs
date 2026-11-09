@@ -138,6 +138,14 @@ enum SyncCmd {
     Setup,
     /// List the snapshots in the bucket.
     List,
+    /// Remove old snapshots and the content only they needed. Kept: everything from the last 7
+    /// days, the newest of each day for 30 days, of each week for a year, and the latest. Runs on
+    /// its own once a day after a sync.
+    Prune {
+        /// Only report what would be removed.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Restore a snapshot into an empty folder. Default: the latest snapshot, into the personal
     /// vault, which must then be empty or missing (a new device).
     Restore {
@@ -506,6 +514,21 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
                 let m = sync::load_snapshot(&remote, &key, seq)?;
                 println!("{seq:>6}  {}  {:<20} {} files", m.created, m.device, m.files.len());
             }
+        }
+        SyncCmd::Prune { dry_run } => {
+            let (creds, key) = sync::keychain::load(&cfg)?;
+            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let r = sync::prune(&remote, &key, chrono::Utc::now(), *dry_run)?;
+            let verb = if *dry_run { "would remove" } else { "removed" };
+            let list: Vec<String> = r.deleted_snapshots.iter().map(u64::to_string).collect();
+            println!(
+                "{verb} {} snapshots ({}) and {} unused blobs, {:.1} MB; {} snapshots kept",
+                list.len(),
+                if list.is_empty() { "none".into() } else { list.join(", ") },
+                r.deleted_blobs,
+                r.freed_bytes as f64 / 1_000_000.0,
+                r.kept
+            );
         }
         SyncCmd::Restore { snapshot, to } => {
             let (creds, key) = sync::keychain::load(&cfg)?;

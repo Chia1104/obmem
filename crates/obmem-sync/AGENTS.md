@@ -7,7 +7,7 @@ Two-way sync and backup of the personal (global) vault through an S3-compatible 
 Under `[sync] prefix` (default `obmem`):
 - `key.age`: the vault key (an age X25519 identity), encrypted with the user's passphrase (age scrypt). There is no recovery key: a forgotten passphrase means the bucket cannot be read. Changing the passphrase only rewraps this file.
 - `snapshots/<seq:012>.age`: a `Manifest` (JSON, encrypted to the vault key) mapping each portable file name to its blob id and size, plus the device and time. Every sync that changes something writes one, so every snapshot is a restore point.
-- `blobs/<id[..2]>/<id>.age`: file content, encrypted. `id` is an HMAC-SHA256 of the plaintext, using a MAC key derived from the identity. Blobs are written once and never change.
+- `blobs/<id[..2]>/<id>.age`: file content, encrypted. `id` is an HMAC-SHA256 of the plaintext, using a MAC key derived from the identity. A blob's content never changes, because its name is a hash of that content.
 
 ## Sync (`sync.rs`)
 
@@ -24,9 +24,16 @@ Under `[sync] prefix` (default `obmem`):
 - Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `BACKGROUND_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records. At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
 - `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
 
+## Prune (`prune.rs`)
+
+- Kept: the latest snapshot; every snapshot of the last 7 days; the newest of each day for 30 days; the newest of each ISO week for a year. Age is the object's time in the listing, so choosing needs no decryption.
+- Every kept snapshot is read before anything is deleted, and one that cannot be read stops the prune. A blob is deleted only when no kept snapshot references it and it is older than `BLOB_GRACE` (24 h). A sync running elsewhere either reuses the latest snapshot's blobs, which are kept, or uploads them and so makes them fresh. Objects under `blobs/` whose name this crate did not write are left alone.
+- `run` prunes after a successful sync at most once a day per device (a `.pruned` marker next to the state). A failed prune does not fail the sync; it shows in the status. Two devices pruning at once only delete the same objects twice.
+
 ## Invariants
 
-- Every write to the bucket is create-only (`PutMode::Create`). Nothing in the bucket is overwritten, so no device can destroy an earlier snapshot. Removing old snapshots and unreferenced blobs (retention) is the only way objects should ever disappear.
+- Snapshots and `key.age` are written create-only (`PutMode::Create`), so no device can overwrite a snapshot or the key. Blobs are written with a plain put, because rewriting a blob stores the same content again. Every blob a new snapshot needs beyond the latest snapshot's is uploaded, even when the bucket already has it, and that renews the object's time (see Prune).
+- `prune` (`prune.rs`) is the only code that deletes objects.
 - The manifest records its own `seq`. `load_snapshot` rejects a manifest stored under a different number.
 - Names in a manifest are vault-relative, `/`-separated and NFC. `files::check_portable` rejects what Windows cannot hold: reserved characters and device names, trailing dots and spaces, `..`. A scan skips such files and reports them. Restore checks every name, and names that collide by case, before it writes anything, because the names come from the bucket. A sync refuses a result with case collisions.
 - Downloaded content is checked against its HMAC and written through `obmem_core::store::atomic_write_bytes`. Restore writes only into a missing or empty folder.

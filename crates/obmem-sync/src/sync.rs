@@ -8,6 +8,9 @@
 //!   `sync-conflict` rule reports until a person merges and deletes it. A deletion on one side
 //!   and an edit on the other keep the edit.
 //!
+//! Blobs the latest snapshot lacks are uploaded even when the bucket already has them: an
+//! unreferenced blob may be old enough for a prune to collect at any moment (see `prune`).
+//!
 //! The merged result becomes a new snapshot before anything changes locally. If another device
 //! took that snapshot number first, nothing local has changed yet and the sync starts over on
 //! top of the newer snapshot. A local file that changes while the sync runs is left alone and
@@ -188,7 +191,7 @@ fn attempt(
         if key.blob_id(&content) != *blob {
             return Ok(None);
         }
-        remote.create(&blob_key(blob), key.encrypt(&content)?)?;
+        remote.put(&blob_key(blob), key.encrypt(&content)?)?;
     }
 
     let mut report = SyncReport { skipped: scan.skipped, ..Default::default() };

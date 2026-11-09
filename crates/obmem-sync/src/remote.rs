@@ -15,6 +15,15 @@ pub struct Credentials {
     pub secret_access_key: String,
 }
 
+/// An object as a listing shows it.
+#[derive(Debug, Clone)]
+pub struct Object {
+    pub key: String,
+    /// When it was last written.
+    pub modified: chrono::DateTime<chrono::Utc>,
+    pub size: u64,
+}
+
 pub struct Remote {
     store: Arc<dyn ObjectStore>,
     rt: tokio::runtime::Runtime,
@@ -68,13 +77,45 @@ impl Remote {
             .with_context(|| format!("writing {key} to the bucket"))
     }
 
+    /// Write, replacing what is there. Only for blobs: their name is a hash of their content, so a
+    /// rewrite stores the same content again, and it renews the object's time, which keeps a
+    /// prune running elsewhere from collecting a blob this sync is about to reference.
+    pub fn put(&self, key: &str, bytes: Vec<u8>) -> Result<()> {
+        self.rt
+            .block_on(self.store.put(&Path::from(key), PutPayload::from(bytes)))
+            .map(|_| ())
+            .with_context(|| format!("writing {key} to the bucket"))
+    }
+
+    /// Remove an object; one already gone is fine.
+    pub fn delete(&self, key: &str) -> Result<()> {
+        self.rt
+            .block_on(async {
+                match self.store.delete(&Path::from(key)).await {
+                    Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+                    Err(e) => Err(e),
+                }
+            })
+            .with_context(|| format!("deleting {key} from the bucket"))
+    }
+
     /// The keys under `dir` (a folder name without the trailing slash).
     pub fn list(&self, dir: &str) -> Result<Vec<String>> {
+        Ok(self.list_meta(dir)?.into_iter().map(|o| o.key).collect())
+    }
+
+    /// The objects under `dir`, with their time and size.
+    pub fn list_meta(&self, dir: &str) -> Result<Vec<Object>> {
         use futures::TryStreamExt;
         self.rt
             .block_on(async {
                 let items: Vec<_> = self.store.list(Some(&Path::from(dir))).try_collect().await?;
-                Ok::<_, object_store::Error>(items.into_iter().map(|m| m.location.to_string()).collect())
+                Ok::<_, object_store::Error>(
+                    items
+                        .into_iter()
+                        .map(|m| Object { key: m.location.to_string(), modified: m.last_modified, size: m.size })
+                        .collect(),
+                )
             })
             .with_context(|| format!("listing {dir}/ in the bucket"))
     }

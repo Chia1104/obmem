@@ -62,6 +62,38 @@ impl Verdict {
     }
 }
 
+/// How a person's action names a note.
+#[derive(Debug, Clone, Copy)]
+pub enum NoteRef<'a> {
+    /// An id, title or vault-relative path, in either vault, as people type them (CLI, MCP).
+    Key(&'a str),
+    /// Exactly this vault-relative path in this vault. Use it when the name comes from a note's
+    /// own content (a finding's `target`): a vault may come from an untrusted clone, and a key
+    /// would let it point the action at a note elsewhere, in the personal vault say.
+    At { scope: Scope, rel: &'a str },
+}
+
+impl<'a> From<&'a str> for NoteRef<'a> {
+    fn from(key: &'a str) -> Self {
+        NoteRef::Key(key)
+    }
+}
+
+impl<'a> From<&'a String> for NoteRef<'a> {
+    fn from(key: &'a String) -> Self {
+        NoteRef::Key(key)
+    }
+}
+
+impl std::fmt::Display for NoteRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NoteRef::Key(key) => f.write_str(key),
+            NoteRef::At { scope, rel } => write!(f, "{}:{rel}", scope.as_str()),
+        }
+    }
+}
+
 pub enum WriteOutcome {
     Written { id: String, path: PathBuf, created: bool, redactions: Vec<SecretHit>, warnings: Vec<String> },
     Duplicate { candidates: Vec<(String, String, f64)> },
@@ -235,6 +267,20 @@ impl Store {
     }
 
     /// Resolve a key that a write will act on: it must match exactly one note.
+    /// The note a [`NoteRef`] names: (absolute path, scope).
+    fn locate(&self, note: NoteRef<'_>) -> Result<(String, String)> {
+        match note {
+            NoteRef::Key(key) => self.resolve_one(key),
+            NoteRef::At { scope, rel } => {
+                let m = self
+                    .index
+                    .by_rel(scope.as_str(), rel)
+                    .ok_or_else(|| anyhow!("no note at {}:{rel}", scope.as_str()))?;
+                Ok((m.path.to_string_lossy().into_owned(), m.scope.to_string()))
+            }
+        }
+    }
+
     fn resolve_one(&self, key: &str) -> Result<(String, String)> {
         let mut m = self.index.resolve(key)?;
         match m.len() {
@@ -480,7 +526,7 @@ impl Store {
 
     /// Set a finding's status and append a history line. `human` unlocks rejecting and
     /// resolving human-authored findings (CLI); agents (MCP) get neither.
-    pub fn resolve_finding(&mut self, key: &str, verdict: Verdict, comment: Option<&str>, by: &str, human: bool) -> Result<String> {
+    pub fn resolve_finding<'a>(&mut self, note: impl Into<NoteRef<'a>>, verdict: Verdict, comment: Option<&str>, by: &str, human: bool) -> Result<String> {
         self.sync()?;
         if verdict == Verdict::Rejected && !human {
             bail!(
@@ -489,7 +535,10 @@ impl Store {
                  `obmem resolve <id> rejected`."
             );
         }
-        let (path, scope) = self.resolve_one(key)?;
+        let note = note.into();
+        let key = note.to_string();
+        let key = key.as_str();
+        let (path, scope) = self.locate(note)?;
         let mut note = Note::parse(&std::fs::read_to_string(&path)?)?;
         if note.fm.note_type.as_deref() != Some("finding") {
             bail!("'{key}' is not a finding (type: {})", note.fm.note_type.as_deref().unwrap_or("-"));
@@ -527,9 +576,12 @@ impl Store {
     /// Record that a note was checked against the current code: `verified_commit` = HEAD,
     /// `verified_at` = today. Clears code-drift and stale findings on the next audit.
     /// Agents may verify only agent-authored notes; the CLI (`human`) may verify any.
-    pub fn verify(&mut self, key: &str, by: &str, human: bool) -> Result<String> {
+    pub fn verify<'a>(&mut self, note: impl Into<NoteRef<'a>>, by: &str, human: bool) -> Result<String> {
         self.sync()?;
-        let (path, scope) = self.resolve_one(key)?;
+        let note = note.into();
+        let key = note.to_string();
+        let key = key.as_str();
+        let (path, scope) = self.locate(note)?;
         let root = if scope == "project" { self.cfg.project_vault.clone() } else { self.cfg.global_vault.clone() };
         let mut note = Note::parse(&std::fs::read_to_string(&path)?)?;
         if note.fm.note_type.as_deref() == Some("finding") {
@@ -569,9 +621,12 @@ impl Store {
 
     /// A person accepts an agent's draft: `draft` → `active`. For people only (CLI, GUI); the MCP
     /// server does not offer it, because an agent must not promote its own notes.
-    pub fn approve(&mut self, key: &str, by: &str) -> Result<String> {
+    pub fn approve<'a>(&mut self, note: impl Into<NoteRef<'a>>, by: &str) -> Result<String> {
         self.sync()?;
-        let (path, scope) = self.resolve_one(key)?;
+        let note = note.into();
+        let key = note.to_string();
+        let key = key.as_str();
+        let (path, scope) = self.locate(note)?;
         let root = if scope == "project" { self.cfg.project_vault.clone() } else { self.cfg.global_vault.clone() };
         let mut note = Note::parse(&std::fs::read_to_string(&path)?)?;
         if note.fm.note_type.as_deref() == Some("finding") {
@@ -856,6 +911,15 @@ mod tests {
 
         let err = store.approve(&id, "human:test").unwrap_err().to_string();
         assert!(err.contains("not a draft"), "{err}");
+
+        // An exact reference stays in its vault: a personal note's path does not reach it as a
+        // project path, while a key (as people type it) still finds it in either vault.
+        let only_personal = WriteRequest { title: "Only in the personal vault".into(), ..req(Scope::Global) };
+        let Ok(WriteOutcome::Written { path: personal, .. }) = store.write(only_personal) else { panic!("write") };
+        let rel = personal.strip_prefix(dir.join("global")).unwrap().to_string_lossy().into_owned();
+        let err = store.approve(NoteRef::At { scope: Scope::Project, rel: &rel }, "human:test").unwrap_err().to_string();
+        assert!(err.contains("no note at project:"), "{err}");
+        store.approve(NoteRef::At { scope: Scope::Global, rel: &rel }, "human:test").unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

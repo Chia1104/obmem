@@ -10,6 +10,7 @@ use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
 use obmem_core::allowlist::Kind;
 use obmem_core::settings::{GlobalSettings, ProjectSettings};
+use obmem_core::note::Scope;
 use obmem_core::store::Verdict;
 use std::path::PathBuf;
 
@@ -431,16 +432,17 @@ fn review_action(work: impl FnOnce() -> Result<String, String> + Send + 'static)
     });
 }
 
-pub(crate) fn approve(root: PathBuf, rel: String) {
-    review_action(move || data::approve(&root, &rel));
+pub(crate) fn approve(root: PathBuf, scope: Scope, rel: String) {
+    review_action(move || data::approve(&root, scope, &rel));
 }
 
-pub(crate) fn resolve(root: PathBuf, rel: String, verdict: Verdict) {
-    review_action(move || data::resolve(&root, &rel, verdict));
+pub(crate) fn resolve(root: PathBuf, scope: Scope, rel: String, verdict: Verdict) {
+    review_action(move || data::resolve(&root, scope, &rel, verdict));
 }
 
-pub(crate) fn verify(root: PathBuf, rel: String) {
-    review_action(move || data::verify(&root, &rel));
+/// Verifies a note in `scope`'s vault: for a finding, the vault the finding is in.
+pub(crate) fn verify(root: PathBuf, scope: Scope, rel: String) {
+    review_action(move || data::verify(&root, scope, &rel));
 }
 
 pub(crate) fn run_audit(root: PathBuf) {

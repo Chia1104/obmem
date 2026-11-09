@@ -8,7 +8,8 @@ use obmem_core::config::{self, Config};
 use obmem_core::settings::{self, GlobalSettings, ProjectSettings};
 use obmem_core::status::{self, Status};
 use obmem_core::audit::{AuditOptions, Severity};
-use obmem_core::store::{Store, Verdict};
+use obmem_core::note::Scope;
+use obmem_core::store::{NoteRef, Store, Verdict};
 use obmem_core::{init, obsidian, projects, review};
 use std::path::{Path, PathBuf};
 
@@ -239,17 +240,17 @@ fn store_at(root: &Path) -> Result<Store, String> {
 
 const BY: &str = "human (gui)";
 
-pub fn approve(root: &Path, rel: &str) -> Result<String, String> {
-    store_at(root)?.approve(rel, BY).map_err(text)
+pub fn approve(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
+    store_at(root)?.approve(NoteRef::At { scope, rel }, BY).map_err(text)
 }
 
-pub fn resolve(root: &Path, rel: &str, verdict: Verdict) -> Result<String, String> {
-    store_at(root)?.resolve_finding(rel, verdict, None, BY, true).map_err(text)
+pub fn resolve(root: &Path, scope: Scope, rel: &str, verdict: Verdict) -> Result<String, String> {
+    store_at(root)?.resolve_finding(NoteRef::At { scope, rel }, verdict, None, BY, true).map_err(text)
 }
 
 /// Records that the note was re-checked against the current code.
-pub fn verify(root: &Path, rel: &str) -> Result<String, String> {
-    store_at(root)?.verify(rel, BY, true).map_err(text)
+pub fn verify(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
+    store_at(root)?.verify(NoteRef::At { scope, rel }, BY, true).map_err(text)
 }
 
 /// What an audit run reported.

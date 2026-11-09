@@ -28,6 +28,20 @@ fn write(store: &mut Store, title: &str, ty: NoteType, scope: Scope) -> String {
     }
 }
 
+fn find(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            if let Some(found) = find(&p, name) {
+                return Some(found);
+            }
+        } else if p.file_name().is_some_and(|n| n == name) {
+            return Some(p);
+        }
+    }
+    None
+}
+
 fn status(path: &std::path::Path) -> String {
     Note::parse(&std::fs::read_to_string(path).unwrap()).unwrap().fm.status.unwrap_or_default()
 }
@@ -52,6 +66,20 @@ fn drafts_and_findings_are_decided_on() {
     )
     .unwrap();
 
+    // A finding in the project vault (which may come from a clone) that names a note in the
+    // personal vault as its target.
+    let personal = store.vault_for(Scope::Global).to_path_buf();
+    let mine = find(&personal, "prefer-short-answers.md").expect("the personal draft");
+    let mine_rel = mine.strip_prefix(&personal).unwrap().to_string_lossy().into_owned();
+    std::fs::write(
+        cfg.project_vault.join("Findings/planted.md"),
+        format!(
+            "---\ntype: finding\ntitle: planted\nstatus: open\nauthor: agent:audit\nrule: stale\n\
+             severity: warn\ntarget: {mine_rel}\n---\n# planted\n\nPoints elsewhere.\n"
+        ),
+    )
+    .unwrap();
+
     let mut app = start();
     app.wait_for_within("id:screen-review", SLOW).unwrap();
     app.press("id:screen-review >> role:button").unwrap();
@@ -70,6 +98,11 @@ fn drafts_and_findings_are_decided_on() {
     let fact = Note::parse(&std::fs::read_to_string(cfg.project_vault.join(format!("Knowledge/{old}.md"))).unwrap()).unwrap();
     assert!(fact.fm.extra.contains_key("verified_at"));
 
+    app.press("id:item-planted >> role:button[Verify note]").unwrap();
+    app.wait_for_within(&format!("text:no note at project:{mine_rel}"), SLOW).unwrap();
+    let theirs = Note::parse(&std::fs::read_to_string(&mine).unwrap()).unwrap();
+    assert!(!theirs.fm.extra.contains_key("verified_at"), "the personal note was not touched");
+
     app.press("id:item-audit-stale-old >> role:button[Reject…]").unwrap();
     app.press("id:item-audit-stale-old >> role:button[Reject]").unwrap();
     app.wait_for_gone("id:item-audit-stale-old", SLOW).unwrap();
@@ -80,7 +113,7 @@ fn drafts_and_findings_are_decided_on() {
     app.press("id:review-review-repo >> role:button[Run audit]").unwrap();
     app.wait_for_within("id:notice", SLOW).unwrap();
     let texts = app.screen().texts().join("\n");
-    assert!(texts.contains("Checked 5 notes: 0 errors, 0 warnings. Findings: 0 new, 0 reopened, 0 closed."), "{texts}");
+    assert!(texts.lines().any(|l| l.starts_with("Checked ") && l.ends_with(" notes: 0 errors, 0 warnings. Findings: 0 new, 0 reopened, 0 closed.")), "{texts}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -95,11 +95,20 @@ pub fn state_path(cfg: &SyncConfig, vault: &Path) -> PathBuf {
     h.update(b"\n");
     h.update(vault.to_string_lossy().as_bytes());
     let id = hex::encode(&h.finalize()[..8]);
-    let dir = obmem_core::config::global_config_path().parent().map(Path::to_path_buf).unwrap_or_default();
+    let dir = obmem_core::config::global_config_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     dir.join("sync").join(format!("{id}.json"))
 }
 
-pub fn sync(remote: &Remote, key: &VaultKey, vault: &Path, state_file: &Path, opts: &SyncOptions) -> Result<SyncReport> {
+pub fn sync(
+    remote: &Remote,
+    key: &VaultKey,
+    vault: &Path,
+    state_file: &Path,
+    opts: &SyncOptions,
+) -> Result<SyncReport> {
     if !vault.is_dir() {
         bail!("{} is not a folder", vault.display());
     }
@@ -127,7 +136,8 @@ fn attempt(
     // Both names would be one file on macOS and Windows: keep the first.
     for (kept, dropped) in files::case_collisions(scan.files.iter().map(|(n, _)| n.as_str())) {
         scan.files.retain(|(n, _)| *n != dropped);
-        scan.skipped.push((dropped, format!("differs from {kept} only in case")));
+        scan.skipped
+            .push((dropped, format!("differs from {kept} only in case")));
     }
     let mut local = BTreeMap::new();
     let mut sizes = std::collections::HashMap::new();
@@ -139,9 +149,13 @@ fn attempt(
     }
 
     let latest = snapshot_seqs(remote)?.last().copied();
-    let remote_m = latest.map(|seq| load_snapshot(remote, key, seq)).transpose()?;
-    let remote_files: BTreeMap<String, String> =
-        remote_m.iter().flat_map(|m| m.files.iter().map(|(n, e)| (n.clone(), e.blob.clone()))).collect();
+    let remote_m = latest
+        .map(|seq| load_snapshot(remote, key, seq))
+        .transpose()?;
+    let remote_files: BTreeMap<String, String> = remote_m
+        .iter()
+        .flat_map(|m| m.files.iter().map(|(n, e)| (n.clone(), e.blob.clone())))
+        .collect();
     for e in remote_m.iter().flat_map(|m| m.files.values()) {
         sizes.insert(e.blob.clone(), e.size);
     }
@@ -154,7 +168,8 @@ fn attempt(
         if let Err(why) = files::check_portable(name)
             && excluded.insert(name.clone())
         {
-            scan.skipped.push((name.clone(), format!("from the bucket: {why}")));
+            scan.skipped
+                .push((name.clone(), format!("from the bucket: {why}")));
         }
     }
     let included = |n: &str| files::included(n, opts.community_plugins) && !excluded.contains(n);
@@ -166,9 +181,13 @@ fn attempt(
 
     let other = remote_m.as_ref().map_or("unknown", |m| m.device.as_str());
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let plan = merge(base, &local, &remote_files, included, |n| conflict_name(n, other, &stamp));
+    let plan = merge(base, &local, &remote_files, included, |n| {
+        conflict_name(n, other, &stamp)
+    });
     if let Some((a, b)) = files::case_collisions(plan.result.keys().map(String::as_str)).first() {
-        bail!("{a} and {b} differ only in case, which macOS and Windows cannot keep apart: rename one of them");
+        bail!(
+            "{a} and {b} differ only in case, which macOS and Windows cannot keep apart: rename one of them"
+        );
     }
     if !opts.allow_mass_delete && too_many_deletions(&plan, local.len()) {
         bail!(
@@ -194,7 +213,10 @@ fn attempt(
         remote.put(&blob_key(blob), key.encrypt(&content)?)?;
     }
 
-    let mut report = SyncReport { skipped: scan.skipped, ..Default::default() };
+    let mut report = SyncReport {
+        skipped: scan.skipped,
+        ..Default::default()
+    };
     report.seq = latest.unwrap_or(0);
     if plan.result != remote_files {
         let seq = latest.map_or(1, |s| s + 1);
@@ -203,9 +225,24 @@ fn attempt(
             seq,
             created: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             device: opts.device.to_string(),
-            files: plan.result.iter().map(|(n, b)| (n.clone(), FileEntry { blob: b.clone(), size: sizes[b] })).collect(),
+            files: plan
+                .result
+                .iter()
+                .map(|(n, b)| {
+                    (
+                        n.clone(),
+                        FileEntry {
+                            blob: b.clone(),
+                            size: sizes[b],
+                        },
+                    )
+                })
+                .collect(),
         };
-        if !remote.create(&snapshot_key(seq), key.encrypt(&serde_json::to_vec(&manifest)?)?)? {
+        if !remote.create(
+            &snapshot_key(seq),
+            key.encrypt(&serde_json::to_vec(&manifest)?)?,
+        )? {
             return Ok(None);
         }
         report.seq = seq;
@@ -215,16 +252,28 @@ fn attempt(
     // The bucket now holds the result: bring the vault in line, leaving alone what changed. The
     // base covers only what this device synced: a name it carried along was never here, and
     // must not count as deleted here once this device starts syncing it.
-    let mut new_base: BTreeMap<String, String> =
-        plan.result.iter().filter(|(n, _)| included(n)).map(|(n, b)| (n.clone(), b.clone())).collect();
-    new_base.extend(base.iter().filter(|(n, _)| !included(n)).map(|(n, b)| (n.clone(), b.clone())));
+    let mut new_base: BTreeMap<String, String> = plan
+        .result
+        .iter()
+        .filter(|(n, _)| included(n))
+        .map(|(n, b)| (n.clone(), b.clone()))
+        .collect();
+    new_base.extend(
+        base.iter()
+            .filter(|(n, _)| !included(n))
+            .map(|(n, b)| (n.clone(), b.clone())),
+    );
     for (name, blob) in &plan.download {
         if current_blob(key, vault, name)?.as_ref() != local.get(name) {
             defer(&mut report, &mut new_base, base, name);
             continue;
         }
-        let cipher = remote.get(&blob_key(blob))?.ok_or_else(|| anyhow!("the bucket is missing the content of {name}"))?;
-        let content = key.decrypt(&cipher).with_context(|| format!("decrypting {name}"))?;
+        let cipher = remote
+            .get(&blob_key(blob))?
+            .ok_or_else(|| anyhow!("the bucket is missing the content of {name}"))?;
+        let content = key
+            .decrypt(&cipher)
+            .with_context(|| format!("decrypting {name}"))?;
         if key.blob_id(&content) != *blob {
             bail!("the content of {name} in the bucket does not match its snapshot entry");
         }
@@ -250,13 +299,25 @@ fn attempt(
     report.uploaded = plan.uploaded;
     report.deleted_remote = plan.deleted_remote;
 
-    write_state(state_file, &State { key_check: key.blob_id(b""), seq: report.seq, files: new_base })?;
+    write_state(
+        state_file,
+        &State {
+            key_check: key.blob_id(b""),
+            seq: report.seq,
+            files: new_base,
+        },
+    )?;
     Ok(Some(report))
 }
 
 /// A file that changed while the sync ran keeps its old base, so the next sync sees what both
 /// sides did to it instead of mistaking the bucket's version for one this device already has.
-fn defer(report: &mut SyncReport, new_base: &mut BTreeMap<String, String>, base: &BTreeMap<String, String>, name: &str) {
+fn defer(
+    report: &mut SyncReport,
+    new_base: &mut BTreeMap<String, String>,
+    base: &BTreeMap<String, String>,
+    name: &str,
+) {
     match base.get(name) {
         Some(b) => new_base.insert(name.to_string(), b.clone()),
         None => new_base.remove(name),
@@ -266,7 +327,8 @@ fn defer(report: &mut SyncReport, new_base: &mut BTreeMap<String, String>, base:
 
 /// The file a portable name stands for under `root`.
 pub(crate) fn path_in(root: &Path, name: &str) -> PathBuf {
-    name.split('/').fold(root.to_path_buf(), |p, part| p.join(part))
+    name.split('/')
+        .fold(root.to_path_buf(), |p, part| p.join(part))
 }
 
 /// The blob id of the file at `name` right now, `None` if there is none. A symlink counts as
@@ -302,7 +364,11 @@ fn merge(
     conflict_name: impl Fn(&str) -> String,
 ) -> Plan {
     let mut p = Plan::default();
-    let names: BTreeSet<&String> = base.keys().chain(local.keys()).chain(remote.keys()).collect();
+    let names: BTreeSet<&String> = base
+        .keys()
+        .chain(local.keys())
+        .chain(remote.keys())
+        .collect();
     for name in names {
         let (b, l, r) = (base.get(name), local.get(name), remote.get(name));
         if !included(name) {
@@ -364,14 +430,25 @@ fn merge(
 /// `Global/a.md` → `Global/a.sync-conflict-<device>-<stamp>.md`.
 fn conflict_name(name: &str, device: &str, stamp: &str) -> String {
     let device = obmem_core::note::slugify(device);
-    let device = if device.is_empty() { "device".to_string() } else { device };
+    let device = if device.is_empty() {
+        "device".to_string()
+    } else {
+        device
+    };
     let (dir, file) = name.rsplit_once('/').map_or(("", name), |(d, f)| (d, f));
     let (stem, ext) = match file.rsplit_once('.') {
         Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
         _ => (file, String::new()),
     };
-    let file = format!("{stem}{}{device}-{stamp}{ext}", obmem_core::audit::SYNC_CONFLICT_MARK);
-    if dir.is_empty() { file } else { format!("{dir}/{file}") }
+    let file = format!(
+        "{stem}{}{device}-{stamp}{ext}",
+        obmem_core::audit::SYNC_CONFLICT_MARK
+    );
+    if dir.is_empty() {
+        file
+    } else {
+        format!("{dir}/{file}")
+    }
 }
 
 /// A sync that would delete more than half the vault (and more than 10 files) is far more often
@@ -390,7 +467,9 @@ fn read_state(path: &Path) -> Result<Option<State>> {
 }
 
 fn write_state(path: &Path, state: &State) -> Result<()> {
-    let dir = path.parent().ok_or_else(|| anyhow!("no folder for {}", path.display()))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow!("no folder for {}", path.display()))?;
     std::fs::create_dir_all(dir)?;
     obmem_core::store::atomic_write_bytes(dir, path, &serde_json::to_vec(state)?)
 }
@@ -406,11 +485,15 @@ impl Lock {
     fn acquire(state_file: &Path, wait: std::time::Duration) -> Result<Self> {
         let path = state_file.with_extension("lock");
         if wait.is_zero() {
-            let lock = Self::try_take(&path)?.ok_or_else(|| anyhow!("another obmem sync is running (lock {})", path.display()))?;
+            let lock = Self::try_take(&path)?.ok_or_else(|| {
+                anyhow!("another obmem sync is running (lock {})", path.display())
+            })?;
             lock.mark_start();
             return Ok(lock);
         }
-        let Some(_queued) = Self::try_take(&state_file.with_extension("queued"))? else { return Err(Queued.into()) };
+        let Some(_queued) = Self::try_take(&state_file.with_extension("queued"))? else {
+            return Err(Queued.into());
+        };
         let deadline = std::time::Instant::now() + wait;
         loop {
             let since_last = Self::last_start(&path).and_then(|t| t.elapsed().ok());
@@ -421,7 +504,11 @@ impl Lock {
                 return Ok(lock);
             }
             if std::time::Instant::now() >= deadline {
-                bail!("gave up after {}s: another obmem sync is running or started under a minute ago (lock {})", wait.as_secs(), path.display());
+                bail!(
+                    "gave up after {}s: another obmem sync is running or started under a minute ago (lock {})",
+                    wait.as_secs(),
+                    path.display()
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
@@ -440,7 +527,9 @@ impl Lock {
         match file.try_lock() {
             Ok(()) => Ok(Some(Self(file))),
             Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-            Err(std::fs::TryLockError::Error(e)) => Err(anyhow::Error::from(e).context(format!("locking {}", path.display()))),
+            Err(std::fs::TryLockError::Error(e)) => {
+                Err(anyhow::Error::from(e).context(format!("locking {}", path.display())))
+            }
         }
     }
 
@@ -485,7 +574,12 @@ pub(crate) mod tests {
 
     impl Device<'_> {
         pub fn sync(&self) -> Result<SyncReport> {
-            let opts = SyncOptions { device: self.name, community_plugins: self.plugins, allow_mass_delete: false, wait: Default::default() };
+            let opts = SyncOptions {
+                device: self.name,
+                community_plugins: self.plugins,
+                allow_mass_delete: false,
+                wait: Default::default(),
+            };
             sync(self.remote, &self.key, &self.vault, &self.state, &opts)
         }
     }
@@ -494,7 +588,14 @@ pub(crate) mod tests {
         let (key, _) = unlock_or_create(remote, &pass("pw")).unwrap();
         let dir = tempdir();
         std::fs::create_dir_all(dir.join("vault")).unwrap();
-        Device { remote, key, vault: dir.join("vault"), state: dir.join("state.json"), name, plugins: false }
+        Device {
+            remote,
+            key,
+            vault: dir.join("vault"),
+            state: dir.join("state.json"),
+            name,
+            plugins: false,
+        }
     }
 
     #[test]
@@ -544,7 +645,10 @@ pub(crate) mod tests {
         let r = win.sync().unwrap();
         assert_eq!(r.conflicts.len(), 1, "{r:?}");
         let copy = &r.conflicts[0];
-        assert!(copy.starts_with("Global/a.sync-conflict-mac-") && copy.ends_with(".md"), "{copy}");
+        assert!(
+            copy.starts_with("Global/a.sync-conflict-mac-") && copy.ends_with(".md"),
+            "{copy}"
+        );
         assert_eq!(read(&win.vault, "Global/a.md").as_deref(), Some("win edit"));
         assert_eq!(read(&win.vault, copy).as_deref(), Some("mac edit"));
 
@@ -615,9 +719,15 @@ pub(crate) mod tests {
         win.sync().unwrap();
 
         let m = load_snapshot(&remote, &mac.key, 2).unwrap();
-        assert!(m.files.contains_key(".obsidian/plugins/x/main.js"), "the plugin stays in the bucket");
+        assert!(
+            m.files.contains_key(".obsidian/plugins/x/main.js"),
+            "the plugin stays in the bucket"
+        );
         mac.sync().unwrap();
-        assert_eq!(read(&mac.vault, ".obsidian/plugins/x/main.js").as_deref(), Some("code"));
+        assert_eq!(
+            read(&mac.vault, ".obsidian/plugins/x/main.js").as_deref(),
+            Some("code")
+        );
     }
 
     #[test]
@@ -632,9 +742,15 @@ pub(crate) mod tests {
         win.plugins = true;
         let r = win.sync().unwrap();
         assert!(r.deleted_remote.is_empty(), "{r:?}");
-        assert_eq!(read(&win.vault, ".obsidian/plugins/x/main.js").as_deref(), Some("code"));
+        assert_eq!(
+            read(&win.vault, ".obsidian/plugins/x/main.js").as_deref(),
+            Some("code")
+        );
         mac.sync().unwrap();
-        assert_eq!(read(&mac.vault, ".obsidian/plugins/x/main.js").as_deref(), Some("code"));
+        assert_eq!(
+            read(&mac.vault, ".obsidian/plugins/x/main.js").as_deref(),
+            Some("code")
+        );
     }
 
     #[cfg(unix)]
@@ -666,13 +782,24 @@ pub(crate) mod tests {
         let entry = m.files["Global/a.md"].clone();
         m.files.insert("Global/b:c.md".into(), entry);
         m.seq = 2;
-        remote.create(&snapshot_key(2), mac.key.encrypt(&serde_json::to_vec(&m).unwrap()).unwrap()).unwrap();
+        remote
+            .create(
+                &snapshot_key(2),
+                mac.key.encrypt(&serde_json::to_vec(&m).unwrap()).unwrap(),
+            )
+            .unwrap();
 
         let r = mac.sync().unwrap();
         assert!(r.skipped.iter().any(|(n, _)| n == "Global/b:c.md"), "{r:?}");
         assert!(!r.downloaded.contains(&"Global/b:c.md".to_string()));
         assert!(!mac.vault.join("Global/b:c.md").exists());
-        assert!(load_snapshot(&remote, &mac.key, 2).unwrap().files.contains_key("Global/b:c.md"), "left in the bucket");
+        assert!(
+            load_snapshot(&remote, &mac.key, 2)
+                .unwrap()
+                .files
+                .contains_key("Global/b:c.md"),
+            "left in the bucket"
+        );
     }
 
     #[test]
@@ -688,7 +815,12 @@ pub(crate) mod tests {
         assert!(err.to_string().contains("--allow-deletes"), "{err}");
         assert_eq!(snapshot_seqs(&remote).unwrap(), [1]);
 
-        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: true, wait: Default::default() };
+        let opts = SyncOptions {
+            device: "mac",
+            community_plugins: false,
+            allow_mass_delete: true,
+            wait: Default::default(),
+        };
         let r = sync(&remote, &mac.key, &mac.vault, &mac.state, &opts).unwrap();
         assert_eq!(r.deleted_remote.len(), 20);
     }
@@ -703,7 +835,12 @@ pub(crate) mod tests {
         // The bucket is recreated (new key) while this device still remembers the old one.
         let fresh = remote::in_memory();
         let (key, _) = unlock_or_create(&fresh, &pass("other")).unwrap();
-        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false, wait: Default::default() };
+        let opts = SyncOptions {
+            device: "mac",
+            community_plugins: false,
+            allow_mass_delete: false,
+            wait: Default::default(),
+        };
         let r = sync(&fresh, &key, &mac.vault, &mac.state, &opts).unwrap();
         assert_eq!(r.uploaded, ["Global/a.md"]);
         assert_eq!(read(&mac.vault, "Global/a.md").as_deref(), Some("a"));
@@ -715,20 +852,46 @@ pub(crate) mod tests {
         let mac = device(&remote, "mac");
         let held = Lock::acquire(&mac.state, Default::default()).unwrap();
         let err = mac.sync().unwrap_err();
-        assert!(err.to_string().contains("another obmem sync is running"), "{err}");
+        assert!(
+            err.to_string().contains("another obmem sync is running"),
+            "{err}"
+        );
 
         // Waiting: the first waiter queues, a second one leaves it to the first.
-        let opts = |wait| SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false, wait };
-        let (remote2, key, vault, state) = (&remote, &mac.key, mac.vault.clone(), mac.state.clone());
+        let opts = |wait| SyncOptions {
+            device: "mac",
+            community_plugins: false,
+            allow_mass_delete: false,
+            wait,
+        };
+        let (remote2, key, vault, state) =
+            (&remote, &mac.key, mac.vault.clone(), mac.state.clone());
         // The running sync started long enough ago for a waiter to go right after it.
-        held.0.set_modified(std::time::SystemTime::now() - 2 * MIN_INTERVAL).unwrap();
+        held.0
+            .set_modified(std::time::SystemTime::now() - 2 * MIN_INTERVAL)
+            .unwrap();
         std::thread::scope(|s| {
-            let first = s.spawn(|| sync(remote2, key, &vault, &state, &opts(std::time::Duration::from_secs(20))));
+            let first = s.spawn(|| {
+                sync(
+                    remote2,
+                    key,
+                    &vault,
+                    &state,
+                    &opts(std::time::Duration::from_secs(20)),
+                )
+            });
             while !state.with_extension("queued").exists() {
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
-            let second = sync(remote2, key, &vault, &state, &opts(std::time::Duration::from_secs(20))).unwrap_err();
+            let second = sync(
+                remote2,
+                key,
+                &vault,
+                &state,
+                &opts(std::time::Duration::from_secs(20)),
+            )
+            .unwrap_err();
             assert!(second.downcast_ref::<Queued>().is_some(), "{second}");
             drop(held);
             assert!(first.join().unwrap().is_ok());
@@ -742,7 +905,12 @@ pub(crate) mod tests {
         let remote = remote::in_memory();
         let mac = device(&remote, "mac");
         mac.sync().unwrap(); // just started one
-        let opts = SyncOptions { device: "mac", community_plugins: false, allow_mass_delete: false, wait: std::time::Duration::from_secs(1) };
+        let opts = SyncOptions {
+            device: "mac",
+            community_plugins: false,
+            allow_mass_delete: false,
+            wait: std::time::Duration::from_secs(1),
+        };
         let err = sync(&remote, &mac.key, &mac.vault, &mac.state, &opts).unwrap_err();
         assert!(err.to_string().contains("gave up"), "{err}");
     }
@@ -750,17 +918,53 @@ pub(crate) mod tests {
     #[test]
     fn merge_table() {
         let m = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
-            pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
         };
-        let base = m(&[("same", "1"), ("here", "1"), ("there", "1"), ("both", "1"), ("gone-here", "1"), ("gone-there", "1")]);
-        let local = m(&[("same", "1"), ("here", "2"), ("there", "1"), ("both", "2"), ("gone-there", "1"), ("new", "1")]);
-        let remote = m(&[("same", "1"), ("here", "1"), ("there", "2"), ("both", "3"), ("gone-here", "1")]);
+        let base = m(&[
+            ("same", "1"),
+            ("here", "1"),
+            ("there", "1"),
+            ("both", "1"),
+            ("gone-here", "1"),
+            ("gone-there", "1"),
+        ]);
+        let local = m(&[
+            ("same", "1"),
+            ("here", "2"),
+            ("there", "1"),
+            ("both", "2"),
+            ("gone-there", "1"),
+            ("new", "1"),
+        ]);
+        let remote = m(&[
+            ("same", "1"),
+            ("here", "1"),
+            ("there", "2"),
+            ("both", "3"),
+            ("gone-here", "1"),
+        ]);
         let p = merge(&base, &local, &remote, |_| true, |n| format!("{n}.copy"));
         assert_eq!(
             p.result,
-            m(&[("same", "1"), ("here", "2"), ("there", "2"), ("both", "2"), ("both.copy", "3"), ("new", "1")])
+            m(&[
+                ("same", "1"),
+                ("here", "2"),
+                ("there", "2"),
+                ("both", "2"),
+                ("both.copy", "3"),
+                ("new", "1")
+            ])
         );
-        assert_eq!(p.download, [("both.copy".to_string(), "3".to_string()), ("there".to_string(), "2".to_string())]);
+        assert_eq!(
+            p.download,
+            [
+                ("both.copy".to_string(), "3".to_string()),
+                ("there".to_string(), "2".to_string())
+            ]
+        );
         assert_eq!(p.delete_local, ["gone-there"]);
         assert_eq!(p.deleted_remote, ["gone-here"]);
         assert_eq!(p.uploaded, ["both", "here", "new"]);
@@ -768,8 +972,17 @@ pub(crate) mod tests {
 
     #[test]
     fn conflict_names() {
-        assert_eq!(conflict_name("Global/a.md", "Work PC", "20261109-101500"), "Global/a.sync-conflict-work-pc-20261109-101500.md");
-        assert_eq!(conflict_name("notes", "mac", "t"), "notes.sync-conflict-mac-t");
-        assert_eq!(conflict_name(".obsidian/app.json", "mac", "t"), ".obsidian/app.sync-conflict-mac-t.json");
+        assert_eq!(
+            conflict_name("Global/a.md", "Work PC", "20261109-101500"),
+            "Global/a.sync-conflict-work-pc-20261109-101500.md"
+        );
+        assert_eq!(
+            conflict_name("notes", "mac", "t"),
+            "notes.sync-conflict-mac-t"
+        );
+        assert_eq!(
+            conflict_name(".obsidian/app.json", "mac", "t"),
+            ".obsidian/app.sync-conflict-mac-t.json"
+        );
     }
 }

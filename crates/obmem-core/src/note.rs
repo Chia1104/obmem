@@ -115,7 +115,9 @@ pub struct Frontmatter {
 impl Frontmatter {
     /// Notes without an `agent:*` author are treated as human-owned (read-only for agents).
     pub fn is_agent_authored(&self) -> bool {
-        self.author.as_deref().is_some_and(|a| a.starts_with("agent"))
+        self.author
+            .as_deref()
+            .is_some_and(|a| a.starts_with("agent"))
     }
 }
 
@@ -128,7 +130,10 @@ pub struct Note {
 impl Note {
     pub fn parse(src: &str) -> Result<Self> {
         let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-        if let Some(rest) = src.strip_prefix("---\n").or_else(|| src.strip_prefix("---\r\n")) {
+        if let Some(rest) = src
+            .strip_prefix("---\n")
+            .or_else(|| src.strip_prefix("---\r\n"))
+        {
             // closing fence: a line that is exactly `---`
             let mut offset = 0;
             for line in rest.split_inclusive('\n') {
@@ -140,12 +145,18 @@ impl Note {
                     } else {
                         yaml_serde::from_str(yaml).context("invalid YAML frontmatter")?
                     };
-                    return Ok(Note { fm, body: body.to_string() });
+                    return Ok(Note {
+                        fm,
+                        body: body.to_string(),
+                    });
                 }
                 offset += line.len();
             }
         }
-        Ok(Note { fm: Frontmatter::default(), body: src.to_string() })
+        Ok(Note {
+            fm: Frontmatter::default(),
+            body: src.to_string(),
+        })
     }
 
     pub fn render(&self) -> Result<String> {
@@ -188,14 +199,21 @@ pub fn slugify(title: &str) -> String {
 
 /// Character trigrams of a title (lowercased, letters/digits only).
 pub fn title_grams(s: &str) -> std::collections::HashSet<String> {
-    let chars: Vec<char> = s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+    let chars: Vec<char> = s
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
     if chars.len() < 3 {
         return [chars.iter().collect::<String>()].into_iter().collect();
     }
     chars.windows(3).map(|w| w.iter().collect()).collect()
 }
 
-pub fn jaccard(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f64 {
+pub fn jaccard(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f64 {
     let inter = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
     if union == 0.0 { 0.0 } else { inter / union }

@@ -10,7 +10,9 @@ const CLOSE: &str = "label:Close the project list";
 
 #[test]
 fn the_sidebar_collapses_resizes_and_becomes_a_drawer_when_narrow() {
-    let Some(dir) = sandbox("sidebar") else { return };
+    let Some(dir) = sandbox("sidebar") else {
+        return;
+    };
     project(&dir, "demo-repo");
 
     let mut app = start();
@@ -24,14 +26,19 @@ fn the_sidebar_collapses_resizes_and_becomes_a_drawer_when_narrow() {
     app.wait_for_within(COLLAPSE, SLOW).unwrap();
 
     // Dragging its edge far to the left collapses it too.
-    app.drag("label:Sidebar width", Point::new(Points(-200.0), Points(0.0))).unwrap();
+    app.drag(
+        "label:Sidebar width",
+        Point::new(Points(-200.0), Points(0.0)),
+    )
+    .unwrap();
     app.wait_for_within(EXPAND, SLOW).unwrap();
     app.press(EXPAND).unwrap();
     app.wait_for_within(COLLAPSE, SLOW).unwrap();
 
     // A narrow window keeps the rail; its button opens the list over the page, and choosing a
     // project closes it.
-    app.set_viewport(Size::new(Points(600.0), Points(800.0))).unwrap();
+    app.set_viewport(Size::new(Points(600.0), Points(800.0)))
+        .unwrap();
     app.wait_for_within(EXPAND, SLOW).unwrap();
     app.press(EXPAND).unwrap();
     app.wait_for_within(CLOSE, SLOW).unwrap();

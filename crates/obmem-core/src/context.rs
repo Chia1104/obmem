@@ -21,13 +21,15 @@ use anyhow::Result;
 
 const MAX_TERMS: usize = 16;
 const EN_STOP: &[&str] = &[
-    "the", "and", "for", "with", "that", "this", "from", "into", "how", "what", "why", "when", "where", "can",
-    "should", "would", "could", "need", "want", "make", "add", "fix", "use", "using", "please", "about", "some",
+    "the", "and", "for", "with", "that", "this", "from", "into", "how", "what", "why", "when",
+    "where", "can", "should", "would", "could", "need", "want", "make", "add", "fix", "use",
+    "using", "please", "about", "some",
 ];
 /// Very common bigrams in Chinese task descriptions that say nothing about the subject.
 const ZH_STOP: &[&str] = &[
-    "我們", "這個", "那個", "一個", "可以", "怎麼", "什麼", "如何", "需要", "幫我", "的話", "一下", "是不", "不是",
-    "有沒", "沒有", "現在", "然後", "因為", "所以", "還是", "或是", "能不", "不能", "直接", "看看", "要怎",
+    "我們", "這個", "那個", "一個", "可以", "怎麼", "什麼", "如何", "需要", "幫我", "的話", "一下",
+    "是不", "不是", "有沒", "沒有", "現在", "然後", "因為", "所以", "還是", "或是", "能不", "不能",
+    "直接", "看看", "要怎",
 ];
 
 /// Pronouns and particles: a bigram containing one is almost never a topic word.
@@ -119,12 +121,20 @@ pub fn task_terms(task: &str) -> Vec<String> {
     for (k, units) in runs {
         match k {
             Class::Word => {
-                let w = units.concat().trim_matches(|c| c == '-' || c == '_').to_lowercase();
-                if w.chars().filter(|c| !is_combining(*c)).count() >= 3 && !EN_STOP.contains(&w.as_str()) {
+                let w = units
+                    .concat()
+                    .trim_matches(|c| c == '-' || c == '_')
+                    .to_lowercase();
+                if w.chars().filter(|c| !is_combining(*c)).count() >= 3
+                    && !EN_STOP.contains(&w.as_str())
+                {
                     push(w);
                 }
             }
-            Class::Han => bigrams(&units).into_iter().filter(|b| keep_bigram(b)).for_each(&mut push),
+            Class::Han => bigrams(&units)
+                .into_iter()
+                .filter(|b| keep_bigram(b))
+                .for_each(&mut push),
             Class::Katakana if units.len() >= 2 => push(units.concat()),
             Class::Hangul | Class::Sea => bigrams(&units).into_iter().for_each(&mut push),
             _ => {}
@@ -134,7 +144,12 @@ pub fn task_terms(task: &str) -> Vec<String> {
     // 3. too many: keep the longest (they carry the most meaning), in their original order
     if terms.len() > MAX_TERMS {
         let mut by_len: Vec<(usize, &String)> = terms.iter().enumerate().collect();
-        by_len.sort_by(|a, b| b.1.chars().count().cmp(&a.1.chars().count()).then(a.0.cmp(&b.0)));
+        by_len.sort_by(|a, b| {
+            b.1.chars()
+                .count()
+                .cmp(&a.1.chars().count())
+                .then(a.0.cmp(&b.0))
+        });
         let mut keep: Vec<usize> = by_len.into_iter().take(MAX_TERMS).map(|(i, _)| i).collect();
         keep.sort();
         terms = keep.into_iter().map(|i| terms[i].clone()).collect();
@@ -144,48 +159,99 @@ pub fn task_terms(task: &str) -> Vec<String> {
 
 /// Rank hits by how many distinct terms the note contains (title matches count double).
 fn score(store: &Store, hit: &Hit, terms: &[String]) -> usize {
-    let root = store.vault_for(if hit.scope == "project" { crate::note::Scope::Project } else { crate::note::Scope::Global });
-    let text = std::fs::read_to_string(root.join(&hit.path)).unwrap_or_default().to_lowercase();
+    let root = store.vault_for(if hit.scope == "project" {
+        crate::note::Scope::Project
+    } else {
+        crate::note::Scope::Global
+    });
+    let text = std::fs::read_to_string(root.join(&hit.path))
+        .unwrap_or_default()
+        .to_lowercase();
     let title = hit.title.to_lowercase();
-    terms.iter().map(|t| if title.contains(t.as_str()) { 2 } else { usize::from(text.contains(t.as_str())) }).sum()
+    terms
+        .iter()
+        .map(|t| {
+            if title.contains(t.as_str()) {
+                2
+            } else {
+                usize::from(text.contains(t.as_str()))
+            }
+        })
+        .sum()
 }
 
 pub fn context(store: &mut Store, task: &str, limit: usize, max_chars: usize) -> Result<String> {
     let terms = task_terms(task);
     if terms.is_empty() {
-        return Ok("No searchable terms in the task description; use memory_search with specific words.".into());
+        return Ok(
+            "No searchable terms in the task description; use memory_search with specific words."
+                .into(),
+        );
     }
-    let query = terms.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(" OR ");
+    let query = terms
+        .iter()
+        .map(|t| format!("\"{t}\""))
+        .collect::<Vec<_>>()
+        .join(" OR ");
     let (hits, problems) = store.search(&query, None, None, 40)?;
-    let mut ranked: Vec<(usize, Hit)> = hits.into_iter().map(|h| (score(store, &h, &terms), h)).collect();
+    let mut ranked: Vec<(usize, Hit)> = hits
+        .into_iter()
+        .map(|h| (score(store, &h, &terms), h))
+        .collect();
     ranked.sort_by_key(|a| std::cmp::Reverse(a.0));
     // findings are listed separately below, against the notes they are about
-    let (findings, notes): (Vec<_>, Vec<_>) = ranked.into_iter().partition(|(_, h)| h.note_type == "finding");
+    let (findings, notes): (Vec<_>, Vec<_>) = ranked
+        .into_iter()
+        .partition(|(_, h)| h.note_type == "finding");
 
-    let mut out = format!("Memory relevant to: {}\n(terms: {})\n", task.trim(), terms.join(", "));
+    let mut out = format!(
+        "Memory relevant to: {}\n(terms: {})\n",
+        task.trim(),
+        terms.join(", ")
+    );
     if notes.is_empty() {
         out.push_str("\nNo matching notes.\n");
     }
     for (s, h) in notes.iter().take(limit) {
-        let trust = if h.status == "draft" { ", draft: unreviewed" } else { "" };
-        let line = format!("\n- [[{}]] ({}/{}{trust}, score {s}) {}\n  {}\n", h.id, h.scope, h.note_type, h.title, h.snippet);
+        let trust = if h.status == "draft" {
+            ", draft: unreviewed"
+        } else {
+            ""
+        };
+        let line = format!(
+            "\n- [[{}]] ({}/{}{trust}, score {s}) {}\n  {}\n",
+            h.id, h.scope, h.note_type, h.title, h.snippet
+        );
         if out.chars().count() + line.chars().count() > max_chars {
             out.push_str("\n…(more matches; narrow with memory_search)\n");
             break;
         }
         out.push_str(&line);
     }
-    let shown: Vec<String> = notes.iter().take(limit).map(|(_, h)| format!("{}:{}", h.scope, h.path)).collect();
+    let shown: Vec<String> = notes
+        .iter()
+        .take(limit)
+        .map(|(_, h)| format!("{}:{}", h.scope, h.path))
+        .collect();
     let related: Vec<&Hit> = findings
         .iter()
         .map(|(_, h)| h)
         .filter(|h| h.status == "open" || h.status == "accepted")
         .filter(|h| {
-            let root = store.vault_for(if h.scope == "project" { crate::note::Scope::Project } else { crate::note::Scope::Global });
+            let root = store.vault_for(if h.scope == "project" {
+                crate::note::Scope::Project
+            } else {
+                crate::note::Scope::Global
+            });
             let target = std::fs::read_to_string(root.join(&h.path))
                 .ok()
                 .and_then(|s| Note::parse(&s).ok())
-                .and_then(|n| n.fm.extra.get("target").and_then(|v| v.as_str()).map(|t| format!("{}:{t}", h.scope)));
+                .and_then(|n| {
+                    n.fm.extra
+                        .get("target")
+                        .and_then(|v| v.as_str())
+                        .map(|t| format!("{}:{t}", h.scope))
+                });
             target.is_some_and(|t| shown.contains(&t))
         })
         .collect();
@@ -207,7 +273,10 @@ mod tests {
 
     #[test]
     fn terms_from_mixed_text() {
-        assert_eq!(task_terms("Fix the rotate_token bug in auth"), vec!["rotate_token", "bug", "auth"]);
+        assert_eq!(
+            task_terms("Fix the rotate_token bug in auth"),
+            vec!["rotate_token", "bug", "auth"]
+        );
         assert_eq!(task_terms("幫我修 JWT 輪替"), vec!["jwt", "輪替"]); // 幫我 / 我修 carry no topic
         assert_eq!(task_terms("code-drift 規則"), vec!["code-drift", "規則"]);
         assert_eq!(task_terms("登入流程"), vec!["登入", "入流", "流程"]);
@@ -217,14 +286,32 @@ mod tests {
     #[test]
     fn terms_in_other_scripts() {
         let t = |s: &str| task_terms(s);
-        assert_eq!(t("幫我修改 refresh token 的輪替"), vec!["修改", "refresh", "token", "輪替"]);
+        assert_eq!(
+            t("幫我修改 refresh token 的輪替"),
+            vec!["修改", "refresh", "token", "輪替"]
+        );
         // Katakana loanwords whole, hiragana particles dropped, kanji bigrams
-        assert_eq!(t("トークンのローテーションを変更する"), vec!["トークン", "ローテーション", "変更"]);
-        assert_eq!(t("토큰 교체 방식을 바꾸기"), vec!["토큰", "교체", "방식", "식을", "바꾸", "꾸기"]);
+        assert_eq!(
+            t("トークンのローテーションを変更する"),
+            vec!["トークン", "ローテーション", "変更"]
+        );
+        assert_eq!(
+            t("토큰 교체 방식을 바꾸기"),
+            vec!["토큰", "교체", "방식", "식을", "바꾸", "꾸기"]
+        );
         // accented Latin letters stay inside the word
-        assert_eq!(t("Änderung der Token-Rotation"), vec!["änderung", "der", "token-rotation"]);
-        assert_eq!(t("Modifier la rotation des jetons"), vec!["modifier", "rotation", "des", "jetons"]);
-        assert_eq!(t("изменить ротацию токенов"), vec!["изменить", "ротацию", "токенов"]);
+        assert_eq!(
+            t("Änderung der Token-Rotation"),
+            vec!["änderung", "der", "token-rotation"]
+        );
+        assert_eq!(
+            t("Modifier la rotation des jetons"),
+            vec!["modifier", "rotation", "des", "jetons"]
+        );
+        assert_eq!(
+            t("изменить ротацию токенов"),
+            vec!["изменить", "ротацию", "токенов"]
+        );
         assert_eq!(t("αλλαγή περιστροφής"), vec!["αλλαγή", "περιστροφής"]);
         assert_eq!(t("تغيير تدوير الرمز"), vec!["تغيير", "تدوير", "الرمز"]);
         assert_eq!(t("שינוי סבב אסימונים"), vec!["שינוי", "סבב", "אסימונים"]);
@@ -235,8 +322,14 @@ mod tests {
         // Thai has no spaces: cluster bigrams, every one a real substring of the text
         let thai = "เปลี่ยนการหมุนเวียนโทเค็น";
         let th = t(thai);
-        assert!(!th.is_empty() && th.iter().all(|x| thai.contains(x.as_str())), "{th:?}");
-        assert!(th.iter().all(|x| !x.starts_with(is_sea_mark)), "no term starts with a mark: {th:?}");
+        assert!(
+            !th.is_empty() && th.iter().all(|x| thai.contains(x.as_str())),
+            "{th:?}"
+        );
+        assert!(
+            th.iter().all(|x| !x.starts_with(is_sea_mark)),
+            "no term starts with a mark: {th:?}"
+        );
     }
 
     #[test]
@@ -246,8 +339,14 @@ mod tests {
                     canary deploys, feature flags, rollback";
         let t = task_terms(long);
         assert_eq!(t.len(), MAX_TERMS);
-        assert!(t.contains(&"authentication".to_string()) && !t.contains(&"plus".to_string()), "{t:?}");
+        assert!(
+            t.contains(&"authentication".to_string()) && !t.contains(&"plus".to_string()),
+            "{t:?}"
+        );
         let pos = |w: &str| t.iter().position(|x| x == w).unwrap();
-        assert!(pos("authentication") < pos("middleware"), "original order kept");
+        assert!(
+            pos("authentication") < pos("middleware"),
+            "original order kept"
+        );
     }
 }

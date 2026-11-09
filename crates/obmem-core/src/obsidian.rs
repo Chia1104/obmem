@@ -71,7 +71,9 @@ pub fn registry_path() -> PathBuf {
         return PathBuf::from(p);
     }
     // macOS ~/Library/Application Support, Linux ~/.config, Windows %APPDATA%
-    dirs::config_dir().unwrap_or_else(|| crate::config::home().join(".config")).join("obsidian/obsidian.json")
+    dirs::config_dir()
+        .unwrap_or_else(|| crate::config::home().join(".config"))
+        .join("obsidian/obsidian.json")
 }
 
 #[derive(Deserialize)]
@@ -119,13 +121,17 @@ struct Output {
 /// start it, verified on 1.14.5). Only a failed run counts: a successful search result can
 /// legitimately contain this very sentence (a note quoting the error).
 fn app_missing(o: &Output) -> bool {
-    !o.ok && (o.stderr.contains("unable to find Obsidian") || o.stdout.contains("unable to find Obsidian"))
+    !o.ok
+        && (o.stderr.contains("unable to find Obsidian")
+            || o.stdout.contains("unable to find Obsidian"))
 }
 
 /// Right after launch the app answers before its CLI commands are registered: a single-line
 /// `Error: Command "…" not found…`, never a real result.
 fn still_starting(o: &Output) -> bool {
-    !o.stdout.contains('\n') && o.stdout.starts_with("Error: Command \"") && o.stdout.contains("not found")
+    !o.stdout.contains('\n')
+        && o.stdout.starts_with("Error: Command \"")
+        && o.stdout.contains("not found")
 }
 
 /// Start Obsidian in the background without taking focus. Best effort per platform.
@@ -133,7 +139,9 @@ fn launch_app() -> Result<()> {
     let status = if cfg!(target_os = "macos") {
         Command::new("open").args(["-g", "-a", "Obsidian"]).status()
     } else if cfg!(target_os = "windows") {
-        Command::new("cmd").args(["/C", "start", "", "obsidian://"]).status()
+        Command::new("cmd")
+            .args(["/C", "start", "", "obsidian://"])
+            .status()
     } else {
         Command::new("xdg-open").arg("obsidian://").status()
     };
@@ -181,7 +189,11 @@ impl Cli {
             if start.elapsed() > self.timeout {
                 let _ = child.kill();
                 let _ = child.wait();
-                bail!("Obsidian CLI timed out after {}s ({})", self.timeout.as_secs(), args.join(" "));
+                bail!(
+                    "Obsidian CLI timed out after {}s ({})",
+                    self.timeout.as_secs(),
+                    args.join(" ")
+                );
             }
             std::thread::sleep(Duration::from_millis(20));
         };
@@ -205,16 +217,26 @@ impl Cli {
                 o = self.exec(&id, args)?;
             }
             if app_missing(&o) {
-                bail!("started Obsidian but its CLI did not answer within {}s", self.timeout.as_secs());
+                bail!(
+                    "started Obsidian but its CLI did not answer within {}s",
+                    self.timeout.as_secs()
+                );
             }
         }
         if !o.ok {
-            let msg = if o.stderr.is_empty() { &o.stdout } else { &o.stderr };
+            let msg = if o.stderr.is_empty() {
+                &o.stdout
+            } else {
+                &o.stderr
+            };
             bail!("Obsidian CLI failed: {msg}");
         }
         let out = o.stdout;
         if out == "Vault not found." {
-            bail!("Obsidian does not know vault id {id} for {}; reopen the folder as a vault.", vault.display());
+            bail!(
+                "Obsidian does not know vault id {id} for {}; reopen the folder as a vault.",
+                vault.display()
+            );
         }
         if let Some(e) = out.strip_prefix("Error:") {
             bail!("Obsidian: {}", e.trim());
@@ -244,7 +266,8 @@ pub fn parse_search(out: &str) -> Result<Vec<SearchHit>> {
         line: usize,
         text: String,
     }
-    let files: Vec<File> = serde_json::from_str(out).context("unexpected `obsidian search:context` output")?;
+    let files: Vec<File> =
+        serde_json::from_str(out).context("unexpected `obsidian search:context` output")?;
     Ok(files
         .into_iter()
         .map(|f| {
@@ -255,7 +278,10 @@ pub fn parse_search(out: &str) -> Result<Vec<SearchHit>> {
                     lines.push(t);
                 }
             }
-            SearchHit { file: f.file, lines }
+            SearchHit {
+                file: f.file,
+                lines,
+            }
         })
         .collect())
 }
@@ -287,7 +313,13 @@ pub fn parse_unresolved(out: &str) -> Result<Vec<Unresolved>> {
         .map(|u| Unresolved {
             link: u.link,
             // one string, ", "-separated
-            sources: u.sources.split(", ").map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect(),
+            sources: u
+                .sources
+                .split(", ")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect(),
         })
         .collect())
 }
@@ -296,7 +328,11 @@ pub fn parse_orphans(out: &str) -> Vec<String> {
     if is_empty_result(out) {
         return vec![];
     }
-    out.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()
+    out.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 impl Api for Cli {
@@ -328,16 +364,28 @@ mod tests {
     #[test]
     fn parses_real_outputs() {
         let s = parse_search(r#"[{"file":"Knowledge/lonely.md","matches":[{"line":6,"text":"token token"},{"line":6,"text":"token token"}]}]"#).unwrap();
-        assert_eq!((s[0].file.as_str(), s[0].lines.clone()), ("Knowledge/lonely.md", vec![(6, "token token".to_string())]));
+        assert_eq!(
+            (s[0].file.as_str(), s[0].lines.clone()),
+            ("Knowledge/lonely.md", vec![(6, "token token".to_string())])
+        );
         assert!(parse_search("No matches found.").unwrap().is_empty());
         let u = parse_unresolved(
             r#"[{"link": "token-重放防護", "count": "2", "sources": "Decisions/jwt-輪替策略.md, Decisions/legacy-token.md"}]"#,
         )
         .unwrap();
-        assert_eq!(u[0].sources, vec!["Decisions/jwt-輪替策略.md", "Decisions/legacy-token.md"]);
-        assert_eq!(parse_backlinks("[\n  {\n    \"file\": \"Decisions/a.md\"\n  }\n]").unwrap(), vec!["Decisions/a.md"]);
+        assert_eq!(
+            u[0].sources,
+            vec!["Decisions/jwt-輪替策略.md", "Decisions/legacy-token.md"]
+        );
+        assert_eq!(
+            parse_backlinks("[\n  {\n    \"file\": \"Decisions/a.md\"\n  }\n]").unwrap(),
+            vec!["Decisions/a.md"]
+        );
         assert!(parse_backlinks("No backlinks found.").unwrap().is_empty());
-        assert_eq!(parse_orphans("Knowledge/lonely.md\n歡迎.md"), vec!["Knowledge/lonely.md", "歡迎.md"]);
+        assert_eq!(
+            parse_orphans("Knowledge/lonely.md\n歡迎.md"),
+            vec!["Knowledge/lonely.md", "歡迎.md"]
+        );
     }
 
     #[test]
@@ -347,7 +395,11 @@ mod tests {
         let reg = dir.join("obsidian.json");
         // registered via a non-canonical spelling of the same folder
         let spelled = format!("{}/./v", dir.display());
-        std::fs::write(&reg, format!(r#"{{"vaults":{{"abc123":{{"path":"{spelled}","ts":1}}}}}}"#)).unwrap();
+        std::fs::write(
+            &reg,
+            format!(r#"{{"vaults":{{"abc123":{{"path":"{spelled}","ts":1}}}}}}"#),
+        )
+        .unwrap();
         // SAFETY: tests touching this env var run in this single test only
         unsafe { std::env::set_var("OBMEM_OBSIDIAN_CONFIG", &reg) };
         assert_eq!(vault_id(&dir.join("v")).unwrap().as_deref(), Some("abc123"));
@@ -358,8 +410,15 @@ mod tests {
 
     #[test]
     fn recognises_startup_states() {
-        let o = |out: &str, err: &str| Output { ok: false, stdout: out.into(), stderr: err.into() };
-        assert!(app_missing(&o("", "The CLI is unable to find Obsidian. Please make sure Obsidian is running and try again.")));
+        let o = |out: &str, err: &str| Output {
+            ok: false,
+            stdout: out.into(),
+            stderr: err.into(),
+        };
+        assert!(app_missing(&o(
+            "",
+            "The CLI is unable to find Obsidian. Please make sure Obsidian is running and try again."
+        )));
         // regression: a successful search whose results quote that error is not "app missing"
         let hit = Output {
             ok: true,
@@ -367,7 +426,13 @@ mod tests {
             stderr: String::new(),
         };
         assert!(!app_missing(&hit) && !still_starting(&hit));
-        assert!(still_starting(&o("Error: Command \"vault\" not found. Did you mean: daily?", "")));
-        assert!(!still_starting(&o("Error: File \"nope.md\" not found.", "")));
+        assert!(still_starting(&o(
+            "Error: Command \"vault\" not found. Did you mean: daily?",
+            ""
+        )));
+        assert!(!still_starting(&o(
+            "Error: File \"nope.md\" not found.",
+            ""
+        )));
     }
 }

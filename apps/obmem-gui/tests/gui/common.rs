@@ -33,8 +33,11 @@ pub fn sandbox(name: &str) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join(format!("obmem-gui-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("config")).unwrap();
-    std::fs::write(dir.join("config/config.toml"), format!("vault = {:?}\n", dir.join("personal").display().to_string()))
-        .unwrap();
+    std::fs::write(
+        dir.join("config/config.toml"),
+        format!("vault = {:?}\n", dir.join("personal").display().to_string()),
+    )
+    .unwrap();
     // SAFETY: see above.
     unsafe { std::env::set_var("OBMEM_CONFIG", dir.join("config/config.toml")) };
     Some(dir)
@@ -43,7 +46,10 @@ pub fn sandbox(name: &str) -> Option<PathBuf> {
 /// Runs the current test again in a child process and fails unless exactly it passed there.
 /// libtest names each test's thread after the test.
 fn in_child() {
-    let test = std::thread::current().name().expect("libtest names the test thread").to_owned();
+    let test = std::thread::current()
+        .name()
+        .expect("libtest names the test thread")
+        .to_owned();
     let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let out = Command::new(std::env::current_exe().unwrap())
         .args([&test, "--exact", "--test-threads=1", "--nocapture"])

@@ -2,7 +2,9 @@
 
 use crate::data::Detail;
 use crate::state;
-use crate::widgets::{Level, card, check, choice, field, heading, muted, primary, switch_control, text_box};
+use crate::widgets::{
+    Level, card, check, choice, field, heading, muted, primary, switch_control, text_box,
+};
 use nsh_core::prelude::*;
 use obmem_core::config::SecretMode;
 use obmem_core::settings::{ProjectSettings, default_env_files};
@@ -34,7 +36,13 @@ fn project_form(s: ProjectSettings) -> View {
             name: name.get_untracked(),
             vault: vault.get_untracked(),
             secret_mode: mode.get_untracked(),
-            extra_env_files: env_files.get_untracked().lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect(),
+            extra_env_files: env_files
+                .get_untracked()
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect(),
             stale_days,
             duplicate_threshold,
         });
@@ -66,9 +74,19 @@ fn project_form(s: ProjectSettings) -> View {
 
 fn codex(d: &Detail) -> View {
     let control: AnyElement = match d.codex_auto_approve {
-        Ok(None) => muted("obmem is not set up for Codex in this project. Set it up in Overview first.").into_element(),
-        Ok(Some(on)) => switch_control(move || on, "Run obmem's tools without asking", state::set_codex_auto_approve).into_element(),
-        Err(ref e) => check(Level::Error, "Could not read .codex/config.toml", e.clone()).into_element(),
+        Ok(None) => {
+            muted("obmem is not set up for Codex in this project. Set it up in Overview first.")
+                .into_element()
+        }
+        Ok(Some(on)) => switch_control(
+            move || on,
+            "Run obmem's tools without asking",
+            state::set_codex_auto_approve,
+        )
+        .into_element(),
+        Err(ref e) => {
+            check(Level::Error, "Could not read .codex/config.toml", e.clone()).into_element()
+        }
     };
     card().test_id("codex").child(heading("Codex")).child(field(
         "Run obmem's tools without asking",

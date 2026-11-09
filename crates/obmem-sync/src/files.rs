@@ -20,17 +20,28 @@ pub struct Scan {
 pub fn scan(vault: &Path, community_plugins: bool) -> Result<Scan> {
     let mut files = Vec::new();
     let mut skipped = Vec::new();
-    let walk = walkdir::WalkDir::new(vault).follow_links(false).into_iter().filter_entry(|e| {
-        e.depth() == 0 || !is_hidden(e.file_name()) || (e.depth() == 1 && e.file_name() == ".obsidian")
-    });
+    let walk = walkdir::WalkDir::new(vault)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            e.depth() == 0
+                || !is_hidden(e.file_name())
+                || (e.depth() == 1 && e.file_name() == ".obsidian")
+        });
     for entry in walk {
         let entry = entry.with_context(|| format!("reading {}", vault.display()))?;
         if entry.file_type().is_dir() {
             continue;
         }
-        let rel = entry.path().strip_prefix(vault).expect("walkdir stays under its root");
+        let rel = entry
+            .path()
+            .strip_prefix(vault)
+            .expect("walkdir stays under its root");
         let Some(name) = name_of(rel) else {
-            skipped.push((rel.to_string_lossy().into_owned(), "the name is not valid Unicode".into()));
+            skipped.push((
+                rel.to_string_lossy().into_owned(),
+                "the name is not valid Unicode".into(),
+            ));
             continue;
         };
         if !included(&name, community_plugins) {
@@ -64,7 +75,10 @@ fn is_hidden(name: &std::ffi::OsStr) -> bool {
 }
 
 fn name_of(rel: &Path) -> Option<String> {
-    let parts: Option<Vec<String>> = rel.components().map(|c| c.as_os_str().to_str().map(|s| s.nfc().collect())).collect();
+    let parts: Option<Vec<String>> = rel
+        .components()
+        .map(|c| c.as_os_str().to_str().map(|s| s.nfc().collect()))
+        .collect();
     Some(parts?.join("/"))
 }
 
@@ -95,13 +109,24 @@ pub fn check_portable(name: &str) -> std::result::Result<(), String> {
         if part.is_empty() || part == "." || part == ".." {
             return Err(format!("`{part}` is not a valid path component"));
         }
-        if let Some(c) = part.chars().find(|c| matches!(c, '<' | '>' | ':' | '"' | '\\' | '|' | '?' | '*') || c.is_control()) {
-            return Err(format!("`{}` cannot be used in a file name on Windows", c.escape_default()));
+        if let Some(c) = part
+            .chars()
+            .find(|c| matches!(c, '<' | '>' | ':' | '"' | '\\' | '|' | '?' | '*') || c.is_control())
+        {
+            return Err(format!(
+                "`{}` cannot be used in a file name on Windows",
+                c.escape_default()
+            ));
         }
         if part.ends_with('.') || part.ends_with(' ') {
             return Err("names ending in a dot or space are not allowed on Windows".into());
         }
-        let stem = part.split('.').next().unwrap_or(part).trim_end().to_ascii_uppercase();
+        let stem = part
+            .split('.')
+            .next()
+            .unwrap_or(part)
+            .trim_end()
+            .to_ascii_uppercase();
         let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
             || ((stem.starts_with("COM") || stem.starts_with("LPT"))
                 && stem.len() == 4
@@ -165,7 +190,13 @@ mod tests {
         let s = scan(&dir, false).unwrap();
         assert_eq!(
             names(&s),
-            [".obsidian/app.json", ".obsidian/snippets/s.css", ".obsidian/themes/t/theme.css", "Global/a.md", "_system/secret-allowlist.toml"]
+            [
+                ".obsidian/app.json",
+                ".obsidian/snippets/s.css",
+                ".obsidian/themes/t/theme.css",
+                "Global/a.md",
+                "_system/secret-allowlist.toml"
+            ]
         );
         let with_plugins = scan(&dir, true).unwrap();
         assert!(names(&with_plugins).contains(&".obsidian/plugins/x/main.js"));
@@ -196,17 +227,40 @@ mod tests {
 
     #[test]
     fn portable_names() {
-        for ok in ["Global/a.md", "Projects/x/Sessions/2026-11-09.md", "Global/jwt-輪替策略-v2.md", "Global/console.md", "Global/com0.md"] {
+        for ok in [
+            "Global/a.md",
+            "Projects/x/Sessions/2026-11-09.md",
+            "Global/jwt-輪替策略-v2.md",
+            "Global/console.md",
+            "Global/com0.md",
+        ] {
             assert!(check_portable(ok).is_ok(), "{ok}");
         }
-        for bad in ["", "/abs.md", "a/../b.md", "a//b.md", "a/./b", "Global/a:b.md", "Global/a\\b.md", "Global/nul", "Global/Con.md", "Global/lpt1.txt", "Global/x.", "Global/x ", "Global/a\u{1}.md"] {
+        for bad in [
+            "",
+            "/abs.md",
+            "a/../b.md",
+            "a//b.md",
+            "a/./b",
+            "Global/a:b.md",
+            "Global/a\\b.md",
+            "Global/nul",
+            "Global/Con.md",
+            "Global/lpt1.txt",
+            "Global/x.",
+            "Global/x ",
+            "Global/a\u{1}.md",
+        ] {
             assert!(check_portable(bad).is_err(), "{bad:?}");
         }
     }
 
     #[test]
     fn case_collisions_are_found() {
-        assert_eq!(case_collisions(["a/X.md", "a/y.md", "a/x.md"]), [("a/X.md".to_string(), "a/x.md".to_string())]);
+        assert_eq!(
+            case_collisions(["a/X.md", "a/y.md", "a/x.md"]),
+            [("a/X.md".to_string(), "a/x.md".to_string())]
+        );
         assert!(case_collisions(["a.md", "b.md"]).is_empty());
     }
 }

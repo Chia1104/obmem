@@ -4,11 +4,11 @@
 use obmem_agents::hooks::Agent;
 use obmem_agents::setup;
 use obmem_core::allowlist::{self, Allowlist, Kind};
+use obmem_core::audit::{AuditOptions, Severity};
 use obmem_core::config::{self, Config};
+use obmem_core::note::Scope;
 use obmem_core::settings::{self, GlobalSettings, ProjectSettings, SyncSettings};
 use obmem_core::status::{self, Status};
-use obmem_core::audit::{AuditOptions, Severity};
-use obmem_core::note::Scope;
 use obmem_core::store::{NoteRef, Store, Verdict};
 use obmem_core::{import, init, obsidian, projects, review, sessions};
 use std::path::{Path, PathBuf};
@@ -103,8 +103,17 @@ pub fn projects() -> Result<Vec<ProjectRow>, String> {
                 .ok()
                 .filter(|_| !missing)
                 .map(|c| c.project_name)
-                .unwrap_or_else(|| p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            ProjectRow { path: p.path, name, missing }
+                .unwrap_or_else(|| {
+                    p.path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                });
+            ProjectRow {
+                path: p.path,
+                name,
+                missing,
+            }
         })
         .collect())
 }
@@ -125,7 +134,10 @@ pub fn detail(path: &Path) -> Result<Detail, String> {
     let store = Store::open(cfg.clone()).map_err(text)?;
     let agents = Agent::ALL
         .into_iter()
-        .map(|agent| AgentState { agent, missing: setup::check(&cfg, agent).map(|r| r.changed).map_err(text) })
+        .map(|agent| AgentState {
+            agent,
+            missing: setup::check(&cfg, agent).map(|r| r.changed).map_err(text),
+        })
         .collect();
     let root = &cfg.project_root;
     Ok(Detail {
@@ -156,24 +168,35 @@ pub fn scan(path: &Path, input: &str) -> Result<Vec<Hit>, String> {
         .scanner()
         .scan(input)
         .into_iter()
-        .map(|h| Hit { rule: h.rule, description: h.description, preview: h.preview, fingerprint: h.fingerprint })
+        .map(|h| Hit {
+            rule: h.rule,
+            description: h.description,
+            preview: h.preview,
+            fingerprint: h.fingerprint,
+        })
         .collect())
 }
 
 fn vault_dir(path: &Path, vault: Vault) -> Result<PathBuf, String> {
     match vault {
-        Vault::Project => Config::load(Some(path)).map(|c| c.project_vault).map_err(text),
+        Vault::Project => Config::load(Some(path))
+            .map(|c| c.project_vault)
+            .map_err(text),
         Vault::Personal => config::global_vault().map_err(text),
     }
 }
 
 /// `path` is the shown project; it is not needed for the personal vault.
 pub fn allow(path: &Path, vault: Vault, kind: Kind, entry: &str) -> Result<(), String> {
-    allowlist::add(&vault_dir(path, vault)?, kind, entry).map(|_| ()).map_err(text)
+    allowlist::add(&vault_dir(path, vault)?, kind, entry)
+        .map(|_| ())
+        .map_err(text)
 }
 
 pub fn disallow(path: &Path, vault: Vault, kind: Kind, entry: &str) -> Result<(), String> {
-    allowlist::remove(&vault_dir(path, vault)?, kind, entry).map(|_| ()).map_err(text)
+    allowlist::remove(&vault_dir(path, vault)?, kind, entry)
+        .map(|_| ())
+        .map_err(text)
 }
 
 pub fn personal() -> Result<Personal, String> {
@@ -191,8 +214,16 @@ fn sync_info() -> Result<SyncInfo, String> {
     let cfg = config::sync_config().map_err(text)?;
     let configured = cfg.bucket.is_some();
     Ok(SyncInfo {
-        connected: if configured { obmem_sync::keychain::is_set_up(&cfg).map_err(text) } else { Ok(false) },
-        last: if configured { obmem_sync::last_status(&cfg) } else { None },
+        connected: if configured {
+            obmem_sync::keychain::is_set_up(&cfg).map_err(text)
+        } else {
+            Ok(false)
+        },
+        last: if configured {
+            obmem_sync::last_status(&cfg)
+        } else {
+            None
+        },
         settings,
     })
 }
@@ -202,7 +233,12 @@ pub fn save_sync(s: &SyncSettings) -> Result<(), String> {
 }
 
 /// Connect this device to the bucket the saved settings name.
-pub fn connect_sync(access_key_id: String, secret_access_key: String, passphrase: String, repeat: String) -> Result<String, String> {
+pub fn connect_sync(
+    access_key_id: String,
+    secret_access_key: String,
+    passphrase: String,
+    repeat: String,
+) -> Result<String, String> {
     let cfg = config::sync_config().map_err(text)?;
     let bucket = cfg.bucket.clone().ok_or("Save a bucket first.")?;
     if access_key_id.trim().is_empty() || secret_access_key.is_empty() || passphrase.is_empty() {
@@ -211,10 +247,15 @@ pub fn connect_sync(access_key_id: String, secret_access_key: String, passphrase
     if passphrase != repeat {
         return Err("The passphrases differ.".into());
     }
-    let creds = obmem_sync::Credentials { access_key_id: access_key_id.trim().to_string(), secret_access_key };
+    let creds = obmem_sync::Credentials {
+        access_key_id: access_key_id.trim().to_string(),
+        secret_access_key,
+    };
     let created = obmem_sync::connect(&cfg, creds, &passphrase.into()).map_err(text)?;
     Ok(if created {
-        format!("Started a new encrypted vault in {bucket}. Every other device unlocks it with the same passphrase.")
+        format!(
+            "Started a new encrypted vault in {bucket}. Every other device unlocks it with the same passphrase."
+        )
     } else {
         format!("Connected to the vault in {bucket}.")
     })
@@ -243,7 +284,11 @@ pub fn initialize(path: &Path) -> Result<(), String> {
 pub fn set_up(path: &Path, agent: Agent) -> Result<SetupDone, String> {
     let cfg = Config::load(Some(path)).map_err(text)?;
     let r = setup::setup(&cfg, agent).map_err(text)?;
-    Ok(SetupDone { agent, changed: r.changed, manual: r.manual })
+    Ok(SetupDone {
+        agent,
+        changed: r.changed,
+        manual: r.manual,
+    })
 }
 
 /// One project's review items, or the personal vault's (shared by every project, listed once).
@@ -264,12 +309,18 @@ pub fn review() -> Result<Vec<ReviewGroup>, String> {
     let mut groups = Vec::new();
     let mut personal: Option<ReviewGroup> = None;
     for p in projects::list().map_err(text)? {
-        let Ok(cfg) = Config::load(Some(&p.path)) else { continue };
+        let Ok(cfg) = Config::load(Some(&p.path)) else {
+            continue;
+        };
         if !cfg.project_root.join(config::PROJECT_CONFIG_FILE).exists() {
             continue;
         }
         let mut store = Store::open(cfg.clone()).map_err(text)?;
-        let (mine, shared): (Vec<_>, Vec<_>) = store.review().map_err(text)?.into_iter().partition(|i| i.scope == "project");
+        let (mine, shared): (Vec<_>, Vec<_>) = store
+            .review()
+            .map_err(text)?
+            .into_iter()
+            .partition(|i| i.scope == "project");
         if personal.is_none() {
             personal = Some(ReviewGroup {
                 title: "Personal vault".into(),
@@ -298,16 +349,22 @@ fn store_at(root: &Path) -> Result<Store, String> {
 const BY: &str = "human (gui)";
 
 pub fn approve(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
-    store_at(root)?.approve(NoteRef::At { scope, rel }, BY).map_err(text)
+    store_at(root)?
+        .approve(NoteRef::At { scope, rel }, BY)
+        .map_err(text)
 }
 
 pub fn resolve(root: &Path, scope: Scope, rel: &str, verdict: Verdict) -> Result<String, String> {
-    store_at(root)?.resolve_finding(NoteRef::At { scope, rel }, verdict, None, BY, true).map_err(text)
+    store_at(root)?
+        .resolve_finding(NoteRef::At { scope, rel }, verdict, None, BY, true)
+        .map_err(text)
 }
 
 /// Records that the note was re-checked against the current code.
 pub fn verify(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
-    store_at(root)?.verify(NoteRef::At { scope, rel }, BY, true).map_err(text)
+    store_at(root)?
+        .verify(NoteRef::At { scope, rel }, BY, true)
+        .map_err(text)
 }
 
 /// What an audit run reported.
@@ -321,7 +378,11 @@ pub struct AuditDone {
 /// `obmem audit --write`: checks both vaults and keeps the finding notes in step.
 pub fn run_audit(root: &Path) -> Result<AuditDone, String> {
     let mut store = store_at(root)?;
-    let opts = AuditOptions { scope: None, rules: vec![], today: chrono::Local::now().date_naive() };
+    let opts = AuditOptions {
+        scope: None,
+        rules: vec![],
+        today: chrono::Local::now().date_naive(),
+    };
     let (report, stats) = store.audit(&opts, Some(Severity::Warn)).map_err(text)?;
     let count = |s: Severity| report.issues.iter().filter(|i| i.severity == s).count();
     let mut summary = format!(
@@ -338,7 +399,10 @@ pub fn run_audit(root: &Path) -> Result<AuditDone, String> {
             st.closed.len()
         ));
     }
-    Ok(AuditDone { summary, notes: report.notices })
+    Ok(AuditDone {
+        summary,
+        notes: report.notices,
+    })
 }
 
 // --- What agents see, session logs, importing Claude Code memory -------------------------------
@@ -407,12 +471,20 @@ fn claude_memory(store: &Store, root: &Path) -> Result<ClaudeMemory, String> {
 pub fn import_claude(root: &Path, chosen: &[PathBuf]) -> Result<Vec<String>, String> {
     let mut store = store_at(root)?;
     let dir = import::default_dir(&store.config().project_root);
-    let items = import::plan(&dir).map_err(text)?.into_iter().filter(|p| chosen.contains(&p.source)).collect();
+    let items = import::plan(&dir)
+        .map_err(text)?
+        .into_iter()
+        .filter(|p| chosen.contains(&p.source))
+        .collect();
     Ok(import::run(&mut store, items)
         .map_err(text)?
         .into_iter()
         .map(|(src, r)| {
-            let name = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let name = src
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             match r {
                 import::ImportResult::Imported(p) => format!("Imported {name} as {p}"),
                 import::ImportResult::Skipped(why) => format!("Skipped {name}: {why}"),

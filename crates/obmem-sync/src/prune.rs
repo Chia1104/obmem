@@ -30,7 +30,12 @@ pub struct PruneReport {
 }
 
 /// Apply the retention rule as of `now`. With `dry_run`, only report.
-pub fn prune(remote: &Remote, key: &VaultKey, now: DateTime<Utc>, dry_run: bool) -> Result<PruneReport> {
+pub fn prune(
+    remote: &Remote,
+    key: &VaultKey,
+    now: DateTime<Utc>,
+    dry_run: bool,
+) -> Result<PruneReport> {
     let snapshots: Vec<(u64, DateTime<Utc>, u64, String)> = remote
         .list_meta(SNAPSHOTS)?
         .into_iter()
@@ -42,15 +47,29 @@ pub fn prune(remote: &Remote, key: &VaultKey, now: DateTime<Utc>, dry_run: bool)
     if snapshots.is_empty() {
         return Ok(PruneReport::default());
     }
-    let keep = retained(&snapshots.iter().map(|(seq, at, ..)| (*seq, *at)).collect::<Vec<_>>(), now);
+    let keep = retained(
+        &snapshots
+            .iter()
+            .map(|(seq, at, ..)| (*seq, *at))
+            .collect::<Vec<_>>(),
+        now,
+    );
 
     // Read every kept snapshot before deleting anything: one that cannot be read stops the prune.
     let mut referenced = HashSet::new();
     for &seq in &keep {
-        referenced.extend(load_snapshot(remote, key, seq)?.files.into_values().map(|e| e.blob));
+        referenced.extend(
+            load_snapshot(remote, key, seq)?
+                .files
+                .into_values()
+                .map(|e| e.blob),
+        );
     }
 
-    let mut report = PruneReport { kept: keep.len(), ..Default::default() };
+    let mut report = PruneReport {
+        kept: keep.len(),
+        ..Default::default()
+    };
     for (seq, _, size, object) in snapshots.iter().filter(|(seq, ..)| !keep.contains(seq)) {
         if !dry_run {
             remote.delete(object)?;
@@ -62,7 +81,14 @@ pub fn prune(remote: &Remote, key: &VaultKey, now: DateTime<Utc>, dry_run: bool)
 
     for o in remote.list_meta(BLOBS)? {
         // Only names this crate writes: `blobs/<2 hex>/<64 hex>.age`.
-        let Some(id) = o.key.rsplit('/').next().and_then(|f| f.strip_suffix(".age")) else { continue };
+        let Some(id) = o
+            .key
+            .rsplit('/')
+            .next()
+            .and_then(|f| f.strip_suffix(".age"))
+        else {
+            continue;
+        };
         if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
             continue;
         }
@@ -80,7 +106,12 @@ pub fn prune(remote: &Remote, key: &VaultKey, now: DateTime<Utc>, dry_run: bool)
 
 /// The snapshot numbers the rule keeps, from `(seq, time)` pairs.
 fn retained(snapshots: &[(u64, DateTime<Utc>)], now: DateTime<Utc>) -> BTreeSet<u64> {
-    let mut keep: BTreeSet<u64> = snapshots.iter().map(|(seq, _)| *seq).max().into_iter().collect();
+    let mut keep: BTreeSet<u64> = snapshots
+        .iter()
+        .map(|(seq, _)| *seq)
+        .max()
+        .into_iter()
+        .collect();
     // Newest snapshot per day (age up to 30 days) or per ISO week (up to a year).
     let mut newest: BTreeMap<(u8, i32, u32), u64> = BTreeMap::new();
     for &(seq, at) in snapshots {
@@ -126,9 +157,17 @@ mod tests {
             (7, at("2026-11-05T08:00:00Z")), // within 7 days: all kept
             (8, at("2026-11-05T09:00:00Z")),
         ];
-        assert_eq!(retained(&snaps, now).into_iter().collect::<Vec<_>>(), [3, 5, 6, 7, 8]);
+        assert_eq!(
+            retained(&snaps, now).into_iter().collect::<Vec<_>>(),
+            [3, 5, 6, 7, 8]
+        );
         // The latest is kept however old.
-        assert_eq!(retained(&[(1, at("2020-01-01T00:00:00Z"))], now).into_iter().collect::<Vec<_>>(), [1]);
+        assert_eq!(
+            retained(&[(1, at("2020-01-01T00:00:00Z"))], now)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            [1]
+        );
     }
 
     #[test]
@@ -146,22 +185,37 @@ mod tests {
 
         // Today nothing is old enough.
         let r = prune(&remote, &mac.key, Utc::now(), false).unwrap();
-        assert_eq!((r.kept, r.deleted_snapshots.len(), r.deleted_blobs), (3, 0, 0));
+        assert_eq!(
+            (r.kept, r.deleted_snapshots.len(), r.deleted_blobs),
+            (3, 0, 0)
+        );
 
         // A dry run a year and more later reports, and changes nothing.
         let later = Utc::now() + TimeDelta::days(400);
         let r = prune(&remote, &mac.key, later, true).unwrap();
-        assert_eq!((r.kept, r.deleted_snapshots.clone(), r.deleted_blobs), (1, vec![1, 2], 2));
+        assert_eq!(
+            (r.kept, r.deleted_snapshots.clone(), r.deleted_blobs),
+            (1, vec![1, 2], 2)
+        );
         assert_eq!(snapshot_seqs(&remote).unwrap(), [1, 2, 3]);
 
         let r = prune(&remote, &mac.key, later, false).unwrap();
-        assert_eq!((r.deleted_snapshots.clone(), r.deleted_blobs), (vec![1, 2], 2));
+        assert_eq!(
+            (r.deleted_snapshots.clone(), r.deleted_blobs),
+            (vec![1, 2], 2)
+        );
         assert_eq!(snapshot_seqs(&remote).unwrap(), [3]);
         assert_eq!(remote.list("blobs").unwrap().len(), 2);
         let target = tempdir().join("restored");
         restore(&remote, &mac.key, None, &target).unwrap();
-        assert_eq!(std::fs::read_to_string(target.join("Global/a.md")).unwrap(), "three");
-        assert_eq!(std::fs::read_to_string(target.join("Global/b.md")).unwrap(), "stays");
+        assert_eq!(
+            std::fs::read_to_string(target.join("Global/a.md")).unwrap(),
+            "three"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("Global/b.md")).unwrap(),
+            "stays"
+        );
     }
 
     #[test]
@@ -172,7 +226,9 @@ mod tests {
         mac.sync().unwrap();
         // A blob a sync elsewhere just uploaded for a snapshot it has not written yet.
         let id = mac.key.blob_id(b"pending");
-        remote.put(&blob_key(&id), mac.key.encrypt(b"pending").unwrap()).unwrap();
+        remote
+            .put(&blob_key(&id), mac.key.encrypt(b"pending").unwrap())
+            .unwrap();
         remote.put("blobs/zz/not-ours.txt", b"x".to_vec()).unwrap();
 
         let r = prune(&remote, &mac.key, Utc::now() + TimeDelta::hours(1), false).unwrap();
@@ -197,6 +253,9 @@ mod tests {
         mac.sync().unwrap();
         let target = tempdir().join("restored");
         restore(&remote, &mac.key, None, &target).unwrap();
-        assert_eq!(std::fs::read_to_string(target.join("Global/a.md")).unwrap(), "one");
+        assert_eq!(
+            std::fs::read_to_string(target.join("Global/a.md")).unwrap(),
+            "one"
+        );
     }
 }

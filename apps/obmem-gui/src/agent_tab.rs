@@ -15,9 +15,13 @@ fn task() -> View {
     card()
         .test_id("task-preview")
         .child(heading("For a task"))
-        .child(muted("What memory_context returns when an agent describes this task, in any language."))
+        .child(muted(
+            "What memory_context returns when an agent describes this task, in any language.",
+        ))
         .child(text_box(input, "e.g. add a retry to the sync job").test_id("task-input"))
-        .child(view().flex_row().pt_2().child(primary("Preview", move || state::preview_task(input.get_untracked()))))
+        .child(view().flex_row().pt_2().child(primary("Preview", move || {
+            state::preview_task(input.get_untracked())
+        })))
         .child(dynamic(move || state::task_preview().map(as_given)))
 }
 
@@ -25,7 +29,9 @@ fn session_start() -> View {
     card()
         .test_id("session-start")
         .child(heading("At session start"))
-        .child(muted("What the session-start hook gives an agent before its first message."))
+        .child(muted(
+            "What the session-start hook gives an agent before its first message.",
+        ))
         .child(dynamic(move || as_given(state::session_start())))
 }
 
@@ -33,13 +39,19 @@ fn session_start() -> View {
 fn as_given(text: Load<String>) -> AnyElement {
     match text {
         Load::Loading => muted("Loading…").into_element(),
-        Load::Failed(e) => check(Level::Error, "The agent would get this error instead", e).into_element(),
+        Load::Failed(e) => {
+            check(Level::Error, "The agent would get this error instead", e).into_element()
+        }
         Load::Ready(t) => view()
             .mt_2()
             .p_3()
             .rounded(move || theme().radius)
             .bg(move || theme().muted)
-            .child(nsh_core::prelude::text(t).text_xs().font_family("monospace"))
+            .child(
+                nsh_core::prelude::text(t)
+                    .text_xs()
+                    .font_family("monospace"),
+            )
             .into_element(),
     }
 }

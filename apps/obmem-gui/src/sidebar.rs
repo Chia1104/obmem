@@ -10,8 +10,8 @@ use crate::icons::{self, INBOX, PERSON, PLUS, SIDEBAR};
 use crate::state::{self, Load, Screen};
 use crate::widgets::{self, WithHint, icon_button, muted, path_text};
 use nsh_base::{HandleEdge, ResizeHandleState, button, resize_handle, theme};
-use nsh_core::geometry::Axis;
 use nsh_core::element::desktop::title_bar;
+use nsh_core::geometry::Axis;
 use nsh_core::prelude::*;
 use nsh_core::storage::Storage;
 
@@ -69,9 +69,17 @@ fn shape() -> Shape {
         return Shape::Rail;
     }
     if let Some((_, raw)) = global::<Drag>().with(|d| d.0) {
-        return if raw < SNAP { Shape::Rail } else { Shape::Full(raw.clamp(MIN, MAX)) };
+        return if raw < SNAP {
+            Shape::Rail
+        } else {
+            Shape::Full(raw.clamp(MIN, MAX))
+        };
     }
-    if global::<Collapsed>().with(|c| c.0) { Shape::Rail } else { Shape::Full(global::<Width>().with(|w| w.0)) }
+    if global::<Collapsed>().with(|c| c.0) {
+        Shape::Rail
+    } else {
+        Shape::Full(global::<Width>().with(|w| w.0))
+    }
 }
 
 /// The width the sidebar takes beside the page.
@@ -139,7 +147,9 @@ pub(crate) fn sidebar() -> impl IntoElement {
                     });
                 })
                 .on_drag_end(move |offset: &Points| {
-                    let Some((from, _)) = global::<Drag>().get_untracked().0 else { return };
+                    let Some((from, _)) = global::<Drag>().get_untracked().0 else {
+                        return;
+                    };
                     global::<Drag>().set(Drag(None));
                     let raw = from + offset.0;
                     if raw < SNAP {
@@ -152,9 +162,23 @@ pub(crate) fn sidebar() -> impl IntoElement {
                     }
                 })
                 // The edge's line: a hairline, inked while the pointer is on it.
-                .child(view().w(move || px(if edge.get() == ResizeHandleState::Idle { 1.0 } else { 2.0 })).bg(move || {
-                    if edge.get() == ResizeHandleState::Idle { theme().sidebar_border } else { theme().primary }
-                })),
+                .child(
+                    view()
+                        .w(move || {
+                            px(if edge.get() == ResizeHandleState::Idle {
+                                1.0
+                            } else {
+                                2.0
+                            })
+                        })
+                        .bg(move || {
+                            if edge.get() == ResizeHandleState::Idle {
+                                theme().sidebar_border
+                            } else {
+                                theme().primary
+                            }
+                        }),
+                ),
         )
 }
 
@@ -179,7 +203,13 @@ pub(crate) fn drawer() -> AnyElement {
                         .child(widgets::title_strip())
                         .child(panel(true)),
                 )
-                .child(button().flex_1().bg(move || theme().foreground.opacity(0.18)).on_press(close_drawer).accessibility_label("Close the project list"))
+                .child(
+                    button()
+                        .flex_1()
+                        .bg(move || theme().foreground.opacity(0.18))
+                        .on_press(close_drawer)
+                        .accessibility_label("Close the project list"),
+                )
         })
     })
 }
@@ -236,7 +266,13 @@ fn panel(in_drawer: bool) -> View {
 /// The background of an entry: the page's own color when it is the one shown, as if the page were
 /// pulled out from under it.
 fn entry_bg(chosen: impl Fn() -> bool + Copy + 'static) -> impl Fn() -> AdaptiveColor {
-    move || if chosen() { theme().background } else { AdaptiveColor::TRANSPARENT }
+    move || {
+        if chosen() {
+            theme().background
+        } else {
+            AdaptiveColor::TRANSPARENT
+        }
+    }
 }
 
 fn screen_id(label: &str) -> String {
@@ -244,7 +280,12 @@ fn screen_id(label: &str) -> String {
 }
 
 /// An entry for a screen that is not a project.
-fn screen_entry(paths: &'static str, label: &'static str, screen: Screen, show: fn()) -> impl IntoElement {
+fn screen_entry(
+    paths: &'static str,
+    label: &'static str,
+    screen: Screen,
+    show: fn(),
+) -> impl IntoElement {
     let chosen = move || state::screen() == screen;
     view().test_id(&screen_id(label)).child(
         button()
@@ -257,10 +298,21 @@ fn screen_entry(paths: &'static str, label: &'static str, screen: Screen, show: 
             .bg(entry_bg(chosen))
             .hover(|s| s.bg(move || theme().sidebar_accent))
             .active(|s| s.opacity(0.7))
-            .text_color(move || if chosen() { theme().foreground } else { theme().muted_foreground })
+            .text_color(move || {
+                if chosen() {
+                    theme().foreground
+                } else {
+                    theme().muted_foreground
+                }
+            })
             .on_press(go(show))
             .child(icons::icon(paths, 16.0))
-            .child(text(label).text_sm().font_weight(FontWeight::MEDIUM).text_color(move || theme().foreground)),
+            .child(
+                text(label)
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(move || theme().foreground),
+            ),
     )
 }
 
@@ -299,12 +351,21 @@ fn project_row(row: ReadSignal<ProjectRow>) -> impl IntoElement {
                 .flex_1()
                 .min_w(px(0.0))
                 .gap(px(1.0))
-                .child(text(move || row.with(|r| r.name.clone())).text_sm().font_weight(FontWeight::MEDIUM).number_of_lines(1u32))
+                .child(
+                    text(move || row.with(|r| r.name.clone()))
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .number_of_lines(1u32),
+                )
                 .child(
                     path_text(move || {
                         row.with(|r| {
                             let p = tilde(&r.path);
-                            if r.missing { format!("{p} (missing)") } else { p }
+                            if r.missing {
+                                format!("{p} (missing)")
+                            } else {
+                                p
+                            }
                         })
                     })
                     .number_of_lines(1u32),
@@ -327,7 +388,11 @@ fn rail() -> View {
                     .items_center()
                     .gap_2()
                     .py_1()
-                    .child(each(rows, |r: &ProjectRow| r.path.clone(), |row, _| rail_project(row)))
+                    .child(each(
+                        rows,
+                        |r: &ProjectRow| r.path.clone(),
+                        |row, _| rail_project(row),
+                    ))
                     .child(icon_button(PLUS, "Add a project…", go(state::add_project))),
             ),
         )
@@ -338,8 +403,18 @@ fn rail() -> View {
                 .pt_2()
                 .border_t_1()
                 .border_t_color(move || theme().sidebar_border)
-                .child(rail_screen(INBOX, "Review", Screen::Review, state::show_review))
-                .child(rail_screen(PERSON, "Personal settings", Screen::Personal, state::show_personal)),
+                .child(rail_screen(
+                    INBOX,
+                    "Review",
+                    Screen::Review,
+                    state::show_review,
+                ))
+                .child(rail_screen(
+                    PERSON,
+                    "Personal settings",
+                    Screen::Personal,
+                    state::show_personal,
+                )),
         )
 }
 
@@ -356,7 +431,12 @@ fn rail_project(row: ReadSignal<ProjectRow>) -> impl IntoElement {
         .with_hint(name)
 }
 
-fn rail_screen(paths: &'static str, label: &'static str, screen: Screen, show: fn()) -> impl IntoElement {
+fn rail_screen(
+    paths: &'static str,
+    label: &'static str,
+    screen: Screen,
+    show: fn(),
+) -> impl IntoElement {
     let chosen = move || state::screen() == screen;
     view().test_id(&format!("rail-{}", screen_id(label))).child(
         button()
@@ -368,7 +448,13 @@ fn rail_screen(paths: &'static str, label: &'static str, screen: Screen, show: f
             .bg(entry_bg(chosen))
             .hover(|s| s.bg(move || theme().sidebar_accent))
             .active(|s| s.opacity(0.7))
-            .text_color(move || if chosen() { theme().primary } else { theme().muted_foreground })
+            .text_color(move || {
+                if chosen() {
+                    theme().primary
+                } else {
+                    theme().muted_foreground
+                }
+            })
             .accessibility_label(label)
             .on_press(go(show))
             .child(icons::icon(paths, 18.0))
@@ -377,7 +463,11 @@ fn rail_screen(paths: &'static str, label: &'static str, screen: Screen, show: f
 }
 
 /// A project's initials on a tile, inked when it is the one shown.
-fn monogram(name: impl Fn() -> String + 'static, chosen: impl Fn() -> bool + Copy + 'static, size: f32) -> View {
+fn monogram(
+    name: impl Fn() -> String + 'static,
+    chosen: impl Fn() -> bool + Copy + 'static,
+    size: f32,
+) -> View {
     view()
         .w(px(size))
         .h(px(size))
@@ -385,19 +475,34 @@ fn monogram(name: impl Fn() -> String + 'static, chosen: impl Fn() -> bool + Cop
         .items_center()
         .justify_center()
         .rounded(move || theme().radius)
-        .bg(move || if chosen() { theme().primary } else { theme().accent })
+        .bg(move || {
+            if chosen() {
+                theme().primary
+            } else {
+                theme().accent
+            }
+        })
         .child(
             text(move || initials(&name()))
                 .text_size(px(size * 0.4))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(move || if chosen() { theme().primary_foreground } else { theme().primary }),
+                .text_color(move || {
+                    if chosen() {
+                        theme().primary_foreground
+                    } else {
+                        theme().primary
+                    }
+                }),
         )
 }
 
 /// `obmem` → `Ob`, `demo-repo` → `DR`: the first letters of the first two words, or the first
 /// two letters of a single word.
 fn initials(name: &str) -> String {
-    let words: Vec<&str> = name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let words: Vec<&str> = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
     let mut out = String::new();
     match words.as_slice() {
         [] => out.push('?'),

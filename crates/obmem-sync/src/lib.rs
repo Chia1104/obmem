@@ -17,14 +17,14 @@
 pub mod files;
 pub mod key;
 pub mod keychain;
-pub mod remote;
 mod prune;
+pub mod remote;
 mod run;
 mod sync;
 
 pub use key::VaultKey;
-pub use remote::{Credentials, Remote};
 pub use prune::{PruneReport, prune};
+pub use remote::{Credentials, Remote};
 pub use run::{BACKGROUND_WAIT, Status, connect, last_status, run, summary};
 pub use sync::{Queued, SyncOptions, SyncReport, state_path, sync};
 
@@ -84,7 +84,9 @@ pub fn unlock_or_create(remote: &Remote, passphrase: &SecretString) -> Result<(V
         return Ok((key, true));
     }
     // Another device created it in the meantime: that one counts.
-    let wrapped = remote.get(KEY_FILE)?.ok_or_else(|| anyhow!("key.age vanished from the bucket"))?;
+    let wrapped = remote
+        .get(KEY_FILE)?
+        .ok_or_else(|| anyhow!("key.age vanished from the bucket"))?;
     Ok((VaultKey::unwrap(&wrapped, passphrase)?, false))
 }
 
@@ -100,14 +102,25 @@ pub fn snapshot_seqs(remote: &Remote) -> Result<Vec<u64>> {
 }
 
 pub fn load_snapshot(remote: &Remote, key: &VaultKey, seq: u64) -> Result<Manifest> {
-    let cipher = remote.get(&snapshot_key(seq))?.ok_or_else(|| anyhow!("there is no snapshot {seq}"))?;
-    let plain = key.decrypt(&cipher).with_context(|| format!("decrypting snapshot {seq}"))?;
-    let m: Manifest = serde_json::from_slice(&plain).with_context(|| format!("reading snapshot {seq}"))?;
+    let cipher = remote
+        .get(&snapshot_key(seq))?
+        .ok_or_else(|| anyhow!("there is no snapshot {seq}"))?;
+    let plain = key
+        .decrypt(&cipher)
+        .with_context(|| format!("decrypting snapshot {seq}"))?;
+    let m: Manifest =
+        serde_json::from_slice(&plain).with_context(|| format!("reading snapshot {seq}"))?;
     if m.format != FORMAT {
-        bail!("snapshot {seq} has format {}; this obmem reads format {FORMAT}", m.format);
+        bail!(
+            "snapshot {seq} has format {}; this obmem reads format {FORMAT}",
+            m.format
+        );
     }
     if m.seq != seq {
-        bail!("snapshot {seq} says it is snapshot {}: the bucket was tampered with", m.seq);
+        bail!(
+            "snapshot {seq} says it is snapshot {}: the bucket was tampered with",
+            m.seq
+        );
     }
     Ok(m)
 }
@@ -120,17 +133,26 @@ pub struct RestoreReport {
 
 /// Write snapshot `seq` (default: the latest) into `target`, which must be missing or empty:
 /// restoring never overwrites a file.
-pub fn restore(remote: &Remote, key: &VaultKey, seq: Option<u64>, target: &Path) -> Result<RestoreReport> {
+pub fn restore(
+    remote: &Remote,
+    key: &VaultKey,
+    seq: Option<u64>,
+    target: &Path,
+) -> Result<RestoreReport> {
     let seq = match seq {
         Some(s) => s,
-        None => *snapshot_seqs(remote)?.last().ok_or_else(|| anyhow!("the bucket has no snapshots yet"))?,
+        None => *snapshot_seqs(remote)?
+            .last()
+            .ok_or_else(|| anyhow!("the bucket has no snapshots yet"))?,
     };
     let manifest = load_snapshot(remote, key, seq)?;
     // Names come from the bucket: check them all before writing anything.
     for name in manifest.files.keys() {
-        files::check_portable(name).map_err(|why| anyhow!("snapshot {seq} holds `{name}`: {why}"))?;
+        files::check_portable(name)
+            .map_err(|why| anyhow!("snapshot {seq} holds `{name}`: {why}"))?;
     }
-    if let Some((a, b)) = files::case_collisions(manifest.files.keys().map(String::as_str)).first() {
+    if let Some((a, b)) = files::case_collisions(manifest.files.keys().map(String::as_str)).first()
+    {
         bail!("snapshot {seq} holds both {a} and {b}, which are the same file here");
     }
     if std::fs::symlink_metadata(target).is_ok() {
@@ -139,7 +161,10 @@ pub fn restore(remote: &Remote, key: &VaultKey, seq: Option<u64>, target: &Path)
             .next()
             .is_none();
         if !empty {
-            bail!("{} is not empty: restore into an empty or new folder", target.display());
+            bail!(
+                "{} is not empty: restore into an empty or new folder",
+                target.display()
+            );
         }
     }
     std::fs::create_dir_all(target).with_context(|| format!("creating {}", target.display()))?;
@@ -149,14 +174,19 @@ pub fn restore(remote: &Remote, key: &VaultKey, seq: Option<u64>, target: &Path)
         let cipher = remote
             .get(&blob_key(&entry.blob))?
             .ok_or_else(|| anyhow!("the bucket is missing the content of {name}"))?;
-        let content = key.decrypt(&cipher).with_context(|| format!("decrypting {name}"))?;
+        let content = key
+            .decrypt(&cipher)
+            .with_context(|| format!("decrypting {name}"))?;
         if key.blob_id(&content) != entry.blob {
             bail!("the content of {name} does not match its snapshot entry");
         }
         let path = sync::path_in(&root, name);
         obmem_core::store::atomic_write_bytes(&root, &path, &content)?;
     }
-    Ok(RestoreReport { seq, files: manifest.files.len() })
+    Ok(RestoreReport {
+        seq,
+        files: manifest.files.len(),
+    })
 }
 
 #[cfg(test)]
@@ -190,7 +220,10 @@ mod tests {
         let target = tempdir().join("restored");
         let r = restore(&remote, &key, None, &target).unwrap();
         assert_eq!((r.seq, r.files), (1, 3));
-        assert_eq!(std::fs::read_to_string(target.join("Global/a.md")).unwrap(), "alpha");
+        assert_eq!(
+            std::fs::read_to_string(target.join("Global/a.md")).unwrap(),
+            "alpha"
+        );
         assert!(!target.join(".obsidian/workspace.json").exists());
     }
 
@@ -204,7 +237,10 @@ mod tests {
         mac.sync().unwrap();
         let old = tempdir().join("old");
         restore(&remote, &mac.key, Some(1), &old).unwrap();
-        assert_eq!(std::fs::read_to_string(old.join("Global/a.md")).unwrap(), "one");
+        assert_eq!(
+            std::fs::read_to_string(old.join("Global/a.md")).unwrap(),
+            "one"
+        );
     }
 
     #[test]
@@ -216,7 +252,10 @@ mod tests {
         for k in remote.list("").unwrap() {
             assert!(!k.contains("secret-plan"), "{k}");
             let bytes = remote.get(&k).unwrap().unwrap();
-            assert!(!bytes.windows(6).any(|w| w == b"secret"), "{k} holds plain text");
+            assert!(
+                !bytes.windows(6).any(|w| w == b"secret"),
+                "{k} holds plain text"
+            );
         }
     }
 
@@ -242,7 +281,9 @@ mod tests {
         let remote = remote::in_memory();
         let (key, _) = unlock_or_create(&remote, &pass("pw")).unwrap();
         let blob = key.blob_id(b"x");
-        remote.create(&blob_key(&blob), key.encrypt(b"x").unwrap()).unwrap();
+        remote
+            .create(&blob_key(&blob), key.encrypt(b"x").unwrap())
+            .unwrap();
         let manifest = Manifest {
             format: FORMAT,
             seq: 1,
@@ -250,7 +291,13 @@ mod tests {
             device: "evil".into(),
             files: BTreeMap::from([("../escape.md".to_string(), FileEntry { blob, size: 1 })]),
         };
-        remote.create(&snapshot_key(1), key.encrypt(&serde_json::to_vec(&manifest).unwrap()).unwrap()).unwrap();
+        remote
+            .create(
+                &snapshot_key(1),
+                key.encrypt(&serde_json::to_vec(&manifest).unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
         let target = tempdir().join("t");
         assert!(restore(&remote, &key, None, &target).is_err());
         assert!(!target.parent().unwrap().join("escape.md").exists());

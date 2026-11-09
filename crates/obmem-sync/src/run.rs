@@ -23,14 +23,23 @@ pub struct Status {
 
 /// Sync the personal vault now. `Ok(None)`: another sync is already queued and will take these
 /// changes too.
-pub fn run(cfg: &SyncConfig, allow_mass_delete: bool, wait: std::time::Duration) -> Result<Option<SyncReport>> {
+pub fn run(
+    cfg: &SyncConfig,
+    allow_mass_delete: bool,
+    wait: std::time::Duration,
+) -> Result<Option<SyncReport>> {
     let vault = config::global_vault()?;
     let state = state_path(cfg, &vault);
     let result = (|| {
         let (creds, key) = keychain::load(cfg)?;
         let remote = Remote::s3(cfg, &creds)?;
         let device = config::device_name(cfg);
-        let opts = SyncOptions { device: &device, community_plugins: cfg.community_plugins.unwrap_or(false), allow_mass_delete, wait };
+        let opts = SyncOptions {
+            device: &device,
+            community_plugins: cfg.community_plugins.unwrap_or(false),
+            allow_mass_delete,
+            wait,
+        };
         let report = sync(&remote, &key, &vault, &state, &opts)?;
         Ok::<_, anyhow::Error>((report, prune_if_due(&remote, &key, &state)))
     })();
@@ -38,8 +47,16 @@ pub fn run(cfg: &SyncConfig, allow_mass_delete: bool, wait: std::time::Duration)
         Err(e) if e.downcast_ref::<Queued>().is_some() => Ok(None),
         result => {
             let status = match &result {
-                Ok((r, cleanup)) => Status { at: now(), ok: true, message: format!("{}{}", summary(r), cleanup) },
-                Err(e) => Status { at: now(), ok: false, message: format!("{e:#}") },
+                Ok((r, cleanup)) => Status {
+                    at: now(),
+                    ok: true,
+                    message: format!("{}{}", summary(r), cleanup),
+                },
+                Err(e) => Status {
+                    at: now(),
+                    ok: false,
+                    message: format!("{e:#}"),
+                },
             };
             if let Err(e) = write_status(&status_path(&state), &status) {
                 tracing::warn!("could not record the sync status: {e:#}");
@@ -72,7 +89,11 @@ fn prune_if_due(remote: &Remote, key: &crate::VaultKey, state: &Path) -> String 
             if p.deleted_snapshots.is_empty() && p.deleted_blobs == 0 {
                 String::new()
             } else {
-                format!("; removed {} old snapshots and {} unused blobs", p.deleted_snapshots.len(), p.deleted_blobs)
+                format!(
+                    "; removed {} old snapshots and {} unused blobs",
+                    p.deleted_snapshots.len(),
+                    p.deleted_blobs
+                )
             }
         }
         Err(e) => format!("; cleaning up old snapshots failed: {e:#}"),
@@ -82,7 +103,11 @@ fn prune_if_due(remote: &Remote, key: &crate::VaultKey, state: &Path) -> String 
 /// Connect this device to the configured bucket: unlock its key with the passphrase, or create
 /// the key when the bucket holds none yet, and keep both in the keychain. Without `[sync] device`,
 /// give the device a name of its own ([`config::new_device_name`]). `true`: created.
-pub fn connect(cfg: &SyncConfig, creds: crate::Credentials, passphrase: &age::secrecy::SecretString) -> Result<bool> {
+pub fn connect(
+    cfg: &SyncConfig,
+    creds: crate::Credentials,
+    passphrase: &age::secrecy::SecretString,
+) -> Result<bool> {
     let remote = Remote::s3(cfg, &creds)?;
     let (key, created) = crate::unlock_or_create(&remote, passphrase)?;
     keychain::save(cfg, &creds, &key)?;
@@ -105,7 +130,14 @@ pub fn summary(r: &SyncReport) -> String {
     for (n, label) in [
         (r.uploaded.len() + r.deleted_remote.len(), "up"),
         (r.downloaded.len() + r.deleted_local.len(), "down"),
-        (r.conflicts.len(), if r.conflicts.len() == 1 { "conflict" } else { "conflicts" }),
+        (
+            r.conflicts.len(),
+            if r.conflicts.len() == 1 {
+                "conflict"
+            } else {
+                "conflicts"
+            },
+        ),
         (r.deferred.len(), "left for the next sync"),
         (r.skipped.len(), "skipped"),
     ] {
@@ -118,7 +150,11 @@ pub fn summary(r: &SyncReport) -> String {
         (seq, true) => format!("snapshot {seq}"),
         (seq, false) => format!("up to date with snapshot {seq}"),
     };
-    if parts.is_empty() { head } else { format!("{head}: {}", parts.join(", ")) }
+    if parts.is_empty() {
+        head
+    } else {
+        format!("{head}: {}", parts.join(", "))
+    }
 }
 
 fn now() -> String {
@@ -130,7 +166,9 @@ fn status_path(state: &Path) -> PathBuf {
 }
 
 fn write_status(path: &Path, status: &Status) -> Result<()> {
-    let dir = path.parent().ok_or_else(|| anyhow::anyhow!("no folder for {}", path.display()))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("no folder for {}", path.display()))?;
     std::fs::create_dir_all(dir)?;
     obmem_core::store::atomic_write_bytes(dir, path, &serde_json::to_vec(status)?)
 }
@@ -141,9 +179,21 @@ mod tests {
 
     #[test]
     fn summaries() {
-        let r = SyncReport { seq: 3, created: true, uploaded: vec!["a".into()], conflicts: vec!["b".into()], ..Default::default() };
+        let r = SyncReport {
+            seq: 3,
+            created: true,
+            uploaded: vec!["a".into()],
+            conflicts: vec!["b".into()],
+            ..Default::default()
+        };
         assert_eq!(summary(&r), "snapshot 3: 1 up, 1 conflict");
-        assert_eq!(summary(&SyncReport { seq: 3, ..Default::default() }), "up to date with snapshot 3");
+        assert_eq!(
+            summary(&SyncReport {
+                seq: 3,
+                ..Default::default()
+            }),
+            "up to date with snapshot 3"
+        );
         assert_eq!(summary(&SyncReport::default()), "nothing to sync yet");
     }
 }

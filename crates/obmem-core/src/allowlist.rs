@@ -56,7 +56,8 @@ fn read_doc(vault: &Path) -> Result<DocumentMut> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", p.display())),
     };
-    text.parse().with_context(|| format!("parsing {}", p.display()))
+    text.parse()
+        .with_context(|| format!("parsing {}", p.display()))
 }
 
 pub fn read(vault: &Path) -> Result<Allowlist> {
@@ -75,7 +76,11 @@ pub fn add(vault: &Path, kind: Kind, entry: &str) -> Result<bool> {
     if let Some(why) = problem {
         bail!("the scanner would ignore \"{entry}\": {why}");
     }
-    let entry = if kind == Kind::Stopword { entry.to_lowercase() } else { entry.to_string() };
+    let entry = if kind == Kind::Stopword {
+        entry.to_lowercase()
+    } else {
+        entry.to_string()
+    };
     edit(vault, kind, |list| {
         if list.iter().any(|v| v.as_str() == Some(&entry)) {
             return false;
@@ -100,7 +105,9 @@ fn edit(vault: &Path, kind: Kind, change: impl FnOnce(&mut Array) -> bool) -> Re
     if slot.is_none() {
         *slot = Item::Value(Value::Array(Array::new()));
     }
-    let list = slot.as_array_mut().with_context(|| format!("allowlist.{} in {} is not a list", kind.key(), FILE))?;
+    let list = slot
+        .as_array_mut()
+        .with_context(|| format!("allowlist.{} in {} is not a list", kind.key(), FILE))?;
     if !change(list) {
         return Ok(false);
     }
@@ -132,7 +139,11 @@ mod tests {
         assert_eq!(a.fingerprints, vec!["abc123"]);
         assert_eq!(a.stopwords, vec!["sandbox-key"]);
         assert_eq!(a.regexes.len(), 1);
-        assert!(std::fs::read_to_string(path(&vault)).unwrap().contains("# keep me"));
+        assert!(
+            std::fs::read_to_string(path(&vault))
+                .unwrap()
+                .contains("# keep me")
+        );
 
         assert!(remove(&vault, Kind::Fingerprint, "abc123").unwrap());
         assert!(!remove(&vault, Kind::Fingerprint, "abc123").unwrap());

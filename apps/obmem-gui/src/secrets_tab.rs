@@ -9,14 +9,20 @@ use obmem_core::allowlist::{Allowlist, Kind};
 use obmem_core::config::SecretMode;
 
 pub(crate) fn secrets_tab(d: &Detail) -> View {
-    view().gap_4().child(scanner(d)).child(try_it()).child(allowlist(&d.allowlist))
+    view()
+        .gap_4()
+        .child(scanner(d))
+        .child(try_it())
+        .child(allowlist(&d.allowlist))
 }
 
 fn scanner(d: &Detail) -> View {
     let st = &d.status;
     let mode = match st.secret_mode {
         SecretMode::Block => "A write that contains a secret is refused.",
-        SecretMode::Redact => "A secret in a write is replaced with [REDACTED] and the rest is written.",
+        SecretMode::Redact => {
+            "A secret in a write is replaced with [REDACTED] and the rest is written."
+        }
     };
     card()
         .child(heading("Scanner"))
@@ -38,31 +44,57 @@ fn try_it() -> View {
     card()
         .test_id("scan")
         .child(heading("Try it"))
-        .child(muted("Paste text to see what the scanner would catch. Nothing is stored."))
-        .child(text_box(input, "Text to scan").test_id("scan-input").multiline(true).min_h(px(80.0)))
-        .child(view().flex_row().pt_2().child(primary("Scan", move || state::scan(input.get_untracked()))))
+        .child(muted(
+            "Paste text to see what the scanner would catch. Nothing is stored.",
+        ))
+        .child(
+            text_box(input, "Text to scan")
+                .test_id("scan-input")
+                .multiline(true)
+                .min_h(px(80.0)),
+        )
+        .child(
+            view()
+                .flex_row()
+                .pt_2()
+                .child(primary("Scan", move || state::scan(input.get_untracked()))),
+        )
         .child(dynamic(move || {
-            state::scan_result().map(|hits| {
-                if hits.is_empty() {
-                    return vec![check(Level::Ok, "Nothing found", "This text would be written as it is.").into_element()];
-                }
-                hits.into_iter().map(|h| hit(h).into_element()).collect()
-            })
-            .unwrap_or_default()
+            state::scan_result()
+                .map(|hits| {
+                    if hits.is_empty() {
+                        return vec![
+                            check(
+                                Level::Ok,
+                                "Nothing found",
+                                "This text would be written as it is.",
+                            )
+                            .into_element(),
+                        ];
+                    }
+                    hits.into_iter().map(|h| hit(h).into_element()).collect()
+                })
+                .unwrap_or_default()
         }))
 }
 
 fn hit(h: Hit) -> View {
     let (here, everywhere) = (h.fingerprint.clone(), h.fingerprint.clone());
-    check(Level::Error, format!("{}: {}", h.rule, h.description), format!("{}   fingerprint {}", h.preview, h.fingerprint))
-        .child(
-            view()
-                .gap_1()
-                .child(action("Allow in this project", move || state::allow(Vault::Project, Kind::Fingerprint, here.clone())))
-                .child(action("Allow in every project", move || {
-                    state::allow(Vault::Personal, Kind::Fingerprint, everywhere.clone())
-                })),
-        )
+    check(
+        Level::Error,
+        format!("{}: {}", h.rule, h.description),
+        format!("{}   fingerprint {}", h.preview, h.fingerprint),
+    )
+    .child(
+        view()
+            .gap_1()
+            .child(action("Allow in this project", move || {
+                state::allow(Vault::Project, Kind::Fingerprint, here.clone())
+            }))
+            .child(action("Allow in every project", move || {
+                state::allow(Vault::Personal, Kind::Fingerprint, everywhere.clone())
+            })),
+    )
 }
 
 fn allowlist(list: &Result<Allowlist, String>) -> View {
@@ -71,7 +103,13 @@ fn allowlist(list: &Result<Allowlist, String>) -> View {
          and words count only in your personal settings.",
     ));
     match list {
-        Err(e) => c = c.child(check(Level::Error, "Could not read the allowlist", e.clone())),
+        Err(e) => {
+            c = c.child(check(
+                Level::Error,
+                "Could not read the allowlist",
+                e.clone(),
+            ))
+        }
         Ok(a) if a.fingerprints.is_empty() => c = c.child(muted("Nothing allowed yet.")),
         Ok(a) => {
             for f in &a.fingerprints {
@@ -83,7 +121,9 @@ fn allowlist(list: &Result<Allowlist, String>) -> View {
                         .gap_3()
                         .py_1()
                         .child(text(f.clone()).flex_1().text_sm())
-                        .child(action("Remove", move || state::disallow(Vault::Project, Kind::Fingerprint, entry.clone()))),
+                        .child(action("Remove", move || {
+                            state::disallow(Vault::Project, Kind::Fingerprint, entry.clone())
+                        })),
                 );
             }
         }

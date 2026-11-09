@@ -1,4 +1,26 @@
 #!/bin/sh
+# Refuse commits whose staged Rust files are not formatted. It formats the staged content of each
+# file through stdin (so rustfmt does not follow `mod` into unstaged files) and compares the result
+# with the staged blob; `rustfmt --check` exits 0 on stdin even when it prints a diff. It never
+# formats on its own: re-staging here would sweep unstaged hunks into the commit.
+# --edition must match `edition` in Cargo.toml; cargo fmt reads it from there.
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+if [ -n "$staged" ]; then
+  if ! command -v rustfmt >/dev/null 2>&1; then
+    echo "pre-commit: rustfmt not on PATH, skipping the format check" >&2
+  else
+    unformatted=$(printf '%s\n' "$staged" | while IFS= read -r file; do
+      formatted=$(git show ":$file" | rustfmt --edition 2024 2>/dev/null | git hash-object --stdin)
+      [ "$formatted" = "$(git rev-parse ":$file")" ] || printf '  %s\n' "$file"
+    done)
+    if [ -n "$unformatted" ]; then
+      printf '%s\n' "$unformatted" >&2
+      echo "pre-commit: these staged files are not formatted (or do not parse). Run 'cargo fmt --all' and stage the result." >&2
+      exit 1
+    fi
+  fi
+fi
+
 # Refuse commits that add secrets to the project vault (docs/kb). Source code is not scanned.
 if ! command -v obmem >/dev/null 2>&1; then
   echo "pre-commit: obmem not installed, skipping vault secret scan" >&2

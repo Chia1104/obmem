@@ -42,7 +42,10 @@ pub fn App() -> impl IntoElement {
     set_tokens(nsh_base::Theme::from_json(THEME).expect("theme.json parses (see the test below)"));
     // The sidebar and the page run up to the window's top edge; each keeps a strip there that
     // drags the window (`widgets::title_strip`).
-    nsh_core::element::desktop::set_title_bar(nsh_core::desktop::TitleBarStyle::Hidden, Some(px(40.0)));
+    nsh_core::element::desktop::set_title_bar(
+        nsh_core::desktop::TitleBarStyle::Hidden,
+        Some(px(40.0)),
+    );
     state::own_tasks();
     state::load_projects(None);
     view()

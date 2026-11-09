@@ -28,7 +28,9 @@ pub fn save(cfg: &SyncConfig, creds: &Credentials, key: &VaultKey) -> Result<()>
         secret_access_key: creds.secret_access_key.clone(),
         vault_key: key.to_secret().expose_secret().to_string(),
     };
-    entry(cfg)?.set_password(&serde_json::to_string(&stored)?).context("saving to the OS keychain")
+    entry(cfg)?
+        .set_password(&serde_json::to_string(&stored)?)
+        .context("saving to the OS keychain")
 }
 
 /// Whether this device has what it needs for the configured bucket.
@@ -44,11 +46,21 @@ pub fn load(cfg: &SyncConfig) -> Result<(Credentials, VaultKey)> {
     let json = match entry(cfg)?.get_password() {
         Ok(s) => s,
         Err(keyring::Error::NoEntry) => {
-            return Err(anyhow!("this device is not set up for {}: run `obmem sync setup`", location(cfg)));
+            return Err(anyhow!(
+                "this device is not set up for {}: run `obmem sync setup`",
+                location(cfg)
+            ));
         }
         Err(e) => return Err(anyhow::Error::from(e).context("reading the OS keychain")),
     };
-    let s: Stored = serde_json::from_str(&json).context("the keychain entry for obmem-sync is damaged; run `obmem sync setup`")?;
+    let s: Stored = serde_json::from_str(&json)
+        .context("the keychain entry for obmem-sync is damaged; run `obmem sync setup`")?;
     let key = VaultKey::parse(&s.vault_key)?;
-    Ok((Credentials { access_key_id: s.access_key_id, secret_access_key: s.secret_access_key }, key))
+    Ok((
+        Credentials {
+            access_key_id: s.access_key_id,
+            secret_access_key: s.secret_access_key,
+        },
+        key,
+    ))
 }

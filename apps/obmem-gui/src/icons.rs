@@ -19,5 +19,8 @@ pub(crate) fn icon(paths: &str, size: f32) -> impl IntoElement {
     let markup = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">{paths}</svg>"#
     );
-    svg(ImageSrc::svg_markup(&markup)).w(px(size)).h(px(size)).flex_shrink_0()
+    svg(ImageSrc::svg_markup(&markup))
+        .w(px(size))
+        .h(px(size))
+        .flex_shrink_0()
 }

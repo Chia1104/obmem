@@ -8,7 +8,11 @@ use std::io::Read;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "obmem", version, about = "Obsidian-backed memory for coding agents (MCP server + CLI)")]
+#[command(
+    name = "obmem",
+    version,
+    about = "Obsidian-backed memory for coding agents (MCP server + CLI)"
+)]
 struct Cli {
     /// Project directory (defaults to cwd, walking up to .obmem.toml or .git).
     #[arg(long, global = true)]
@@ -190,16 +194,23 @@ enum HookCmd {
 /// never fail the agent: errors go to stderr, stdout gets the agent's "no-op" answer.
 fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<&str>) {
     let input = match session {
-        Some(s) => hooks::HookInput { session_id: Some(s.to_string()), ..Default::default() },
+        Some(s) => hooks::HookInput {
+            session_id: Some(s.to_string()),
+            ..Default::default()
+        },
         None => hooks::HookInput::from_stdin(),
     };
     let agent = match which {
-        HookCmd::SessionStart { agent, .. } | HookCmd::Stop { agent } | HookCmd::PreCompact { agent } => *agent,
+        HookCmd::SessionStart { agent, .. }
+        | HookCmd::Stop { agent }
+        | HookCmd::PreCompact { agent } => *agent,
     };
     if input.misrouted(agent) {
         return;
     }
-    let dir = project.map(PathBuf::from).or_else(|| input.project_dir().map(PathBuf::from));
+    let dir = project
+        .map(PathBuf::from)
+        .or_else(|| input.project_dir().map(PathBuf::from));
     // The hook's answer, and whether to sync the personal vault after it.
     let out = (|| -> Result<(String, bool)> {
         let cfg = config::Config::load(dir.as_deref())?;
@@ -214,7 +225,10 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
                     eprintln!("obmem: could not record the project: {e:#}");
                 }
                 let mut store = store::Store::open(cfg)?;
-                (hooks::session_start(&mut store, &input, agent, *max_chars, now)?, true)
+                (
+                    hooks::session_start(&mut store, &input, agent, *max_chars, now)?,
+                    true,
+                )
             }
             HookCmd::Stop { .. } => {
                 // A stop that asks the agent to log first is not the end of the turn: sync after
@@ -253,15 +267,27 @@ fn main() -> Result<()> {
     let mut cli = Cli::parse();
     // `--project ${workspaceFolder}` from a client that does not interpolate variables: ignore it
     // and fall back to the cwd (and, for `serve`, the client's roots) instead of failing to start.
-    if cli.project.as_ref().is_some_and(|p| p.to_string_lossy().contains("${")) {
-        eprintln!("obmem: ignoring uninterpolated --project {}", cli.project.as_ref().unwrap().display());
+    if cli
+        .project
+        .as_ref()
+        .is_some_and(|p| p.to_string_lossy().contains("${"))
+    {
+        eprintln!(
+            "obmem: ignoring uninterpolated --project {}",
+            cli.project.as_ref().unwrap().display()
+        );
         cli.project = None;
     }
     if let Cmd::Hook { which, session } = &cli.cmd {
         run_hook(which, cli.project.as_deref(), session.as_deref());
         return Ok(());
     }
-    if let Cmd::Sync { action, allow_deletes, background } = &cli.cmd {
+    if let Cmd::Sync {
+        action,
+        allow_deletes,
+        background,
+    } = &cli.cmd
+    {
         // Only the personal vault and the user's config are involved: no project to load.
         if *background {
             if let Ok(cfg) = config::sync_config() {
@@ -277,7 +303,11 @@ fn main() -> Result<()> {
         Cmd::Init => {
             let created = init::run(&cfg)?;
             projects::record(&cfg.project_root)?;
-            println!("Project vault: {}\nGlobal vault:  {}", cfg.project_vault.display(), cfg.global_vault.display());
+            println!(
+                "Project vault: {}\nGlobal vault:  {}",
+                cfg.project_vault.display(),
+                cfg.global_vault.display()
+            );
             if created.is_empty() {
                 println!("Nothing to do, everything already exists.");
             } else {
@@ -302,7 +332,14 @@ fn main() -> Result<()> {
             let mut store = store::Store::open(cfg)?;
             let (hits, problems) = store.search(&query.join(" "), None, None, limit)?;
             for h in hits {
-                println!("[[{}]] ({}/{}) {}\n    {}", h.id, h.scope, h.note_type, h.title, h.snippet.replace('\n', " "));
+                println!(
+                    "[[{}]] ({}/{}) {}\n    {}",
+                    h.id,
+                    h.scope,
+                    h.note_type,
+                    h.title,
+                    h.snippet.replace('\n', " ")
+                );
             }
             for p in problems {
                 eprintln!("note: {p}");
@@ -311,12 +348,17 @@ fn main() -> Result<()> {
         Cmd::Get { id } => {
             let mut store = store::Store::open(cfg)?;
             let (loc, content, bl) = store.get(&id)?;
-            let bl = bl.map(|b| b.join(", ")).unwrap_or_else(|e| format!("unavailable ({e})"));
+            let bl = bl
+                .map(|b| b.join(", "))
+                .unwrap_or_else(|e| format!("unavailable ({e})"));
             println!("<!-- {loc} | backlinks: {bl} -->\n{content}");
         }
         Cmd::Context { task, limit } => {
             let mut store = store::Store::open(cfg)?;
-            print!("{}", context::context(&mut store, &task.join(" "), limit, 6000)?);
+            print!(
+                "{}",
+                context::context(&mut store, &task.join(" "), limit, 6000)?
+            );
         }
         Cmd::Scan { files, staged } => {
             let store = store::Store::open(cfg.clone())?;
@@ -331,25 +373,47 @@ fn main() -> Result<()> {
             }
             // Fail closed: a file that cannot be read is an error, not a silent pass.
             for p in files {
-                let bytes = std::fs::read(&p).map_err(|e| anyhow::anyhow!("cannot scan {}: {e}", p.display()))?;
-                inputs.push((p.display().to_string(), String::from_utf8_lossy(&bytes).into_owned()));
+                let bytes = std::fs::read(&p)
+                    .map_err(|e| anyhow::anyhow!("cannot scan {}: {e}", p.display()))?;
+                inputs.push((
+                    p.display().to_string(),
+                    String::from_utf8_lossy(&bytes).into_owned(),
+                ));
             }
             let mut found = 0;
             for (name, text) in inputs {
                 for h in store.scanner().scan(&text) {
                     found += 1;
-                    println!("{name}:{}: {} ({}) {} fingerprint={}", h.line, h.rule, h.description, h.preview, h.fingerprint);
+                    println!(
+                        "{name}:{}: {} ({}) {} fingerprint={}",
+                        h.line, h.rule, h.description, h.preview, h.fingerprint
+                    );
                 }
             }
             if found > 0 {
                 std::process::exit(1);
             }
         }
-        Cmd::Audit { scope, rules, min_severity, write, json, fail_on } => {
+        Cmd::Audit {
+            scope,
+            rules,
+            min_severity,
+            write,
+            json,
+            fail_on,
+        } => {
             let mut store = store::Store::open(cfg)?;
-            let opts = audit::AuditOptions { scope, rules, today: chrono::Local::now().date_naive() };
+            let opts = audit::AuditOptions {
+                scope,
+                rules,
+                today: chrono::Local::now().date_naive(),
+            };
             let (report, stats) = store.audit(&opts, write.then_some(min_severity))?;
-            let shown: Vec<&audit::Issue> = report.issues.iter().filter(|i| i.severity >= min_severity).collect();
+            let shown: Vec<&audit::Issue> = report
+                .issues
+                .iter()
+                .filter(|i| i.severity >= min_severity)
+                .collect();
             if json {
                 let v = serde_json::json!({
                     "checked_notes": report.checked_notes,
@@ -359,7 +423,10 @@ fn main() -> Result<()> {
                 });
                 println!("{}", serde_json::to_string_pretty(&v)?);
             } else {
-                print!("{}", audit::report_text(&report, &shown, stats.as_ref(), min_severity, usize::MAX));
+                print!(
+                    "{}",
+                    audit::report_text(&report, &shown, stats.as_ref(), min_severity, usize::MAX)
+                );
             }
             if let Some(level) = fail_on
                 && report.issues.iter().any(|i| i.severity >= level)
@@ -367,31 +434,57 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Cmd::Resolve { id, verdict, comment } => {
+        Cmd::Resolve {
+            id,
+            verdict,
+            comment,
+        } => {
             let mut store = store::Store::open(cfg)?;
-            println!("{}", store.resolve_finding(&id, verdict, comment.as_deref(), "human (cli)", true)?);
+            println!(
+                "{}",
+                store.resolve_finding(&id, verdict, comment.as_deref(), "human (cli)", true)?
+            );
         }
         Cmd::ImportClaude { dir, dry_run } => {
             let dir = dir.unwrap_or_else(|| import::default_dir(&cfg.project_root));
             let items = import::plan(&dir)?;
             if dry_run {
                 for i in &items {
-                    println!("{} → {}/{} [[{}]] {}", i.source.display(), i.scope.as_str(), i.note_type.as_str(), i.name, i.title);
+                    println!(
+                        "{} → {}/{} [[{}]] {}",
+                        i.source.display(),
+                        i.scope.as_str(),
+                        i.note_type.as_str(),
+                        i.name,
+                        i.title
+                    );
                 }
-                println!("{} memories in {} (dry run, nothing written)", items.len(), dir.display());
+                println!(
+                    "{} memories in {} (dry run, nothing written)",
+                    items.len(),
+                    dir.display()
+                );
             } else {
                 let mut store = store::Store::open(cfg)?;
                 for (src, r) in import::run(&mut store, items)? {
                     match r {
-                        import::ImportResult::Imported(p) => println!("imported {} → {p}", src.display()),
-                        import::ImportResult::Skipped(why) => println!("skipped  {}: {why}", src.display()),
+                        import::ImportResult::Imported(p) => {
+                            println!("imported {} → {p}", src.display())
+                        }
+                        import::ImportResult::Skipped(why) => {
+                            println!("skipped  {}: {why}", src.display())
+                        }
                     }
                 }
             }
         }
         Cmd::Setup { agents, check } => {
             for agent in agents {
-                let r = if check { setup::check(&cfg, agent)? } else { setup::setup(&cfg, agent)? };
+                let r = if check {
+                    setup::check(&cfg, agent)?
+                } else {
+                    setup::setup(&cfg, agent)?
+                };
                 println!("{}:", agent.label());
                 for p in &r.changed {
                     println!("  {} {p}", if check { "missing  " } else { "updated  " });
@@ -446,7 +539,8 @@ fn main() -> Result<()> {
                 let state = match &v.obsidian {
                     status::Registration::Registered { id } => format!("registered (id {id})"),
                     status::Registration::NotRegistered => {
-                        "NOT registered: open the folder in Obsidian (\"Open folder as vault\")".into()
+                        "NOT registered: open the folder in Obsidian (\"Open folder as vault\")"
+                            .into()
                     }
                     status::Registration::Unknown(e) => format!("unknown ({e})"),
                 };
@@ -455,7 +549,10 @@ fn main() -> Result<()> {
             println!("drafts:         {} waiting for review", st.drafts);
             println!("findings:       {} open", st.open_findings);
             println!("secret rules:   {}", st.secret_rules);
-            println!("known secrets:  {} values loaded (from .env files / env vars, memory only)", st.known_secrets);
+            println!(
+                "known secrets:  {} values loaded (from .env files / env vars, memory only)",
+                st.known_secrets
+            );
             println!("secret mode:    {:?}", st.secret_mode);
             println!("sync:           {}", sync_status_line());
         }
@@ -485,8 +582,12 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             let passphrase = if sync::has_key(&remote)? {
                 rpassword::prompt_password("Backup passphrase: ")?
             } else {
-                eprintln!("This bucket holds no backup yet. Choose a passphrase: it encrypts the backup,");
-                eprintln!("and every other device unlocks it with the same one. Without it the backup cannot be read.");
+                eprintln!(
+                    "This bucket holds no backup yet. Choose a passphrase: it encrypts the backup,"
+                );
+                eprintln!(
+                    "and every other device unlocks it with the same one. Without it the backup cannot be read."
+                );
                 let first = rpassword::prompt_password("New backup passphrase: ")?;
                 if first.is_empty() {
                     anyhow::bail!("the passphrase cannot be empty");
@@ -512,7 +613,12 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             }
             for seq in seqs {
                 let m = sync::load_snapshot(&remote, &key, seq)?;
-                println!("{seq:>6}  {}  {:<20} {} files", m.created, m.device, m.files.len());
+                println!(
+                    "{seq:>6}  {}  {:<20} {} files",
+                    m.created,
+                    m.device,
+                    m.files.len()
+                );
             }
         }
         SyncCmd::Prune { dry_run } => {
@@ -524,7 +630,11 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             println!(
                 "{verb} {} snapshots ({}) and {} unused blobs, {:.1} MB; {} snapshots kept",
                 list.len(),
-                if list.is_empty() { "none".into() } else { list.join(", ") },
+                if list.is_empty() {
+                    "none".into()
+                } else {
+                    list.join(", ")
+                },
                 r.deleted_blobs,
                 r.freed_bytes as f64 / 1_000_000.0,
                 r.kept
@@ -538,8 +648,15 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
                 None => config::global_vault()?,
             };
             let r = sync::restore(&remote, &key, *snapshot, &target)?;
-            println!("restored snapshot {} ({} files) into {}", r.seq, r.files, target.display());
-            println!("next: open the folder in Obsidian (\"Open folder as vault\"); if it is the personal vault, `obmem sync` keeps it in sync from now on");
+            println!(
+                "restored snapshot {} ({} files) into {}",
+                r.seq,
+                r.files,
+                target.display()
+            );
+            println!(
+                "next: open the folder in Obsidian (\"Open folder as vault\"); if it is the personal vault, `obmem sync` keeps it in sync from now on"
+            );
         }
     }
     Ok(())
@@ -557,14 +674,19 @@ fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
         ("downloaded", &r.downloaded),
         ("deleted here", &r.deleted_local),
         ("deleted in the bucket", &r.deleted_remote),
-        ("left for the next sync (changed while syncing)", &r.deferred),
+        (
+            "left for the next sync (changed while syncing)",
+            &r.deferred,
+        ),
     ] {
         for n in names {
             println!("{label}: {n}");
         }
     }
     for n in &r.conflicts {
-        println!("CONFLICT: {n} is another device's version; merge it into the original, then delete it");
+        println!(
+            "CONFLICT: {n} is another device's version; merge it into the original, then delete it"
+        );
     }
     println!("{}", obmem_sync::summary(&r));
     Ok(())
@@ -576,7 +698,11 @@ fn sync_status_line() -> String {
         Ok(_) => return "not set up (add [sync] to your config, then `obmem sync setup`)".into(),
         Err(e) => return format!("config unreadable: {e:#}"),
     };
-    let auto = if cfg.auto_sync() { "" } else { " (automatic sync off)" };
+    let auto = if cfg.auto_sync() {
+        ""
+    } else {
+        " (automatic sync off)"
+    };
     match obmem_sync::last_status(&cfg) {
         None => format!("not run on this device yet{auto}"),
         Some(s) if s.ok => format!("{} at {}{auto}", s.message, s.at),
@@ -587,11 +713,15 @@ fn sync_status_line() -> String {
 /// After a session starts or a turn ends, sync the personal vault in a process of its own, so the
 /// agent never waits on the network. Errors go to the sync status, never to the agent.
 fn spawn_background_sync() {
-    let Ok(cfg) = config::sync_config() else { return };
+    let Ok(cfg) = config::sync_config() else {
+        return;
+    };
     if !cfg.auto_sync() {
         return;
     }
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["sync", "--background"])
         .stdin(std::process::Stdio::null())
@@ -620,8 +750,12 @@ fn spawn_background_sync() {
 /// until the last holder of its pipe closes it: without this, the agent would wait for the sync.
 #[cfg(windows)]
 fn stop_sharing_std_handles() {
-    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation};
-    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+    use windows_sys::Win32::Foundation::{
+        HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
     for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
         // SAFETY: plain Win32 calls on this process's own standard handles.
         unsafe {
@@ -651,21 +785,38 @@ fn prompt(label: &str) -> Result<String> {
 /// included; anything git cannot show is an error (fail closed).
 fn staged_vault_inputs(cfg: &config::Config) -> Result<Vec<(String, String)>> {
     let git = |args: &[&str]| -> Result<Vec<u8>> {
-        let out = std::process::Command::new("git").arg("-C").arg(&cfg.project_root).args(args).output()?;
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&cfg.project_root)
+            .args(args)
+            .output()?;
         if !out.status.success() {
-            anyhow::bail!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+            anyhow::bail!(
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
         }
         Ok(out.stdout)
     };
     // git prints paths relative to the repository top, which need not be the project root
-    let top = PathBuf::from(String::from_utf8_lossy(&git(&["rev-parse", "--show-toplevel"])?).trim());
+    let top =
+        PathBuf::from(String::from_utf8_lossy(&git(&["rev-parse", "--show-toplevel"])?).trim());
     let top = std::fs::canonicalize(&top).unwrap_or(top);
-    let vault = std::fs::canonicalize(&cfg.project_vault).unwrap_or_else(|_| cfg.project_vault.clone());
-    let listing = git(&["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"])?;
+    let vault =
+        std::fs::canonicalize(&cfg.project_vault).unwrap_or_else(|_| cfg.project_vault.clone());
+    let listing = git(&[
+        "diff",
+        "--cached",
+        "--name-only",
+        "-z",
+        "--diff-filter=ACMR",
+    ])?;
     let mut inputs = Vec::new();
     for raw in listing.split(|b| *b == 0).filter(|p| !p.is_empty()) {
-        let rel = String::from_utf8(raw.to_vec())
-            .map_err(|_| anyhow::anyhow!("staged path is not UTF-8: {}", String::from_utf8_lossy(raw)))?;
+        let rel = String::from_utf8(raw.to_vec()).map_err(|_| {
+            anyhow::anyhow!("staged path is not UTF-8: {}", String::from_utf8_lossy(raw))
+        })?;
         if !top.join(&rel).starts_with(&vault) {
             continue;
         }
@@ -688,11 +839,22 @@ mod tests {
             let out = std::process::Command::new("git")
                 .arg("-C")
                 .arg(&root)
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
                 .args(args)
                 .output()
                 .unwrap();
-            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         };
         g(&["init", "-q"]);
         let cfg = config::Config {
@@ -718,9 +880,15 @@ mod tests {
 
         let got = staged_vault_inputs(&cfg).unwrap();
         let names: Vec<&str> = got.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(names.contains(&"docs/kb/note.md") && names.contains(&"docs/kb/筆記 one.md"), "{names:?}");
+        assert!(
+            names.contains(&"docs/kb/note.md") && names.contains(&"docs/kb/筆記 one.md"),
+            "{names:?}"
+        );
         assert!(!names.contains(&"src.rs"), "{names:?}");
-        assert!(got.iter().all(|(_, text)| text.contains(token)), "staged content, not the cleaned working copy");
+        assert!(
+            got.iter().all(|(_, text)| text.contains(token)),
+            "staged content, not the cleaned working copy"
+        );
 
         // 4. a rename of a committed vault file is scanned too
         g(&["commit", "-qm", "c"]);

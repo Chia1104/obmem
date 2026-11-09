@@ -54,13 +54,20 @@ fn load(file: &Path) -> Result<Registry> {
 fn save(file: &Path, reg: &Registry) -> Result<()> {
     let dir = file.parent().context("registry path has no parent")?;
     std::fs::create_dir_all(dir)?;
-    let body = format!("# Projects obmem has seen on this machine. Maintained by obmem.\n\n{}", toml::to_string(reg)?);
+    let body = format!(
+        "# Projects obmem has seen on this machine. Maintained by obmem.\n\n{}",
+        toml::to_string(reg)?
+    );
     crate::store::atomic_write(dir, file, &body)
 }
 
 fn list_at(file: &Path) -> Result<Vec<Project>> {
     let mut v = load(file)?.projects;
-    v.sort_by(|a, b| b.last_seen.cmp(&a.last_seen).then_with(|| a.path.cmp(&b.path)));
+    v.sort_by(|a, b| {
+        b.last_seen
+            .cmp(&a.last_seen)
+            .then_with(|| a.path.cmp(&b.path))
+    });
     Ok(v)
 }
 
@@ -70,7 +77,10 @@ fn record_at(file: &Path, path: &Path, today: &str) -> Result<()> {
     match reg.projects.iter_mut().find(|p| p.path == path) {
         Some(p) if p.last_seen == today => return Ok(()),
         Some(p) => p.last_seen = today.to_string(),
-        None => reg.projects.push(Project { path, last_seen: today.to_string() }),
+        None => reg.projects.push(Project {
+            path,
+            last_seen: today.to_string(),
+        }),
     }
     save(file, &reg)
 }
@@ -103,12 +113,18 @@ mod tests {
         record_at(&file, &b, "2026-11-02").unwrap();
         record_at(&file, &a, "2026-11-03").unwrap(); // seen again: updated, not duplicated
         let listed = list_at(&file).unwrap();
-        assert_eq!(listed.iter().map(|p| p.path.clone()).collect::<Vec<_>>(), vec![a.clone(), b.clone()]);
+        assert_eq!(
+            listed.iter().map(|p| p.path.clone()).collect::<Vec<_>>(),
+            vec![a.clone(), b.clone()]
+        );
         assert_eq!(listed[0].last_seen, "2026-11-03");
 
         let written = std::fs::metadata(&file).unwrap().modified().unwrap();
         record_at(&file, &a, "2026-11-03").unwrap(); // same day: no write
-        assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), written);
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            written
+        );
 
         assert!(remove_at(&file, &b).unwrap());
         assert!(!remove_at(&file, &b).unwrap());

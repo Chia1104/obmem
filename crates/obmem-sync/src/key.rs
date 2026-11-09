@@ -22,7 +22,10 @@ impl VaultKey {
         let mut h = Sha256::new();
         h.update(b"obmem-sync blob id v1\0");
         h.update(identity.to_string().expose_secret().as_bytes());
-        Self { mac_key: h.finalize().into(), identity }
+        Self {
+            mac_key: h.finalize().into(),
+            identity,
+        }
     }
 
     /// `AGE-SECRET-KEY-1…`: what the keychain stores.
@@ -31,14 +34,20 @@ impl VaultKey {
     }
 
     pub fn parse(s: &str) -> Result<Self> {
-        let identity = s.trim().parse::<age::x25519::Identity>().map_err(|e| anyhow!("not a vault key: {e}"))?;
+        let identity = s
+            .trim()
+            .parse::<age::x25519::Identity>()
+            .map_err(|e| anyhow!("not a vault key: {e}"))?;
         Ok(Self::from_identity(identity))
     }
 
     /// `key.age`: the key encrypted with the passphrase (age scrypt).
     pub fn wrap(&self, passphrase: &SecretString) -> Result<Vec<u8>> {
         let recipient = age::scrypt::Recipient::new(passphrase.clone());
-        Ok(age::encrypt(&recipient, self.identity.to_string().expose_secret().as_bytes())?)
+        Ok(age::encrypt(
+            &recipient,
+            self.identity.to_string().expose_secret().as_bytes(),
+        )?)
     }
 
     pub fn unwrap(wrapped: &[u8], passphrase: &SecretString) -> Result<Self> {
@@ -49,13 +58,17 @@ impl VaultKey {
             }
             e => anyhow!("reading key.age: {e}"),
         })?;
-        Self::parse(std::str::from_utf8(&plain).map_err(|_| anyhow!("key.age does not hold a vault key"))?)
+        Self::parse(
+            std::str::from_utf8(&plain)
+                .map_err(|_| anyhow!("key.age does not hold a vault key"))?,
+        )
     }
 
     /// A blob's name on the remote: HMAC of its content, so equal files are stored once and the
     /// name tells nobody without the key what is inside.
     pub fn blob_id(&self, content: &[u8]) -> String {
-        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.mac_key).expect("HMAC takes any key length");
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(&self.mac_key)
+            .expect("HMAC takes any key length");
         mac.update(content);
         hex::encode(mac.finalize().into_bytes())
     }
@@ -76,11 +89,19 @@ mod tests {
     #[test]
     fn wrap_round_trips_and_rejects_a_wrong_passphrase() {
         let key = VaultKey::generate();
-        let wrapped = key.wrap(&SecretString::from("correct horse".to_string())).unwrap();
-        let back = VaultKey::unwrap(&wrapped, &SecretString::from("correct horse".to_string())).unwrap();
-        assert_eq!(back.to_secret().expose_secret(), key.to_secret().expose_secret());
+        let wrapped = key
+            .wrap(&SecretString::from("correct horse".to_string()))
+            .unwrap();
+        let back =
+            VaultKey::unwrap(&wrapped, &SecretString::from("correct horse".to_string())).unwrap();
+        assert_eq!(
+            back.to_secret().expose_secret(),
+            key.to_secret().expose_secret()
+        );
         assert_eq!(back.blob_id(b"x"), key.blob_id(b"x"));
-        let err = VaultKey::unwrap(&wrapped, &SecretString::from("wrong".to_string())).err().unwrap();
+        let err = VaultKey::unwrap(&wrapped, &SecretString::from("wrong".to_string()))
+            .err()
+            .unwrap();
         assert!(err.to_string().contains("wrong passphrase"), "{err}");
     }
 

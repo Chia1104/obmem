@@ -4,13 +4,15 @@
 //! which run obmem's blocking work off the engine thread and write the result back. A global is
 //! per surface, so each test has its own.
 
-use crate::data::{self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, SetupDone, Vault};
+use crate::data::{
+    self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, SetupDone, Vault,
+};
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
 use obmem_core::allowlist::Kind;
-use obmem_core::settings::{GlobalSettings, ProjectSettings, SyncSettings};
 use obmem_core::note::Scope;
+use obmem_core::settings::{GlobalSettings, ProjectSettings, SyncSettings};
 use obmem_core::store::Verdict;
 use std::path::PathBuf;
 
@@ -127,7 +129,11 @@ pub(crate) fn task_preview() -> Option<Load<String>> {
 
 /// The task last previewed, to seed the box when the tab is drawn again (untracked).
 pub(crate) fn last_task() -> String {
-    global::<TaskPreview>().get_untracked().0.map(|(t, _)| t).unwrap_or_default()
+    global::<TaskPreview>()
+        .get_untracked()
+        .0
+        .map(|(t, _)| t)
+        .unwrap_or_default()
 }
 
 pub(crate) fn sessions() -> Load<Sessions> {
@@ -142,7 +148,11 @@ pub(crate) fn scan_result() -> Option<Vec<Hit>> {
 /// The text last scanned, so the box keeps it when the tab is drawn again. Untracked: a scan
 /// must not redraw the tab that shows the box.
 pub(crate) fn last_scanned() -> String {
-    global::<ScanResult>().get_untracked().0.map(|(input, _)| input).unwrap_or_default()
+    global::<ScanResult>()
+        .get_untracked()
+        .0
+        .map(|(input, _)| input)
+        .unwrap_or_default()
 }
 
 fn set_notice(n: Option<Notice>) {
@@ -174,12 +184,17 @@ pub(crate) fn own_tasks() {
 
 /// Runs `task` under the window's owner.
 fn run_task(task: impl Future<Output = ()> + 'static) {
-    let owner = global::<Tasks>().with(|t| t.0).unwrap_or_else(Owner::current);
+    let owner = global::<Tasks>()
+        .with(|t| t.0)
+        .unwrap_or_else(Owner::current);
     owner.run(|| drop(spawn(task)));
 }
 
 /// Runs `work` on a blocking thread and hands its result to `then` on the engine thread.
-fn in_background<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static, then: impl FnOnce(R) + 'static) {
+fn in_background<R: Send + 'static>(
+    work: impl FnOnce() -> R + Send + 'static,
+    then: impl FnOnce(R) + 'static,
+) {
     run_task(async move {
         match blocking(work).await {
             Ok(r) => then(r),
@@ -189,7 +204,10 @@ fn in_background<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static, t
 }
 
 /// Runs a change to the shown project, then reports `done` and reads the project again.
-fn change_project(work: impl FnOnce(PathBuf) -> Result<(), String> + Send + 'static, done: impl Into<String>) {
+fn change_project(
+    work: impl FnOnce(PathBuf) -> Result<(), String> + Send + 'static,
+    done: impl Into<String>,
+) {
     let Some(path) = selected() else { return };
     let again = path.clone();
     let done = done.into();
@@ -217,7 +235,9 @@ pub(crate) fn load_projects(wanted: Option<PathBuf>) {
                 return;
             }
         };
-        let current = wanted.or_else(selected).filter(|p| rows.iter().any(|r| &r.path == p));
+        let current = wanted
+            .or_else(selected)
+            .filter(|p| rows.iter().any(|r| &r.path == p));
         let next = current.or_else(|| rows.first().map(|r| r.path.clone()));
         global::<Projects>().set(Projects(Load::Ready(rows)));
         match next {
@@ -282,15 +302,23 @@ pub(crate) fn show_tab(t: Tab) {
     match t {
         Tab::Agent => {
             global::<SessionStart>().set(SessionStart(Load::Loading));
-            in_background(move || data::session_start(&path), |r| {
-                global::<SessionStart>().set(SessionStart(r.map_or_else(Load::Failed, Load::Ready)));
-            });
+            in_background(
+                move || data::session_start(&path),
+                |r| {
+                    global::<SessionStart>()
+                        .set(SessionStart(r.map_or_else(Load::Failed, Load::Ready)));
+                },
+            );
         }
         Tab::Sessions => {
             global::<SessionsState>().set(SessionsState(Load::Loading));
-            in_background(move || data::sessions(&path), |r| {
-                global::<SessionsState>().set(SessionsState(r.map_or_else(Load::Failed, Load::Ready)));
-            });
+            in_background(
+                move || data::sessions(&path),
+                |r| {
+                    global::<SessionsState>()
+                        .set(SessionsState(r.map_or_else(Load::Failed, Load::Ready)));
+                },
+            );
         }
         _ => {}
     }
@@ -301,34 +329,47 @@ pub(crate) fn preview_task(task: String) {
     let Some(path) = selected() else { return };
     global::<TaskPreview>().set(TaskPreview(Some((task.clone(), Load::Loading))));
     let wanted = task.clone();
-    in_background(move || data::context_for(&path, &task), move |r| {
-        // A newer preview may have started meanwhile.
-        if last_task() == wanted {
-            global::<TaskPreview>().set(TaskPreview(Some((wanted, r.map_or_else(Load::Failed, Load::Ready)))));
-        }
-    });
+    in_background(
+        move || data::context_for(&path, &task),
+        move |r| {
+            // A newer preview may have started meanwhile.
+            if last_task() == wanted {
+                global::<TaskPreview>().set(TaskPreview(Some((
+                    wanted,
+                    r.map_or_else(Load::Failed, Load::Ready),
+                ))));
+            }
+        },
+    );
 }
 
 /// Imports the chosen Claude Code memory files as drafts.
 pub(crate) fn import_claude(chosen: Vec<PathBuf>) {
     let Some(path) = selected() else { return };
     let again = path.clone();
-    in_background(move || data::import_claude(&path, &chosen), move |r| {
-        set_notice(Some(match r {
-            Ok(lines) => Notice::Lines("Claude Code memory imported".into(), lines),
-            Err(e) => Notice::Error(e),
-        }));
-        reload(again);
-    });
+    in_background(
+        move || data::import_claude(&path, &chosen),
+        move |r| {
+            set_notice(Some(match r {
+                Ok(lines) => Notice::Lines("Claude Code memory imported".into(), lines),
+                Err(e) => Notice::Error(e),
+            }));
+            reload(again);
+        },
+    );
 }
 
 /// Asks for a folder and lists the project it is in.
 pub(crate) fn add_project() {
     run_task(async {
-        let dialog = OpenDialog::folders().title("Add a project").button_label("Add");
+        let dialog = OpenDialog::folders()
+            .title("Add a project")
+            .button_label("Add");
         match pick_paths(dialog).await {
             Ok(Some(paths)) => {
-                let Some(folder) = paths.into_iter().next() else { return };
+                let Some(folder) = paths.into_iter().next() else {
+                    return;
+                };
                 in_background(
                     move || data::add_project(&folder),
                     |r| match r {
@@ -387,11 +428,18 @@ pub(crate) fn set_up(agent: Agent) {
 // --- Settings and secrets ----------------------------------------------------
 
 pub(crate) fn save_settings(s: ProjectSettings) {
-    change_project(move |path| data::save_settings(&path, &s), "Settings saved.");
+    change_project(
+        move |path| data::save_settings(&path, &s),
+        "Settings saved.",
+    );
 }
 
 pub(crate) fn set_codex_auto_approve(on: bool) {
-    let done = if on { "Codex now runs obmem's tools without asking." } else { "Codex asks before running obmem's tools again." };
+    let done = if on {
+        "Codex now runs obmem's tools without asking."
+    } else {
+        "Codex asks before running obmem's tools again."
+    };
     change_project(move |path| data::set_codex_auto_approve(&path, on), done);
 }
 
@@ -436,7 +484,9 @@ fn after_allowlist_change(r: Result<(), String>, done: &str) {
     }
     refresh();
     // The allowlist changed: scan the last text again so its result shows what now passes.
-    if let Some(input) = global::<ScanResult>().with(|v| v.0.as_ref().map(|(input, _)| input.clone())) {
+    if let Some(input) =
+        global::<ScanResult>().with(|v| v.0.as_ref().map(|(input, _)| input.clone()))
+    {
         scan(input);
     }
     if screen() == Screen::Personal {
@@ -488,7 +538,12 @@ pub(crate) fn save_sync(s: SyncSettings) {
     );
 }
 
-pub(crate) fn connect_sync(access_key_id: String, secret: String, passphrase: String, repeat: String) {
+pub(crate) fn connect_sync(
+    access_key_id: String,
+    secret: String,
+    passphrase: String,
+    repeat: String,
+) {
     in_background(
         move || data::connect_sync(access_key_id, secret, passphrase, repeat),
         |r| match r {

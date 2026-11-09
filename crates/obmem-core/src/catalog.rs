@@ -52,9 +52,9 @@ impl Catalog {
                 continue;
             }
             // skip .obsidian, .git, .trash and similar
-            let walker = WalkDir::new(vr.root)
-                .into_iter()
-                .filter_entry(|e| e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.'));
+            let walker = WalkDir::new(vr.root).into_iter().filter_entry(|e| {
+                e.depth() == 0 || !e.file_name().to_string_lossy().starts_with('.')
+            });
             for entry in walker.filter_map(|e| e.ok()) {
                 let p = entry.path();
                 if !entry.file_type().is_file() || p.extension().is_none_or(|e| e != "md") {
@@ -62,20 +62,34 @@ impl Catalog {
                 }
                 // A sync conflict copy is another device's unmerged version: the audit reports it to
                 // a person, and agents must not take it for a note (`sync-conflict`).
-                if entry.file_name().to_string_lossy().contains(crate::audit::SYNC_CONFLICT_MARK) {
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(crate::audit::SYNC_CONFLICT_MARK)
+                {
                     continue;
                 }
-                let Ok(src) = std::fs::read_to_string(p) else { continue };
+                let Ok(src) = std::fs::read_to_string(p) else {
+                    continue;
+                };
                 let fm = Note::parse(&src).map(|n| n.fm).unwrap_or_default();
                 let id = p.file_stem().unwrap().to_string_lossy().into_owned();
                 notes.push(Meta {
-                    rel: p.strip_prefix(vr.root).unwrap_or(p).to_string_lossy().replace('\\', "/"),
+                    rel: p
+                        .strip_prefix(vr.root)
+                        .unwrap_or(p)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
                     path: p.to_path_buf(),
                     scope: vr.scope,
                     title: fm.title.clone().unwrap_or_else(|| id.clone()),
                     note_type: fm.note_type.unwrap_or_default(),
                     status: fm.status.unwrap_or_default(),
-                    mtime: entry.metadata().ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH),
+                    mtime: entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .unwrap_or(SystemTime::UNIX_EPOCH),
                     id,
                 });
             }
@@ -97,7 +111,12 @@ impl Catalog {
         Ok(self
             .notes
             .iter()
-            .filter(|m| m.id == key || m.title == key || m.rel == rel || m.rel.strip_suffix(".md") == Some(rel))
+            .filter(|m| {
+                m.id == key
+                    || m.title == key
+                    || m.rel == rel
+                    || m.rel.strip_suffix(".md") == Some(rel)
+            })
             .map(|m| (m.path.to_string_lossy().into_owned(), m.scope.to_string()))
             .collect())
     }
@@ -113,10 +132,17 @@ impl Catalog {
     }
 
     /// Most recently modified first.
-    pub fn list_by_status(&self, status: &str, limit: usize) -> Result<Vec<(String, String, String)>> {
+    pub fn list_by_status(
+        &self,
+        status: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String, String)>> {
         let mut v: Vec<&Meta> = self.notes.iter().filter(|m| m.status == status).collect();
         v.sort_by_key(|a| std::cmp::Reverse(a.mtime));
-        Ok(v.into_iter().take(limit).map(|m| (m.id.clone(), m.title.clone(), m.note_type.clone())).collect())
+        Ok(v.into_iter()
+            .take(limit)
+            .map(|m| (m.id.clone(), m.title.clone(), m.note_type.clone()))
+            .collect())
     }
 
     /// Every note, as of the last sync.
@@ -125,7 +151,10 @@ impl Catalog {
     }
 
     pub fn count_by_status(&self, status: &str, scope: &str) -> usize {
-        self.notes.iter().filter(|m| m.status == status && m.scope == scope).count()
+        self.notes
+            .iter()
+            .filter(|m| m.status == status && m.scope == scope)
+            .count()
     }
 
     /// Feedback and preference notes from the global vault (always relevant): (id, title, status).
@@ -151,10 +180,18 @@ mod tests {
     fn resolve_is_exact() {
         let dir = std::env::temp_dir().join(format!("obmem-cat-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("Decisions")).unwrap();
-        std::fs::write(dir.join("Decisions/a_b.md"), "---\ntitle: A B\nstatus: draft\n---\n").unwrap();
+        std::fs::write(
+            dir.join("Decisions/a_b.md"),
+            "---\ntitle: A B\nstatus: draft\n---\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("Decisions/axb.md"), "x").unwrap();
         let mut c = Catalog::default();
-        c.sync(&[VaultRoot { scope: "project", root: &dir }]).unwrap();
+        c.sync(&[VaultRoot {
+            scope: "project",
+            root: &dir,
+        }])
+        .unwrap();
         assert_eq!(c.resolve("a_b").unwrap().len(), 1);
         assert_eq!(c.resolve("A B").unwrap().len(), 1);
         assert_eq!(c.resolve("Decisions/a_b").unwrap().len(), 1);

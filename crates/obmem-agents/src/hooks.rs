@@ -14,9 +14,9 @@
 //!
 //! Hooks must never break a session: callers print errors to stderr and exit 0.
 
+use anyhow::Result;
 use obmem_core::config::{Config, SecretMode};
 use obmem_core::store::Store;
-use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -45,7 +45,13 @@ pub enum Agent {
 }
 
 impl Agent {
-    pub const ALL: [Agent; 5] = [Agent::Claude, Agent::Codex, Agent::Cursor, Agent::Copilot, Agent::Amp];
+    pub const ALL: [Agent; 5] = [
+        Agent::Claude,
+        Agent::Codex,
+        Agent::Cursor,
+        Agent::Copilot,
+        Agent::Amp,
+    ];
 
     /// The name on the command line (`--agent codex`).
     pub fn id(self) -> &'static str {
@@ -126,8 +132,13 @@ impl HookInput {
     }
 
     pub fn parse(json: &str) -> Self {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return Self::default() };
-        let first = |keys: &[&str]| keys.iter().find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(str::to_string));
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+            return Self::default();
+        };
+        let first = |keys: &[&str]| {
+            keys.iter()
+                .find_map(|k| v.get(*k).and_then(|x| x.as_str()).map(str::to_string))
+        };
         Self {
             session_id: first(&["session_id", "sessionId", "conversation_id"]),
             transcript_path: first(&["transcript_path", "transcriptPath"]).map(PathBuf::from),
@@ -138,7 +149,12 @@ impl HookInput {
             workspace_roots: v
                 .get("workspace_roots")
                 .and_then(|x| x.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str()).map(PathBuf::from).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str())
+                        .map(PathBuf::from)
+                        .collect()
+                })
                 .unwrap_or_default(),
             from_cursor: first(&["cursor_version", "generation_id"]).is_some(),
         }
@@ -155,7 +171,9 @@ impl HookInput {
 
     /// The project directory the agent is working in, if it says.
     pub fn project_dir(&self) -> Option<&Path> {
-        self.cwd.as_deref().or(self.workspace_roots.first().map(|p| p.as_path()))
+        self.cwd
+            .as_deref()
+            .or(self.workspace_roots.first().map(|p| p.as_path()))
     }
 
     fn continuing(&self) -> bool {
@@ -185,9 +203,13 @@ fn push_unique(v: &mut Vec<String>, s: String) {
 /// unknown lines are skipped, sidechains (subagents) are ignored.
 pub fn scan_transcript(path: &Path) -> Activity {
     let mut a = Activity::default();
-    let Ok(src) = std::fs::read_to_string(path) else { return a };
+    let Ok(src) = std::fs::read_to_string(path) else {
+        return a;
+    };
     for line in src.lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
         if v.get("isSidechain").and_then(|x| x.as_bool()) == Some(true) {
             continue;
         }
@@ -215,7 +237,9 @@ pub fn scan_transcript(path: &Path) -> Activity {
                     }
                     a.tools_since_log += 1;
                     if EDIT_TOOLS.contains(&name)
-                        && let Some(f) = b["input"]["file_path"].as_str().or(b["input"]["notebook_path"].as_str())
+                        && let Some(f) = b["input"]["file_path"]
+                            .as_str()
+                            .or(b["input"]["notebook_path"].as_str())
                     {
                         push_unique(&mut a.edited_since_log, f.to_string());
                         push_unique(&mut a.edited, f.to_string());
@@ -232,11 +256,17 @@ fn state_dir() -> PathBuf {
     if let Ok(p) = std::env::var("OBMEM_STATE_DIR") {
         return PathBuf::from(p);
     }
-    dirs::cache_dir().unwrap_or_else(|| obmem_core::config::home().join(".cache")).join("obmem/hook-state")
+    dirs::cache_dir()
+        .unwrap_or_else(|| obmem_core::config::home().join(".cache"))
+        .join("obmem/hook-state")
 }
 
 fn state_file(kind: &str, session: &str) -> PathBuf {
-    let safe: String = session.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(64).collect();
+    let safe: String = session
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(64)
+        .collect();
     state_dir().join(format!("{kind}-{safe}"))
 }
 
@@ -245,7 +275,9 @@ fn read_ts(p: &Path) -> Option<u64> {
 }
 
 fn secs(t: SystemTime) -> u64 {
-    t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    t.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn short_paths(files: &[String], root: &Path, n: usize) -> String {
@@ -253,14 +285,26 @@ fn short_paths(files: &[String], root: &Path, n: usize) -> String {
         .iter()
         .rev()
         .take(n)
-        .map(|f| Path::new(f).strip_prefix(root).map(|p| p.display().to_string()).unwrap_or_else(|_| f.clone()))
+        .map(|f| {
+            Path::new(f)
+                .strip_prefix(root)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| f.clone())
+        })
         .collect();
     shown.join(", ")
 }
 
 fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// Repo files (outside the project vault) modified or committed after `since`, oldest first.
@@ -268,7 +312,15 @@ pub fn changed_since(cfg: &Config, since: u64) -> Vec<String> {
     let root = &cfg.project_root;
     let in_vault = |rel: &str| root.join(rel).starts_with(&cfg.project_vault);
     let mut files: Vec<String> = Vec::new();
-    if let Some(log) = git(root, &["log", &format!("--since=@{since}"), "--name-only", "--pretty=format:"]) {
+    if let Some(log) = git(
+        root,
+        &[
+            "log",
+            &format!("--since=@{since}"),
+            "--name-only",
+            "--pretty=format:",
+        ],
+    ) {
         for l in log.lines().rev().map(str::trim).filter(|l| !l.is_empty()) {
             if !in_vault(l) {
                 push_unique(&mut files, l.to_string());
@@ -279,7 +331,10 @@ pub fn changed_since(cfg: &Config, since: u64) -> Vec<String> {
         for l in st.lines() {
             let Some(path) = l.get(3..) else { continue };
             let path = path.rsplit(" -> ").next().unwrap_or(path).trim_matches('"');
-            let modified = std::fs::metadata(root.join(path)).and_then(|m| m.modified()).map(secs).unwrap_or(u64::MAX);
+            let modified = std::fs::metadata(root.join(path))
+                .and_then(|m| m.modified())
+                .map(secs)
+                .unwrap_or(u64::MAX);
             if !in_vault(path) && modified > since {
                 push_unique(&mut files, path.to_string());
             }
@@ -301,7 +356,13 @@ fn last_log_entry(cfg: &Config) -> u64 {
 
 /// Session start: remember when the session began (for agents without a usable transcript),
 /// then return the memory context in the agent's format.
-pub fn session_start(store: &mut Store, input: &HookInput, agent: Agent, max_chars: usize, now: SystemTime) -> Result<String> {
+pub fn session_start(
+    store: &mut Store,
+    input: &HookInput,
+    agent: Agent,
+    max_chars: usize,
+    now: SystemTime,
+) -> Result<String> {
     if let Some(sid) = &input.session_id {
         let p = state_file("start", sid);
         if !p.exists() {
@@ -313,12 +374,22 @@ pub fn session_start(store: &mut Store, input: &HookInput, agent: Agent, max_cha
 }
 
 /// Stop hook: the reason to keep going, or `None` to let the agent stop.
-pub fn stop(cfg: &Config, input: &HookInput, agent: Agent, now: SystemTime) -> Result<Option<String>> {
+pub fn stop(
+    cfg: &Config,
+    input: &HookInput,
+    agent: Agent,
+    now: SystemTime,
+) -> Result<Option<String>> {
     if input.continuing() {
         return Ok(None);
     }
-    let Some(session) = &input.session_id else { return Ok(None) };
-    let claude_transcript = input.transcript_path.as_deref().filter(|p| agent == Agent::Claude && p.exists());
+    let Some(session) = &input.session_id else {
+        return Ok(None);
+    };
+    let claude_transcript = input
+        .transcript_path
+        .as_deref()
+        .filter(|p| agent == Agent::Claude && p.exists());
     let work = match claude_transcript {
         Some(t) => {
             let act = scan_transcript(t);
@@ -327,7 +398,10 @@ pub fn stop(cfg: &Config, input: &HookInput, agent: Agent, now: SystemTime) -> R
             }
             let mut w = format!("{} tool calls", act.tools_since_log);
             if !act.edited_since_log.is_empty() {
-                w.push_str(&format!(", edited {}", short_paths(&act.edited_since_log, &cfg.project_root, 6)));
+                w.push_str(&format!(
+                    ", edited {}",
+                    short_paths(&act.edited_since_log, &cfg.project_root, 6)
+                ));
             }
             w
         }
@@ -359,24 +433,41 @@ pub fn stop(cfg: &Config, input: &HookInput, agent: Agent, now: SystemTime) -> R
 pub fn pre_compact(store: &mut Store, input: &HookInput, agent: Agent) -> Result<String> {
     let trigger = input.trigger.as_deref().unwrap_or("auto");
     let mut entry = format!("[context compacted, {trigger}]");
-    let transcript = input.transcript_path.as_deref().filter(|p| agent == Agent::Claude && p.exists());
+    let transcript = input
+        .transcript_path
+        .as_deref()
+        .filter(|p| agent == Agent::Claude && p.exists());
     match transcript {
         Some(t) => {
             let act = scan_transcript(t);
             let recent: Vec<&String> = act.prompts.iter().rev().take(3).collect();
             if !recent.is_empty() {
-                let joined: Vec<String> = recent.iter().rev().map(|p| format!("\"{}\"", p.replace('\n', " "))).collect();
+                let joined: Vec<String> = recent
+                    .iter()
+                    .rev()
+                    .map(|p| format!("\"{}\"", p.replace('\n', " ")))
+                    .collect();
                 entry.push_str(&format!(" Recent requests: {}.", joined.join("; ")));
             }
             if !act.edited.is_empty() {
-                entry.push_str(&format!(" Files edited: {}.", short_paths(&act.edited, &store.cfg.project_root, 12)));
+                entry.push_str(&format!(
+                    " Files edited: {}.",
+                    short_paths(&act.edited, &store.cfg.project_root, 12)
+                ));
             }
         }
         None => {
-            let started = input.session_id.as_deref().and_then(|s| read_ts(&state_file("start", s))).unwrap_or(0);
+            let started = input
+                .session_id
+                .as_deref()
+                .and_then(|s| read_ts(&state_file("start", s)))
+                .unwrap_or(0);
             let files = changed_since(&store.cfg, started);
             if !files.is_empty() {
-                entry.push_str(&format!(" Files changed: {}.", short_paths(&files, &store.cfg.project_root, 12)));
+                entry.push_str(&format!(
+                    " Files changed: {}.",
+                    short_paths(&files, &store.cfg.project_root, 12)
+                ));
             }
         }
     }
@@ -468,14 +559,43 @@ mod tests {
         let t0 = UNIX_EPOCH + Duration::from_secs(1_000_000);
         let cfg = cfg_for(Path::new("/r"));
 
-        assert!(stop(&cfg, &input(&idle, false), Agent::Claude, t0).unwrap().is_none()); // nothing worth logging
-        assert!(stop(&cfg, &input(&busy, true), Agent::Claude, t0).unwrap().is_none()); // already continuing
-        let reason = stop(&cfg, &input(&busy, false), Agent::Claude, t0).unwrap().expect("blocks");
+        assert!(
+            stop(&cfg, &input(&idle, false), Agent::Claude, t0)
+                .unwrap()
+                .is_none()
+        ); // nothing worth logging
+        assert!(
+            stop(&cfg, &input(&busy, true), Agent::Claude, t0)
+                .unwrap()
+                .is_none()
+        ); // already continuing
+        let reason = stop(&cfg, &input(&busy, false), Agent::Claude, t0)
+            .unwrap()
+            .expect("blocks");
         assert!(reason.contains("src/a.rs"));
-        let v: serde_json::Value = serde_json::from_str(&Agent::Claude.stop_output(Some(&reason))).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&Agent::Claude.stop_output(Some(&reason))).unwrap();
         assert_eq!(v["decision"], "block");
-        assert!(stop(&cfg, &input(&busy, false), Agent::Claude, t0 + Duration::from_secs(60)).unwrap().is_none()); // cooldown
-        assert!(stop(&cfg, &input(&busy, false), Agent::Claude, t0 + STOP_COOLDOWN + Duration::from_secs(1)).unwrap().is_some());
+        assert!(
+            stop(
+                &cfg,
+                &input(&busy, false),
+                Agent::Claude,
+                t0 + Duration::from_secs(60)
+            )
+            .unwrap()
+            .is_none()
+        ); // cooldown
+        assert!(
+            stop(
+                &cfg,
+                &input(&busy, false),
+                Agent::Claude,
+                t0 + STOP_COOLDOWN + Duration::from_secs(1)
+            )
+            .unwrap()
+            .is_some()
+        );
 
         unsafe { std::env::remove_var("OBMEM_STATE_DIR") };
         let _ = std::fs::remove_dir_all(&dir);
@@ -497,7 +617,14 @@ mod tests {
             Command::new("git")
                 .arg("-C")
                 .arg(&repo)
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
                 .args(args)
                 .output()
                 .unwrap()
@@ -507,7 +634,11 @@ mod tests {
         g(&["add", "-A"]);
         g(&["commit", "-qm", "init"]);
         let cfg = cfg_for(&repo);
-        let input = HookInput { session_id: Some("c1".into()), loop_count: Some(0), ..Default::default() };
+        let input = HookInput {
+            session_id: Some("c1".into()),
+            loop_count: Some(0),
+            ..Default::default()
+        };
 
         // session starts now; nothing changed yet (old.rs was committed before) → let it stop
         let start = SystemTime::now() + Duration::from_secs(1);
@@ -521,13 +652,28 @@ mod tests {
         assert!(stop(&cfg, &input, Agent::Cursor, start).unwrap().is_none());
         std::thread::sleep(Duration::from_millis(1100));
         std::fs::write(repo.join("new.rs"), "y").unwrap();
-        let r = stop(&cfg, &input, Agent::Cursor, start).unwrap().expect("work since start");
-        assert!(r.contains("new.rs") && !r.contains("old.rs") && !r.contains("note.md"), "{r}");
-        let out: serde_json::Value = serde_json::from_str(&Agent::Cursor.stop_output(Some(&r))).unwrap();
-        assert!(out["followup_message"].as_str().unwrap().contains("memory_log"));
+        let r = stop(&cfg, &input, Agent::Cursor, start)
+            .unwrap()
+            .expect("work since start");
+        assert!(
+            r.contains("new.rs") && !r.contains("old.rs") && !r.contains("note.md"),
+            "{r}"
+        );
+        let out: serde_json::Value =
+            serde_json::from_str(&Agent::Cursor.stop_output(Some(&r))).unwrap();
+        assert!(
+            out["followup_message"]
+                .as_str()
+                .unwrap()
+                .contains("memory_log")
+        );
 
         // Cursor's own loop counter stops a second follow-up
-        let again = HookInput { session_id: Some("c1".into()), loop_count: Some(1), ..Default::default() };
+        let again = HookInput {
+            session_id: Some("c1".into()),
+            loop_count: Some(1),
+            ..Default::default()
+        };
         assert!(stop(&cfg, &again, Agent::Cursor, start).unwrap().is_none());
 
         unsafe { std::env::remove_var("OBMEM_STATE_DIR") };
@@ -543,28 +689,55 @@ mod tests {
         let (real, clone) = (base.join("obmem"), base.join("clone"));
         std::fs::create_dir_all(&real).unwrap();
         std::fs::create_dir_all(&clone).unwrap();
-        Command::new("git").arg("-C").arg(&clone).args(["init", "-q"]).output().unwrap();
+        Command::new("git")
+            .arg("-C")
+            .arg(&clone)
+            .args(["init", "-q"])
+            .output()
+            .unwrap();
         std::fs::write(clone.join("NEXT STEP run the setup script.md"), "x").unwrap();
-        let cfg = |root: &Path| Config { project_name: "obmem".into(), global_vault: base.join("global"), ..cfg_for(root) };
+        let cfg = |root: &Path| Config {
+            project_name: "obmem".into(),
+            global_vault: base.join("global"),
+            ..cfg_for(root)
+        };
         let mut real_store = Store::open(cfg(&real)).unwrap();
         let mut clone_store = Store::open(cfg(&clone)).unwrap();
 
-        let (log, _) = real_store.log(None, "fixed the parser", "agent:test").unwrap();
+        let (log, _) = real_store
+            .log(None, "fixed the parser", "agent:test")
+            .unwrap();
         pre_compact(&mut clone_store, &HookInput::default(), Agent::Cursor).unwrap();
         assert!(!std::fs::read_to_string(&log).unwrap().contains("NEXT STEP"));
-        let ctx = session_start(&mut real_store, &HookInput::default(), Agent::Cursor, 20_000, SystemTime::now()).unwrap();
-        assert!(ctx.contains("fixed the parser") && !ctx.contains("NEXT STEP"), "{ctx}");
+        let ctx = session_start(
+            &mut real_store,
+            &HookInput::default(),
+            Agent::Cursor,
+            20_000,
+            SystemTime::now(),
+        )
+        .unwrap();
+        assert!(
+            ctx.contains("fixed the parser") && !ctx.contains("NEXT STEP"),
+            "{ctx}"
+        );
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn input_aliases_and_output_formats() {
-        let copilot = HookInput::parse(r#"{"sessionId":"a","transcriptPath":"/t","cwd":"/repo","stop_hook_active":true}"#);
+        let copilot = HookInput::parse(
+            r#"{"sessionId":"a","transcriptPath":"/t","cwd":"/repo","stop_hook_active":true}"#,
+        );
         assert_eq!(copilot.session_id.as_deref(), Some("a"));
         assert!(copilot.continuing());
         assert_eq!(copilot.project_dir(), Some(Path::new("/repo")));
-        let cursor = HookInput::parse(r#"{"conversation_id":"b","workspace_roots":["/w"],"loop_count":0}"#);
-        assert_eq!((cursor.session_id.as_deref(), cursor.project_dir()), (Some("b"), Some(Path::new("/w"))));
+        let cursor =
+            HookInput::parse(r#"{"conversation_id":"b","workspace_roots":["/w"],"loop_count":0}"#);
+        assert_eq!(
+            (cursor.session_id.as_deref(), cursor.project_dir()),
+            (Some("b"), Some(Path::new("/w")))
+        );
         assert!(!cursor.continuing());
         // real cursor-agent sessionStart payload (2026.11.05): both ids present, which serde aliases reject
         let real = HookInput::parse(
@@ -579,13 +752,21 @@ mod tests {
         );
         assert!(t3.misrouted(Agent::Claude) && !t3.misrouted(Agent::Cursor));
         // Claude Code's own payload is never misrouted
-        let claude = HookInput::parse(r#"{"session_id":"c","transcript_path":"/t","cwd":"/repo","hook_event_name":"Stop"}"#);
+        let claude = HookInput::parse(
+            r#"{"session_id":"c","transcript_path":"/t","cwd":"/repo","hook_event_name":"Stop"}"#,
+        );
         assert!(!claude.misrouted(Agent::Claude));
 
         assert_eq!(Agent::Claude.session_start_output("ctx"), "ctx");
         assert_eq!(Agent::Codex.session_start_output("ctx"), "ctx");
-        assert_eq!(Agent::Cursor.session_start_output("ctx"), r#"{"additional_context":"ctx"}"#);
-        assert_eq!(Agent::Copilot.session_start_output("ctx"), r#"{"additionalContext":"ctx"}"#);
+        assert_eq!(
+            Agent::Cursor.session_start_output("ctx"),
+            r#"{"additional_context":"ctx"}"#
+        );
+        assert_eq!(
+            Agent::Copilot.session_start_output("ctx"),
+            r#"{"additionalContext":"ctx"}"#
+        );
         assert_eq!(Agent::Codex.stop_output(None), "{}"); // Codex requires JSON even when not blocking
         assert_eq!(Agent::Claude.stop_output(None), "");
     }

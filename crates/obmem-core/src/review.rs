@@ -46,10 +46,19 @@ impl Store {
                 (_, "draft") => Kind::Draft,
                 _ => continue,
             };
-            let Ok(note) = std::fs::read_to_string(&m.path).map_err(anyhow::Error::from).and_then(|s| Note::parse(&s)) else {
+            let Ok(note) = std::fs::read_to_string(&m.path)
+                .map_err(anyhow::Error::from)
+                .and_then(|s| Note::parse(&s))
+            else {
                 continue;
             };
-            let extra = |k: &str| note.fm.extra.get(k).and_then(|v| v.as_str()).map(String::from);
+            let extra = |k: &str| {
+                note.fm
+                    .extra
+                    .get(k)
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            };
             items.push((
                 m.mtime,
                 Item {
@@ -61,7 +70,12 @@ impl Store {
                     note_type: m.note_type.clone(),
                     status: m.status.clone(),
                     author: note.fm.author.clone().unwrap_or_default(),
-                    updated: note.fm.updated.clone().or(note.fm.created.clone()).unwrap_or_default(),
+                    updated: note
+                        .fm
+                        .updated
+                        .clone()
+                        .or(note.fm.created.clone())
+                        .unwrap_or_default(),
                     summary: summary(&note.body),
                     rule: extra("rule"),
                     severity: extra("severity"),
@@ -83,7 +97,11 @@ fn summary(body: &str) -> String {
         .take_while(|l| !l.is_empty())
         .collect();
     let s = text.join(" ");
-    if s.chars().count() > 280 { format!("{}…", s.chars().take(280).collect::<String>()) } else { s }
+    if s.chars().count() > 280 {
+        format!("{}…", s.chars().take(280).collect::<String>())
+    } else {
+        s
+    }
 }
 
 #[cfg(test)]
@@ -138,7 +156,10 @@ mod tests {
         assert_eq!(items[0].kind, Kind::Finding);
         assert_eq!(items[0].target.as_deref(), Some("Knowledge/old-note.md"));
         assert_eq!(items[0].summary, "Not checked for 200 days.");
-        assert_eq!((items[1].kind, items[1].title.as_str()), (Kind::Draft, "Use X"));
+        assert_eq!(
+            (items[1].kind, items[1].title.as_str()),
+            (Kind::Draft, "Use X")
+        );
         assert_eq!(items[1].summary, "We chose X.");
         let _ = std::fs::remove_dir_all(&dir);
     }

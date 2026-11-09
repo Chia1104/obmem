@@ -3,7 +3,10 @@
 
 use crate::data::{Personal, SyncInfo, Vault};
 use crate::state::{self, Load};
-use crate::widgets::{Level, action, card, check, field, heading, muted, notice_area, page, page_header, primary, switch_control, text_box};
+use crate::widgets::{
+    Level, action, card, check, field, heading, muted, notice_area, page, page_header, primary,
+    switch_control, text_box,
+};
 use nsh_core::prelude::*;
 use obmem_core::allowlist::{Allowlist, Kind};
 use obmem_core::settings::{GlobalSettings, SyncSettings};
@@ -12,14 +15,29 @@ pub(crate) fn personal_page() -> impl IntoElement {
     page(
         page_header(
             "Personal settings",
-            muted("Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault."),
+            muted(
+                "Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault.",
+            ),
             vec![],
         ),
-        view().gap_4().child(notice_area()).child(view().gap_4().child(dynamic(move || match state::personal() {
-            Load::Loading => vec![muted("Loading…").into_element()],
-            Load::Failed(e) => vec![check(Level::Error, "Could not read your settings", e).into_element()],
-            Load::Ready(p) => vec![form(&p).into_element(), sync_card(&p).into_element(), allowlist(&p).into_element()],
-        }))),
+        view()
+            .gap_4()
+            .child(notice_area())
+            .child(
+                view()
+                    .gap_4()
+                    .child(dynamic(move || match state::personal() {
+                        Load::Loading => vec![muted("Loading…").into_element()],
+                        Load::Failed(e) => vec![
+                            check(Level::Error, "Could not read your settings", e).into_element(),
+                        ],
+                        Load::Ready(p) => vec![
+                            form(&p).into_element(),
+                            sync_card(&p).into_element(),
+                            allowlist(&p).into_element(),
+                        ],
+                    })),
+            ),
     )
 }
 
@@ -62,9 +80,17 @@ fn sync_card(p: &Personal) -> View {
         .child(muted("Keep this personal vault the same on your Macs and PCs through an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Everything in the bucket is encrypted, and only your passphrase unlocks it."));
     let info = match &p.sync {
         Ok(i) => i.clone(),
-        Err(e) => return c.child(check(Level::Error, "Could not read the sync settings", e.clone())),
+        Err(e) => {
+            return c.child(check(
+                Level::Error,
+                "Could not read the sync settings",
+                e.clone(),
+            ));
+        }
     };
-    let c = c.child(sync_status(&info)).child(sync_settings(&info.settings));
+    let c = c
+        .child(sync_status(&info))
+        .child(sync_settings(&info.settings));
     if info.settings.bucket.is_empty() || info.connected == Ok(true) {
         return c;
     }
@@ -77,18 +103,40 @@ fn sync_status(info: &SyncInfo) -> View {
         return row.child(muted("Off: no bucket yet."));
     }
     match &info.connected {
-        Err(e) => return row.child(check(Level::Error, "Could not read the keychain", e.clone())),
+        Err(e) => {
+            return row.child(check(
+                Level::Error,
+                "Could not read the keychain",
+                e.clone(),
+            ));
+        }
         Ok(false) => {
-            return row.child(check(Level::Warn, "This device is not connected", "Enter the bucket's access key and your passphrase below."));
+            return row.child(check(
+                Level::Warn,
+                "This device is not connected",
+                "Enter the bucket's access key and your passphrase below.",
+            ));
         }
         Ok(true) => {}
     }
     let line = match &info.last {
-        None => check(Level::Warn, "Connected, not synced yet", "Sync now, or start an agent session in an obmem project."),
+        None => check(
+            Level::Warn,
+            "Connected, not synced yet",
+            "Sync now, or start an agent session in an obmem project.",
+        ),
         Some(s) if s.ok => check(Level::Ok, "Last sync", format!("{} ({})", s.message, s.at)),
-        Some(s) => check(Level::Error, "The last sync failed", format!("{} ({})", s.message, s.at)),
+        Some(s) => check(
+            Level::Error,
+            "The last sync failed",
+            format!("{} ({})", s.message, s.at),
+        ),
     };
-    row.child(line).child(view().flex_row().child(primary("Sync now", state::sync_now)))
+    row.child(line).child(
+        view()
+            .flex_row()
+            .child(primary("Sync now", state::sync_now)),
+    )
 }
 
 fn sync_settings(s: &SyncSettings) -> View {
@@ -136,7 +184,12 @@ fn connect_form() -> View {
     let passphrase = signal(String::new());
     let repeat = signal(String::new());
     let connect = move || {
-        state::connect_sync(key_id.get_untracked(), secret.get_untracked(), passphrase.get_untracked(), repeat.get_untracked())
+        state::connect_sync(
+            key_id.get_untracked(),
+            secret.get_untracked(),
+            passphrase.get_untracked(),
+            repeat.get_untracked(),
+        )
     };
     view()
         .test_id("sync-connect")
@@ -158,16 +211,49 @@ fn allowlist(p: &Personal) -> View {
         .child(muted("False positives the scanner lets through in every project. Only this list may hold patterns and words."));
     let a = match &p.allowlist {
         Ok(a) => a.clone(),
-        Err(e) => return c.child(check(Level::Error, "Could not read your allowlist", e.clone())),
+        Err(e) => {
+            return c.child(check(
+                Level::Error,
+                "Could not read your allowlist",
+                e.clone(),
+            ));
+        }
     };
-    let Allowlist { fingerprints, regexes, stopwords } = a;
-    c = c.child(entries("Fingerprints", "Exact values, added from a scan.", Kind::Fingerprint, fingerprints, false));
-    c = c.child(entries("Patterns", "Regexes matched against a suspected secret.", Kind::Regex, regexes, true));
-    c.child(entries("Words", "A value containing one of these (4+ letters) is not a secret.", Kind::Stopword, stopwords, true))
+    let Allowlist {
+        fingerprints,
+        regexes,
+        stopwords,
+    } = a;
+    c = c.child(entries(
+        "Fingerprints",
+        "Exact values, added from a scan.",
+        Kind::Fingerprint,
+        fingerprints,
+        false,
+    ));
+    c = c.child(entries(
+        "Patterns",
+        "Regexes matched against a suspected secret.",
+        Kind::Regex,
+        regexes,
+        true,
+    ));
+    c.child(entries(
+        "Words",
+        "A value containing one of these (4+ letters) is not a secret.",
+        Kind::Stopword,
+        stopwords,
+        true,
+    ))
 }
 
 fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool) -> View {
-    let mut block = view().test_id(&format!("entries-{}", title.to_lowercase())).gap_1().pt_3().child(text(title.to_string()).font_weight(FontWeight::MEDIUM)).child(muted(help.to_string()));
+    let mut block = view()
+        .test_id(&format!("entries-{}", title.to_lowercase()))
+        .gap_1()
+        .pt_3()
+        .child(text(title.to_string()).font_weight(FontWeight::MEDIUM))
+        .child(muted(help.to_string()));
     if list.is_empty() {
         block = block.child(muted("None."));
     }
@@ -180,7 +266,9 @@ fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool
                 .gap_3()
                 .py_1()
                 .child(text(e).flex_1().text_sm())
-                .child(action("Remove", move || state::disallow(Vault::Personal, kind, entry.clone()))),
+                .child(action("Remove", move || {
+                    state::disallow(Vault::Personal, kind, entry.clone())
+                })),
         );
     }
     if addable {
@@ -190,8 +278,14 @@ fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool
                 .flex_row()
                 .gap_2()
                 .pt_1()
-                .child(text_box(draft, &format!("Add to {}", title.to_lowercase())).test_id(&format!("add-{}", title.to_lowercase())).flex_1())
-                .child(action("Add", move || state::allow(Vault::Personal, kind, draft.get_untracked()))),
+                .child(
+                    text_box(draft, &format!("Add to {}", title.to_lowercase()))
+                        .test_id(&format!("add-{}", title.to_lowercase()))
+                        .flex_1(),
+                )
+                .child(action("Add", move || {
+                    state::allow(Vault::Personal, kind, draft.get_untracked())
+                })),
         );
     }
     block

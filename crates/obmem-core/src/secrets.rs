@@ -107,14 +107,19 @@ pub struct ScannerSources<'a> {
 /// (nearly) everything rather than for one known false positive.
 // Token-shaped fixtures are split with concat! so the source never contains a literal that
 // GitHub push protection (or any secret scanner) would flag; the compiled strings are unchanged.
-const ALLOWLIST_PROBES: &[&str] = &["", "Zx9qL2vR7tYp4mK8wB3nQ6sD", concat!("gh", "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA")];
+const ALLOWLIST_PROBES: &[&str] = &[
+    "",
+    "Zx9qL2vR7tYp4mK8wB3nQ6sD",
+    concat!("gh", "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA"),
+];
 const MIN_STOPWORD_LEN: usize = 4;
 
 fn read_rule_file(p: &Path) -> Result<Option<RuleFile>> {
     if !p.exists() {
         return Ok(None);
     }
-    let f = toml::from_str(&std::fs::read_to_string(p)?).with_context(|| format!("parsing {}", p.display()))?;
+    let f = toml::from_str(&std::fs::read_to_string(p)?)
+        .with_context(|| format!("parsing {}", p.display()))?;
     Ok(Some(f))
 }
 
@@ -148,7 +153,9 @@ fn merge_allowlist(into: &mut AllowlistDef, a: AllowlistDef, src: &Path, trusted
 /// Why the scanner would ignore this allowlist regex, if it would.
 pub fn regex_problem(r: &str) -> Option<String> {
     match Regex::new(r) {
-        Ok(re) if ALLOWLIST_PROBES.iter().any(|p| re.is_match(p)) => Some("it matches almost anything".into()),
+        Ok(re) if ALLOWLIST_PROBES.iter().any(|p| re.is_match(p)) => {
+            Some("it matches almost anything".into())
+        }
         Ok(_) => None,
         Err(e) => Some(format!("it is not a valid regex: {e}")),
     }
@@ -159,7 +166,10 @@ pub fn stopword_problem(w: &str) -> Option<String> {
     let w = w.trim().to_lowercase();
     if w.chars().count() < MIN_STOPWORD_LEN {
         Some(format!("it is shorter than {MIN_STOPWORD_LEN} characters"))
-    } else if ALLOWLIST_PROBES.iter().any(|p| p.to_lowercase().contains(&w)) {
+    } else if ALLOWLIST_PROBES
+        .iter()
+        .any(|p| p.to_lowercase().contains(&w))
+    {
         Some("it is too generic".into())
     } else {
         None
@@ -177,10 +187,16 @@ impl Scanner {
         // Vault files may come from an untrusted clone: they can add rules, never weaken
         // built-in ones, and allowlist files contribute only allowlist entries.
         for p in &src.extra_rule_files {
-            let Some(f) = read_rule_file(p)? else { continue };
+            let Some(f) = read_rule_file(p)? else {
+                continue;
+            };
             for r in f.rules {
                 if builtin_ids.contains(&r.id) {
-                    tracing::warn!("{}: ignoring rule '{}', built-in rules cannot be overridden", p.display(), r.id);
+                    tracing::warn!(
+                        "{}: ignoring rule '{}', built-in rules cannot be overridden",
+                        p.display(),
+                        r.id
+                    );
                 } else {
                     defs.push(r);
                 }
@@ -190,7 +206,9 @@ impl Scanner {
             }
         }
         for p in &src.allowlist_files {
-            let Some(f) = read_rule_file(p)? else { continue };
+            let Some(f) = read_rule_file(p)? else {
+                continue;
+            };
             if !f.rules.is_empty() {
                 tracing::warn!("{}: ignoring [[rules]] in an allowlist file", p.display());
             }
@@ -238,7 +256,11 @@ impl Scanner {
         let keyword_ac = if keywords.is_empty() {
             None
         } else {
-            Some(AhoCorasickBuilder::new().ascii_case_insensitive(true).build(&keywords)?)
+            Some(
+                AhoCorasickBuilder::new()
+                    .ascii_case_insensitive(true)
+                    .build(&keywords)?,
+            )
         };
 
         let known_values = collect_known_values(&src.env_files, src.scan_process_env);
@@ -259,7 +281,11 @@ impl Scanner {
             keyword_rules,
             known,
             known_count,
-            allow_regexes: allow.regexes.iter().filter_map(|r| Regex::new(r).ok()).collect(),
+            allow_regexes: allow
+                .regexes
+                .iter()
+                .filter_map(|r| Regex::new(r).ok())
+                .collect(),
             stopwords: allow.stopwords,
             allow_fingerprints: allow.fingerprints.into_iter().collect(),
         })
@@ -279,8 +305,14 @@ impl Scanner {
         // 1. exact known values
         if let Some(ac) = &self.known {
             for m in ac.find_iter(text) {
-                self.push_hit(&mut hits, text, m.start(), m.end(), "known-secret-value",
-                    "Exact value of a secret from .env / environment");
+                self.push_hit(
+                    &mut hits,
+                    text,
+                    m.start(),
+                    m.end(),
+                    "known-secret-value",
+                    "Exact value of a secret from .env / environment",
+                );
             }
         }
 
@@ -296,8 +328,12 @@ impl Scanner {
                 continue;
             }
             for caps in rule.re.captures_iter(text) {
-                let group = rule.secret_group.unwrap_or(if caps.len() > 1 { 1 } else { 0 });
-                let Some(m) = caps.get(group).or_else(|| caps.get(0)) else { continue };
+                let group = rule
+                    .secret_group
+                    .unwrap_or(if caps.len() > 1 { 1 } else { 0 });
+                let Some(m) = caps.get(group).or_else(|| caps.get(0)) else {
+                    continue;
+                };
                 let value = m.as_str();
                 if let Some(min) = rule.entropy
                     && shannon_entropy(value) < min
@@ -307,7 +343,14 @@ impl Scanner {
                 if is_placeholder(value) {
                     continue;
                 }
-                self.push_hit(&mut hits, text, m.start(), m.end(), &rule.id, &rule.description);
+                self.push_hit(
+                    &mut hits,
+                    text,
+                    m.start(),
+                    m.end(),
+                    &rule.id,
+                    &rule.description,
+                );
             }
         }
 
@@ -315,7 +358,10 @@ impl Scanner {
         // drop hits fully contained in an earlier one (same secret matched by two layers)
         let mut out: Vec<SecretHit> = Vec::new();
         for h in hits {
-            if out.last().is_some_and(|l| h.start >= l.start && h.end <= l.end) {
+            if out
+                .last()
+                .is_some_and(|l| h.start >= l.start && h.end <= l.end)
+            {
                 continue;
             }
             out.push(h);
@@ -323,7 +369,15 @@ impl Scanner {
         out
     }
 
-    fn push_hit(&self, hits: &mut Vec<SecretHit>, text: &str, start: usize, end: usize, rule: &str, desc: &str) {
+    fn push_hit(
+        &self,
+        hits: &mut Vec<SecretHit>,
+        text: &str,
+        start: usize,
+        end: usize,
+        rule: &str,
+        desc: &str,
+    ) {
         let value = &text[start..end];
         let fingerprint = fingerprint(value);
         if self.allow_fingerprints.contains(&fingerprint) {
@@ -350,8 +404,10 @@ impl Scanner {
     /// Replace every hit with `[REDACTED:<rule>]`. A private key is redacted through its END
     /// line (see [`redaction_end`]). Spans that overlap become one, named after the first hit.
     pub fn redact(text: &str, hits: &[SecretHit]) -> String {
-        let mut spans: Vec<(usize, usize, &str)> =
-            hits.iter().map(|h| (h.start, redaction_end(text, h), h.rule.as_str())).collect();
+        let mut spans: Vec<(usize, usize, &str)> = hits
+            .iter()
+            .map(|h| (h.start, redaction_end(text, h), h.rule.as_str()))
+            .collect();
         spans.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
         let mut out = String::with_capacity(text.len());
         let mut pos = 0;
@@ -369,8 +425,9 @@ impl Scanner {
 
 /// The BEGIN line of a PEM private key, as the built-in `private-key` rule matches it, and the
 /// END line that closes the key.
-static KEY_BEGIN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----").unwrap());
+static KEY_BEGIN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----").unwrap()
+});
 static KEY_END: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----").unwrap());
 
@@ -380,7 +437,9 @@ static KEY_END: LazyLock<Regex> =
 /// to the end of the text when there is none: whatever the layout, no part of the key is kept.
 fn redaction_end(text: &str, h: &SecretHit) -> usize {
     match KEY_BEGIN.find_iter(&text[h.start..h.end]).last() {
-        Some(b) => KEY_END.find_at(text, h.start + b.end()).map_or(text.len(), |e| e.end().max(h.end)),
+        Some(b) => KEY_END
+            .find_at(text, h.start + b.end())
+            .map_or(text.len(), |e| e.end().max(h.end)),
         None => h.end,
     }
 }
@@ -394,17 +453,35 @@ pub fn shannon_entropy(s: &str) -> f64 {
     for c in s.chars() {
         *counts.entry(c).or_insert(0usize) += 1;
     }
-    counts.values().map(|&c| {
-        let p = c as f64 / n;
-        -p * p.log2()
-    }).sum()
+    counts
+        .values()
+        .map(|&c| {
+            let p = c as f64 / n;
+            -p * p.log2()
+        })
+        .sum()
 }
 
 fn is_placeholder(v: &str) -> bool {
     let l = v.to_lowercase();
     const MARKERS: &[&str] = &[
-        "xxxx", "****", "example", "placeholder", "changeme", "dummy", "your_", "your-",
-        "<", "${", "{{", "redacted", "sample", "fake", "test1234", "replace_me", "replaceme",
+        "xxxx",
+        "****",
+        "example",
+        "placeholder",
+        "changeme",
+        "dummy",
+        "your_",
+        "your-",
+        "<",
+        "${",
+        "{{",
+        "redacted",
+        "sample",
+        "fake",
+        "test1234",
+        "replace_me",
+        "replaceme",
     ];
     if MARKERS.iter().any(|m| l.contains(m)) {
         return true;
@@ -424,7 +501,16 @@ fn mask(v: &str) -> String {
 }
 
 const SENSITIVE_NAME: &[&str] = &[
-    "KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "PWD", "CREDENTIAL", "DSN", "PRIVATE", "AUTH",
+    "KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "PWD",
+    "CREDENTIAL",
+    "DSN",
+    "PRIVATE",
+    "AUTH",
 ];
 
 /// Names that contain a sensitive-looking word but hold paths: `PWD` (cwd, not a password),
@@ -451,7 +537,9 @@ fn usable_value(v: &str) -> bool {
 fn collect_known_values(env_files: &[std::path::PathBuf], scan_process_env: bool) -> Vec<String> {
     let mut vals: HashSet<String> = HashSet::new();
     for f in env_files {
-        let Ok(s) = std::fs::read_to_string(f) else { continue };
+        let Ok(s) = std::fs::read_to_string(f) else {
+            continue;
+        };
         for line in s.lines() {
             let line = line.trim();
             if line.starts_with('#') {
@@ -500,7 +588,11 @@ mod tests {
     #[test]
     fn catches_prefixed_tokens() {
         let s = scanner_with_env("");
-        let t = concat!("token is gh", "p_abcdefghijklmnopqrstuvwxyz0123456789 ok\nkey AKIA", "IOSFODNN7EXAMPLF");
+        let t = concat!(
+            "token is gh",
+            "p_abcdefghijklmnopqrstuvwxyz0123456789 ok\nkey AKIA",
+            "IOSFODNN7EXAMPLF"
+        );
         let hits = s.scan(t);
         let ids: Vec<_> = hits.iter().map(|h| h.rule.as_str()).collect();
         assert!(ids.contains(&"github-token"), "{ids:?}");
@@ -528,8 +620,14 @@ mod tests {
     fn placeholders_and_prose_ignored() {
         let s = scanner_with_env("");
         assert!(s.scan("set API_KEY=<YOUR_KEY_HERE> in .env").is_empty());
-        assert!(s.scan("the token refresh flow rotates every 15 minutes").is_empty());
-        assert!(s.scan("postgres://user:${DB_PASSWORD}@localhost/db").is_empty());
+        assert!(
+            s.scan("the token refresh flow rotates every 15 minutes")
+                .is_empty()
+        );
+        assert!(
+            s.scan("postgres://user:${DB_PASSWORD}@localhost/db")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -542,11 +640,16 @@ mod tests {
 
     const KEY_HEAD: &str = concat!("-----BEGIN ", "RSA PRIVATE KEY-----");
     const KEY_TAIL: &str = concat!("-----END ", "RSA PRIVATE KEY-----");
-    const KEY_BODY: [&str; 2] =
-        ["Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3Bx", "cXdlcnR5dWlvcGFzZGZnaGprbHp4Y3Zibm0xMjM0NTY3ODkwUVdF"];
+    const KEY_BODY: [&str; 2] = [
+        "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWprbG1ub3Bx",
+        "cXdlcnR5dWlvcGFzZGZnaGprbHp4Y3Zibm0xMjM0NTY3ODkwUVdF",
+    ];
 
     fn assert_no_key(redacted: &str) {
-        assert!(KEY_BODY.iter().all(|b| !redacted.contains(b)) && !redacted.contains("-----END"), "{redacted}");
+        assert!(
+            KEY_BODY.iter().all(|b| !redacted.contains(b)) && !redacted.contains("-----END"),
+            "{redacted}"
+        );
     }
 
     #[test]
@@ -561,7 +664,9 @@ mod tests {
             format!("# {KEY_HEAD}\n# {b1}\n# {b2}\n# {KEY_TAIL}"),
             format!("{KEY_HEAD}\r{b1}\r{b2}\r{KEY_TAIL}"),
             format!("{{\"key\": \"{KEY_HEAD}\\\\n{b1}\\\\n{b2}\\\\n{KEY_TAIL}\\\\n\"}}"),
-            format!("{KEY_HEAD}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0A1B2C\n\n{b1}\n{b2}\n{KEY_TAIL}"),
+            format!(
+                "{KEY_HEAD}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0A1B2C\n\n{b1}\n{b2}\n{KEY_TAIL}"
+            ),
         ];
         for key in layouts {
             let t = format!("before the key\n{key}\nafter the key");
@@ -571,7 +676,10 @@ mod tests {
             assert_eq!(&t[hits[0].start..hits[0].end], KEY_HEAD);
             let red = Scanner::redact(&t, &hits);
             assert_no_key(&red);
-            assert!(red.starts_with("before the key\n") && red.ends_with("\nafter the key"), "{red}");
+            assert!(
+                red.starts_with("before the key\n") && red.ends_with("\nafter the key"),
+                "{red}"
+            );
             assert!(red.contains("[REDACTED:private-key]"), "{red}");
         }
     }
@@ -582,14 +690,23 @@ mod tests {
         let [b1, b2] = KEY_BODY;
         let t = format!("a\n{KEY_HEAD}\n{b1}\n{KEY_TAIL}\nmiddle\n{KEY_HEAD}\n{b2}\n{KEY_TAIL}\nz");
         let hits = s.scan(&t);
-        assert_eq!(Scanner::redact(&t, &hits), "a\n[REDACTED:private-key]\nmiddle\n[REDACTED:private-key]\nz");
+        assert_eq!(
+            Scanner::redact(&t, &hits),
+            "a\n[REDACTED:private-key]\nmiddle\n[REDACTED:private-key]\nz"
+        );
     }
 
     #[test]
     fn redact_without_an_end_line_removes_the_rest_of_the_text() {
         let s = scanner_with_env("");
         let [b1, b2] = KEY_BODY;
-        let t = format!(concat!("note\n{}\n{}\n{} see also gh", "p_abcdefghijklmnopqrstuvwxyz0123456789 ok"), KEY_HEAD, b1, b2);
+        let t = format!(
+            concat!(
+                "note\n{}\n{}\n{} see also gh",
+                "p_abcdefghijklmnopqrstuvwxyz0123456789 ok"
+            ),
+            KEY_HEAD, b1, b2
+        );
         let hits = s.scan(&t);
         // Both secrets are still reported on their own.
         let ids: Vec<_> = hits.iter().map(|h| h.rule.as_str()).collect();
@@ -602,12 +719,17 @@ mod tests {
         // A multi-line .env value: the line parser keeps only the BEGIN line as a known value,
         // and that hit replaces the identical `private-key` one.
         let [b1, b2] = KEY_BODY;
-        let s = scanner_with_env(&format!("JWT_PRIVATE_KEY=\"{KEY_HEAD}\n{b1}\n{b2}\n{KEY_TAIL}\"\n"));
+        let s = scanner_with_env(&format!(
+            "JWT_PRIVATE_KEY=\"{KEY_HEAD}\n{b1}\n{b2}\n{KEY_TAIL}\"\n"
+        ));
         let t = format!("x\n{KEY_HEAD}\n{b1}\n{b2}\n{KEY_TAIL}\ny");
         let hits = s.scan(&t);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].rule, "known-secret-value");
-        assert_eq!(Scanner::redact(&t, &hits), "x\n[REDACTED:known-secret-value]\ny");
+        assert_eq!(
+            Scanner::redact(&t, &hits),
+            "x\n[REDACTED:known-secret-value]\ny"
+        );
     }
 
     #[test]
@@ -621,7 +743,11 @@ mod tests {
         std::fs::write(&allow, "[[rules]]\nid = \"extra\"\nregex = 'zzz'\n[allowlist]\nstopwords = ['example-token']\n").unwrap();
         // untrusted (project vault): broad entries are dropped, fingerprints kept
         let untrusted = dir.join("project-allow.toml");
-        std::fs::write(&untrusted, "[allowlist]\nregexes = ['^ghp_']\nstopwords = ['qm4zr8']\nfingerprints = ['abc']\n").unwrap();
+        std::fs::write(
+            &untrusted,
+            "[allowlist]\nregexes = ['^ghp_']\nstopwords = ['qm4zr8']\nfingerprints = ['abc']\n",
+        )
+        .unwrap();
         let sc = Scanner::new(ScannerSources {
             extra_rule_files: vec![&rules],
             allowlist_files: vec![&allow, &untrusted],
@@ -631,7 +757,13 @@ mod tests {
         })
         .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
-        assert!(!sc.scan(concat!("token gh", "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA here")).is_empty());
+        assert!(
+            !sc.scan(concat!(
+                "token gh",
+                "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA here"
+            ))
+            .is_empty()
+        );
         assert_eq!(sc.stopwords, vec!["example-token".to_string()]);
         assert_eq!(sc.allow_regexes.len(), 0);
         assert!(sc.allow_fingerprints.contains("abc"));
@@ -640,7 +772,11 @@ mod tests {
 
     #[test]
     fn path_like_env_values_are_not_secrets() {
-        assert!(!is_sensitive_name("PWD") && !is_sensitive_name("OLDPWD") && !is_sensitive_name("SSH_AUTH_SOCK"));
+        assert!(
+            !is_sensitive_name("PWD")
+                && !is_sensitive_name("OLDPWD")
+                && !is_sensitive_name("SSH_AUTH_SOCK")
+        );
         assert!(is_sensitive_name("DB_PWD") && is_sensitive_name("GITHUB_TOKEN"));
         let here = std::env::temp_dir();
         assert!(!usable_value(&here.to_string_lossy()));

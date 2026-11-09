@@ -14,7 +14,9 @@ fn put(root: Option<&Path>, path: &Path, content: &str, created: &mut Vec<String
         }
         return Ok(());
     }
-    let dir = path.parent().ok_or_else(|| anyhow::anyhow!("no parent for {}", path.display()))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("no parent for {}", path.display()))?;
     if let Some(r) = root {
         crate::config::ensure_within(r, dir)?;
     }
@@ -22,7 +24,10 @@ fn put(root: Option<&Path>, path: &Path, content: &str, created: &mut Vec<String
     if let Some(r) = root {
         crate::config::ensure_within(r, dir)?;
     }
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
     std::io::Write::write_all(&mut f, content.as_bytes())?;
     created.push(path.display().to_string());
     Ok(())
@@ -133,33 +138,104 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
         ),
         &mut created,
     )?;
-    for d in ["Architecture", "Decisions", "Knowledge", "Runbooks", "Findings", "Inbox", "Archive"] {
+    for d in [
+        "Architecture",
+        "Decisions",
+        "Knowledge",
+        "Runbooks",
+        "Findings",
+        "Inbox",
+        "Archive",
+    ] {
         put(Some(pv), &pv.join(d).join(".gitkeep"), "", &mut created)?;
     }
     // Obsidian's own app state (workspace layout, plugin caches) is per person, not team knowledge.
-    put(Some(pv), &pv.join(".gitignore"), "# Obsidian app state is per person\n.obsidian/\n", &mut created)?;
-    put(Some(pv), &pv.join("_system/secret-allowlist.toml"), ALLOWLIST, &mut created)?;
-    put(Some(pv), &pv.join("_system/secret-rules.toml"), RULES, &mut created)?;
-    put(Some(pv), &pv.join("_system/Review.base"), REVIEW_BASE, &mut created)?;
-    put(Some(pv), &pv.join("_system/Findings.base"), FINDINGS_BASE, &mut created)?;
-    put(Some(pv), &pv.join(crate::audit::SUPPRESSIONS_FILE), crate::audit::SUPPRESSIONS_TEMPLATE, &mut created)?;
+    put(
+        Some(pv),
+        &pv.join(".gitignore"),
+        "# Obsidian app state is per person\n.obsidian/\n",
+        &mut created,
+    )?;
+    put(
+        Some(pv),
+        &pv.join("_system/secret-allowlist.toml"),
+        ALLOWLIST,
+        &mut created,
+    )?;
+    put(
+        Some(pv),
+        &pv.join("_system/secret-rules.toml"),
+        RULES,
+        &mut created,
+    )?;
+    put(
+        Some(pv),
+        &pv.join("_system/Review.base"),
+        REVIEW_BASE,
+        &mut created,
+    )?;
+    put(
+        Some(pv),
+        &pv.join("_system/Findings.base"),
+        FINDINGS_BASE,
+        &mut created,
+    )?;
+    put(
+        Some(pv),
+        &pv.join(crate::audit::SUPPRESSIONS_FILE),
+        crate::audit::SUPPRESSIONS_TEMPLATE,
+        &mut created,
+    )?;
     put(
         Some(pv),
         &pv.join("Templates/decision.md"),
-        &template("decision", "## Context\n\n## Decision\n\n## Alternatives considered\n\n## Consequences\n"),
+        &template(
+            "decision",
+            "## Context\n\n## Decision\n\n## Alternatives considered\n\n## Consequences\n",
+        ),
         &mut created,
     )?;
-    put(Some(pv), &pv.join("Templates/fact.md"), &template("fact", ""), &mut created)?;
-    put(Some(pv), &pv.join("Templates/procedure.md"), &template("procedure", "## Steps\n1. \n"), &mut created)?;
+    put(
+        Some(pv),
+        &pv.join("Templates/fact.md"),
+        &template("fact", ""),
+        &mut created,
+    )?;
+    put(
+        Some(pv),
+        &pv.join("Templates/procedure.md"),
+        &template("procedure", "## Steps\n1. \n"),
+        &mut created,
+    )?;
 
     // Global vault (personal)
     for d in ["Global/Feedback", "Global/Preferences"] {
         put(Some(gv), &gv.join(d).join(".gitkeep"), "", &mut created)?;
     }
-    put(Some(gv), &gv.join("_system/secret-allowlist.toml"), ALLOWLIST, &mut created)?;
-    put(Some(gv), &gv.join("_system/Findings.base"), FINDINGS_BASE, &mut created)?;
-    put(Some(gv), &gv.join(crate::audit::SUPPRESSIONS_FILE), crate::audit::SUPPRESSIONS_TEMPLATE, &mut created)?;
-    put(Some(gv), &cfg.global_project_dir().join("Sessions/.gitkeep"), "", &mut created)?;
+    put(
+        Some(gv),
+        &gv.join("_system/secret-allowlist.toml"),
+        ALLOWLIST,
+        &mut created,
+    )?;
+    put(
+        Some(gv),
+        &gv.join("_system/Findings.base"),
+        FINDINGS_BASE,
+        &mut created,
+    )?;
+    put(
+        Some(gv),
+        &gv.join(crate::audit::SUPPRESSIONS_FILE),
+        crate::audit::SUPPRESSIONS_TEMPLATE,
+        &mut created,
+    )?;
+    put(
+        Some(gv),
+        &cfg.global_project_dir().join("Sessions/.gitkeep"),
+        "",
+        &mut created,
+    )?;
     Ok(created)
 }
 
@@ -209,18 +285,46 @@ mod tests {
         // a dangling symlink planted where init wants to write (path.exists() would say false)
         std::os::unix::fs::symlink(outside.join("planted.txt"), vault.join("Index.md")).unwrap();
         assert!(put(Some(&vault), &vault.join("Index.md"), "x", &mut created).is_err());
-        assert!(!outside.join("planted.txt").exists(), "nothing written through the symlink");
+        assert!(
+            !outside.join("planted.txt").exists(),
+            "nothing written through the symlink"
+        );
 
         // a symlinked folder inside the vault that points outside it
         std::os::unix::fs::symlink(&outside, vault.join("Decisions")).unwrap();
-        assert!(put(Some(&vault), &vault.join("Decisions/.gitkeep"), "", &mut created).is_err());
+        assert!(
+            put(
+                Some(&vault),
+                &vault.join("Decisions/.gitkeep"),
+                "",
+                &mut created
+            )
+            .is_err()
+        );
         assert!(!outside.join(".gitkeep").exists());
 
         // normal files are created once, then left alone
-        assert!(put(Some(&vault), &vault.join("Runbooks/.gitkeep"), "", &mut created).is_ok());
+        assert!(
+            put(
+                Some(&vault),
+                &vault.join("Runbooks/.gitkeep"),
+                "",
+                &mut created
+            )
+            .is_ok()
+        );
         std::fs::write(vault.join("Runbooks/.gitkeep"), "mine").unwrap();
-        put(Some(&vault), &vault.join("Runbooks/.gitkeep"), "", &mut created).unwrap();
-        assert_eq!(std::fs::read_to_string(vault.join("Runbooks/.gitkeep")).unwrap(), "mine");
+        put(
+            Some(&vault),
+            &vault.join("Runbooks/.gitkeep"),
+            "",
+            &mut created,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(vault.join("Runbooks/.gitkeep")).unwrap(),
+            "mine"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

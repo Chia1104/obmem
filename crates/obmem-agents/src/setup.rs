@@ -3,9 +3,9 @@
 //! already there (anything mentioning `obmem serve` / `obmem hook`) is left alone, so running
 //! it again is safe. Commands use `obmem` from PATH so the files can be committed.
 
-use obmem_core::config::Config;
 use crate::hooks::Agent;
 use anyhow::{Context, Result};
+use obmem_core::config::Config;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -19,20 +19,33 @@ pub struct Report {
 
 impl Report {
     fn new() -> Self {
-        Self { changed: vec![], unchanged: vec![], manual: vec![] }
+        Self {
+            changed: vec![],
+            unchanged: vec![],
+            manual: vec![],
+        }
     }
     fn note(&mut self, path: &Path, changed: bool) {
         let p = path.display().to_string();
-        if changed { self.changed.push(p) } else { self.unchanged.push(p) }
+        if changed {
+            self.changed.push(p)
+        } else {
+            self.unchanged.push(p)
+        }
     }
 }
 
 /// The version of the `obmem` that agents run: every command `setup` writes calls `obmem` from
 /// PATH. `None` when it is not on PATH.
 pub fn cli_version() -> Option<String> {
-    let out = std::process::Command::new("obmem").arg("--version").output().ok()?;
+    let out = std::process::Command::new("obmem")
+        .arg("--version")
+        .output()
+        .ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
-    out.status.success().then(|| text.trim().trim_start_matches("obmem").trim().to_string())
+    out.status
+        .success()
+        .then(|| text.trim().trim_start_matches("obmem").trim().to_string())
 }
 
 const CODEX_CONFIG: &str = ".codex/config.toml";
@@ -44,24 +57,37 @@ const CODEX_APPROVAL: &str = "default_tools_approval_mode";
 /// without this.
 pub fn codex_auto_approve(cfg: &Config) -> Result<Option<bool>> {
     let doc = codex_config(cfg)?;
-    let Some(server) = doc.get("mcp_servers").and_then(|t| t.get("obmem")) else { return Ok(None) };
-    Ok(Some(server.get(CODEX_APPROVAL).and_then(|v| v.as_str()) == Some("approve")))
+    let Some(server) = doc.get("mcp_servers").and_then(|t| t.get("obmem")) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        server.get(CODEX_APPROVAL).and_then(|v| v.as_str()) == Some("approve"),
+    ))
 }
 
 /// Turns Codex's approval of obmem's tools on or off for this project.
 pub fn set_codex_auto_approve(cfg: &Config, on: bool) -> Result<()> {
     let path = cfg.project_root.join(CODEX_CONFIG);
     let mut doc = codex_config(cfg)?;
-    let Some(server) = doc.get_mut("mcp_servers").and_then(|t| t.get_mut("obmem")).and_then(|t| t.as_table_like_mut())
+    let Some(server) = doc
+        .get_mut("mcp_servers")
+        .and_then(|t| t.get_mut("obmem"))
+        .and_then(|t| t.as_table_like_mut())
     else {
-        anyhow::bail!("obmem is not set up for Codex in this project; run `obmem setup codex` first");
+        anyhow::bail!(
+            "obmem is not set up for Codex in this project; run `obmem setup codex` first"
+        );
     };
     if on {
         server.insert(CODEX_APPROVAL, toml_edit::value("approve"));
     } else {
         server.remove(CODEX_APPROVAL);
     }
-    Writer { root: &cfg.project_root, apply: true }.write(&path, &doc.to_string())
+    Writer {
+        root: &cfg.project_root,
+        apply: true,
+    }
+    .write(&path, &doc.to_string())
 }
 
 fn codex_config(cfg: &Config) -> Result<toml_edit::DocumentMut> {
@@ -71,7 +97,8 @@ fn codex_config(cfg: &Config) -> Result<toml_edit::DocumentMut> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
     };
-    text.parse().with_context(|| format!("parsing {}", path.display()))
+    text.parse()
+        .with_context(|| format!("parsing {}", path.display()))
 }
 
 fn mentions(v: &Value, needle: &str) -> bool {
@@ -81,12 +108,16 @@ fn mentions(v: &Value, needle: &str) -> bool {
 /// Read a JSON object (or start one), let `edit` change it, write it back if it changed.
 fn merge_json(path: &Path, w: &Writer, edit: impl FnOnce(&mut Value) -> bool) -> Result<bool> {
     let mut v: Value = if path.exists() {
-        serde_json::from_str(&std::fs::read_to_string(path)?).with_context(|| format!("parsing {}", path.display()))?
+        serde_json::from_str(&std::fs::read_to_string(path)?)
+            .with_context(|| format!("parsing {}", path.display()))?
     } else {
         json!({})
     };
     if !v.is_object() {
-        anyhow::bail!("{} is not a JSON object; add the obmem entries by hand", path.display());
+        anyhow::bail!(
+            "{} is not a JSON object; add the obmem entries by hand",
+            path.display()
+        );
     }
     if !edit(&mut v) {
         return Ok(false);
@@ -105,7 +136,11 @@ fn add_mcp_json(path: &Path, w: &Writer) -> Result<bool> {
 
 fn add_mcp_json_args(path: &Path, w: &Writer, args: &[&str]) -> Result<bool> {
     merge_json(path, w, |v| {
-        let servers = v.as_object_mut().unwrap().entry("mcpServers").or_insert_with(|| json!({}));
+        let servers = v
+            .as_object_mut()
+            .unwrap()
+            .entry("mcpServers")
+            .or_insert_with(|| json!({}));
         if mentions(servers, "obmem") {
             return false;
         }
@@ -117,14 +152,24 @@ fn add_mcp_json_args(path: &Path, w: &Writer, args: &[&str]) -> Result<bool> {
 /// Claude Code / Codex shape: `hooks.<Event>[] = {matcher?, hooks: [{type, command}]}`.
 fn add_nested_hooks(path: &Path, w: &Writer, events: &[(&str, String)]) -> Result<bool> {
     merge_json(path, w, |v| {
-        let hooks = v.as_object_mut().unwrap().entry("hooks").or_insert_with(|| json!({}));
+        let hooks = v
+            .as_object_mut()
+            .unwrap()
+            .entry("hooks")
+            .or_insert_with(|| json!({}));
         let mut changed = false;
         for (event, command) in events {
-            let list = hooks.as_object_mut().unwrap().entry(*event).or_insert_with(|| json!([]));
+            let list = hooks
+                .as_object_mut()
+                .unwrap()
+                .entry(*event)
+                .or_insert_with(|| json!([]));
             if mentions(list, "obmem hook") {
                 continue;
             }
-            list.as_array_mut().unwrap().push(json!({ "hooks": [{ "type": "command", "command": command }] }));
+            list.as_array_mut()
+                .unwrap()
+                .push(json!({ "hooks": [{ "type": "command", "command": command }] }));
             changed = true;
         }
         changed
@@ -139,7 +184,11 @@ fn add_flat_hooks(path: &Path, w: &Writer, events: &[(&str, Value)]) -> Result<b
         let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
         let mut changed = false;
         for (event, entry) in events {
-            let list = hooks.as_object_mut().unwrap().entry(*event).or_insert_with(|| json!([]));
+            let list = hooks
+                .as_object_mut()
+                .unwrap()
+                .entry(*event)
+                .or_insert_with(|| json!([]));
             if mentions(list, "obmem hook") {
                 continue;
             }
@@ -159,7 +208,13 @@ fn append_once(path: &Path, w: &Writer, marker: &str, block: &str) -> Result<boo
     if !w.apply {
         return Ok(true);
     }
-    let sep = if existing.is_empty() || existing.ends_with("\n\n") { "" } else if existing.ends_with('\n') { "\n" } else { "\n\n" };
+    let sep = if existing.is_empty() || existing.ends_with("\n\n") {
+        ""
+    } else if existing.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
     w.write(path, &format!("{existing}{sep}{block}"))?;
     Ok(true)
 }
@@ -175,7 +230,9 @@ fn upsert_guide(path: &Path, w: &Writer) -> Result<bool> {
     if let (Some(start), Some(end)) = (existing.find(AGENTS_MARKER), existing.find(AGENTS_END))
         && end > start
     {
-        let end = end + AGENTS_END.len() + usize::from(existing[end + AGENTS_END.len()..].starts_with('\n'));
+        let end = end
+            + AGENTS_END.len()
+            + usize::from(existing[end + AGENTS_END.len()..].starts_with('\n'));
         let updated = format!("{}{block}{}", &existing[..start], &existing[end..]);
         if updated == existing {
             return Ok(false);
@@ -189,7 +246,10 @@ fn upsert_guide(path: &Path, w: &Writer) -> Result<bool> {
 }
 
 fn agents_md_block() -> String {
-    format!("{AGENTS_MARKER}\n## Project memory (obmem)\n\n{}\n{AGENTS_END}\n", obmem_core::guide::GUIDE)
+    format!(
+        "{AGENTS_MARKER}\n## Project memory (obmem)\n\n{}\n{AGENTS_END}\n",
+        obmem_core::guide::GUIDE
+    )
 }
 
 const AMP_PLUGIN: &str = r#"// obmem: project memory for Amp. Generated by `obmem setup amp`; safe to edit.
@@ -226,12 +286,26 @@ export default function (amp: PluginAPI) {
 
 /// Register obmem for `agent` in the project: write what is missing, keep everything else.
 pub fn setup(cfg: &Config, agent: Agent) -> Result<Report> {
-    run(cfg, agent, &Writer { root: &cfg.project_root, apply: true })
+    run(
+        cfg,
+        agent,
+        &Writer {
+            root: &cfg.project_root,
+            apply: true,
+        },
+    )
 }
 
 /// What `setup` would do, without writing anything: an empty `changed` means the agent is set up.
 pub fn check(cfg: &Config, agent: Agent) -> Result<Report> {
-    run(cfg, agent, &Writer { root: &cfg.project_root, apply: false })
+    run(
+        cfg,
+        agent,
+        &Writer {
+            root: &cfg.project_root,
+            apply: false,
+        },
+    )
 }
 
 /// Where setup writes and whether it may. The files are in the project, which may be an untrusted
@@ -274,7 +348,17 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
             r.note(&p, append_once(&p, w, "[mcp_servers.obmem]", block)?);
             // Codex has SessionStart (also after compaction) and Stop; no PreCompact.
             let p = root.join(".codex/hooks.json");
-            r.note(&p, add_nested_hooks(&p, w, &[("SessionStart", cmd("session-start")), ("Stop", cmd("stop"))])?);
+            r.note(
+                &p,
+                add_nested_hooks(
+                    &p,
+                    w,
+                    &[
+                        ("SessionStart", cmd("session-start")),
+                        ("Stop", cmd("stop")),
+                    ],
+                )?,
+            );
             r.manual.push(format!(
                 "Codex loads project config only for trusted projects: trust {} when Codex asks (or set \
                  trust_level = \"trusted\" for it in ~/.codex/config.toml), then review and trust the two new hooks.",
@@ -285,7 +369,10 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
             // Some Cursor hosts (T3 Code's driver) start MCP servers in the home directory, so pin
             // the project; obmem ignores the placeholder if a host does not interpolate it.
             let p = root.join(".cursor/mcp.json");
-            r.note(&p, add_mcp_json_args(&p, w, &["serve", "--project", "${workspaceFolder}"])?);
+            r.note(
+                &p,
+                add_mcp_json_args(&p, w, &["serve", "--project", "${workspaceFolder}"])?,
+            );
             let p = root.join(".cursor/hooks.json");
             let events = [
                 ("sessionStart", json!({ "command": cmd("session-start") })),
@@ -297,11 +384,13 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
             // AGENTS.md (which Cursor reads) covers that case.
             let p = root.join("AGENTS.md");
             r.note(&p, upsert_guide(&p, w)?);
-            r.manual.push("In Cursor: Settings → MCP, enable `obmem` for this project.".into());
+            r.manual
+                .push("In Cursor: Settings → MCP, enable `obmem` for this project.".into());
         }
         Agent::Copilot => {
             let p = root.join(".github/hooks/obmem.json");
-            let entry = |event: &str| json!({ "type": "command", "bash": cmd(event), "timeoutSec": 30 });
+            let entry =
+                |event: &str| json!({ "type": "command", "bash": cmd(event), "timeoutSec": 30 });
             let events = [
                 ("sessionStart", entry("session-start")),
                 ("agentStop", entry("stop")),
@@ -362,7 +451,11 @@ mod tests {
             r#"{"version":1,"hooks":{"afterFileEdit":[{"command":"./fmt.sh"}]}}"#,
         )
         .unwrap();
-        std::fs::write(root.join(".cursor/mcp.json"), r#"{"mcpServers":{"other":{"command":"x"}}}"#).unwrap();
+        std::fs::write(
+            root.join(".cursor/mcp.json"),
+            r#"{"mcpServers":{"other":{"command":"x"}}}"#,
+        )
+        .unwrap();
         let c = cfg(&root);
 
         let planned = check(&c, Agent::Cursor).unwrap();
@@ -374,10 +467,18 @@ mod tests {
 
         let first = setup(&c, Agent::Cursor).unwrap();
         assert_eq!(first.changed.len(), 3, "{:?}", first.changed); // mcp.json, hooks.json, AGENTS.md
-        let hooks: Value = serde_json::from_str(&std::fs::read_to_string(root.join(".cursor/hooks.json")).unwrap()).unwrap();
+        let hooks: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(".cursor/hooks.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(hooks["hooks"]["afterFileEdit"][0]["command"], "./fmt.sh"); // kept
-        assert_eq!(hooks["hooks"]["stop"][0]["command"], "obmem hook stop --agent cursor");
-        let mcp: Value = serde_json::from_str(&std::fs::read_to_string(root.join(".cursor/mcp.json")).unwrap()).unwrap();
+        assert_eq!(
+            hooks["hooks"]["stop"][0]["command"],
+            "obmem hook stop --agent cursor"
+        );
+        let mcp: Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join(".cursor/mcp.json")).unwrap())
+                .unwrap();
         assert!(mcp["mcpServers"]["other"].is_object() && mcp["mcpServers"]["obmem"].is_object());
 
         let second = setup(&c, Agent::Cursor).unwrap();
@@ -387,14 +488,23 @@ mod tests {
         setup(&c, Agent::Codex).unwrap();
         let toml = std::fs::read_to_string(root.join(".codex/config.toml")).unwrap();
         assert_eq!(toml.matches("[mcp_servers.obmem]").count(), 1);
-        let codex: Value = serde_json::from_str(&std::fs::read_to_string(root.join(".codex/hooks.json")).unwrap()).unwrap();
-        assert_eq!(codex["hooks"]["Stop"][0]["hooks"][0]["command"], "obmem hook stop --agent codex");
+        let codex: Value =
+            serde_json::from_str(&std::fs::read_to_string(root.join(".codex/hooks.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            codex["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "obmem hook stop --agent codex"
+        );
         assert!(setup(&c, Agent::Codex).unwrap().changed.is_empty());
         // Auto-approval is off until switched on, and switching keeps the rest of the file.
         assert_eq!(codex_auto_approve(&c).unwrap(), Some(false));
         set_codex_auto_approve(&c, true).unwrap();
         assert_eq!(codex_auto_approve(&c).unwrap(), Some(true));
-        assert!(std::fs::read_to_string(root.join(CODEX_CONFIG)).unwrap().contains("args = [\"serve\"]"));
+        assert!(
+            std::fs::read_to_string(root.join(CODEX_CONFIG))
+                .unwrap()
+                .contains("args = [\"serve\"]")
+        );
         set_codex_auto_approve(&c, false).unwrap();
         assert_eq!(codex_auto_approve(&c).unwrap(), Some(false));
         assert!(check(&c, Agent::Codex).unwrap().changed.is_empty());
@@ -403,12 +513,21 @@ mod tests {
         let agents = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
         assert_eq!(agents.matches(AGENTS_MARKER).count(), 1);
         // an outdated guide block is refreshed in place; surrounding text survives
-        let stale = format!("# Team notes\n\n{AGENTS_MARKER}\nold guide\n{AGENTS_END}\n\nkeep me\n");
+        let stale =
+            format!("# Team notes\n\n{AGENTS_MARKER}\nold guide\n{AGENTS_END}\n\nkeep me\n");
         std::fs::write(root.join("AGENTS.md"), stale).unwrap();
-        let w = Writer { root: &root, apply: true };
+        let w = Writer {
+            root: &root,
+            apply: true,
+        };
         assert!(upsert_guide(&root.join("AGENTS.md"), &w).unwrap());
         let fresh = std::fs::read_to_string(root.join("AGENTS.md")).unwrap();
-        assert!(fresh.starts_with("# Team notes") && fresh.ends_with("keep me\n") && !fresh.contains("old guide"), "{fresh}");
+        assert!(
+            fresh.starts_with("# Team notes")
+                && fresh.ends_with("keep me\n")
+                && !fresh.contains("old guide"),
+            "{fresh}"
+        );
         assert!(!upsert_guide(&root.join("AGENTS.md"), &w).unwrap());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -417,7 +536,8 @@ mod tests {
     #[test]
     fn never_writes_through_a_planted_symlink() {
         let root = std::env::temp_dir().join(format!("obmem-setup-link-{}", std::process::id()));
-        let outside = std::env::temp_dir().join(format!("obmem-setup-outside-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("obmem-setup-outside-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);
         std::fs::create_dir_all(root.join(".codex")).unwrap();
@@ -425,14 +545,18 @@ mod tests {
         // A clone ships .codex/config.toml as a link to the user's own Codex config.
         let theirs = "[mcp_servers.obmem]\ncommand = \"obmem\"\n";
         std::fs::write(outside.join("config.toml"), theirs).unwrap();
-        std::os::unix::fs::symlink(outside.join("config.toml"), root.join(".codex/config.toml")).unwrap();
+        std::os::unix::fs::symlink(outside.join("config.toml"), root.join(".codex/config.toml"))
+            .unwrap();
         // And .cursor as a link to a folder outside the project.
         std::os::unix::fs::symlink(&outside, root.join(".cursor")).unwrap();
         let c = cfg(&root);
 
         assert!(set_codex_auto_approve(&c, true).is_err());
         assert!(setup(&c, Agent::Cursor).is_err());
-        assert_eq!(std::fs::read_to_string(outside.join("config.toml")).unwrap(), theirs);
+        assert_eq!(
+            std::fs::read_to_string(outside.join("config.toml")).unwrap(),
+            theirs
+        );
         assert!(!outside.join("mcp.json").exists() && !outside.join("hooks.json").exists());
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);

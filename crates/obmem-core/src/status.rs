@@ -34,7 +34,9 @@ pub struct VaultStatus {
 /// Whether Obsidian knows the vault. Search, backlinks and link checks need it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Registration {
-    Registered { id: String },
+    Registered {
+        id: String,
+    },
     NotRegistered,
     /// Obsidian's registry could not be read.
     Unknown(String),

@@ -30,7 +30,10 @@ pub(crate) fn tone(name: &'static str) -> impl Fn() -> AdaptiveColor + Copy {
 /// The strip along the window's top edge where the system's title bar was: it drags the window,
 /// and the window's controls sit in it. Nothing where the system draws its own title bar.
 pub(crate) fn title_strip() -> View {
-    view().flex_shrink_0().h(move || title_bar().top).window_drag(true)
+    view()
+        .flex_shrink_0()
+        .h(move || title_bar().top)
+        .window_drag(true)
 }
 
 /// A page: its header, then its blocks, in a column that scrolls and stops growing in a wide
@@ -54,7 +57,11 @@ pub(crate) fn page(header: impl IntoElement, body: impl IntoElement) -> impl Int
 
 /// A page's title, what it is about below it, and its actions, which move under the title when
 /// they do not fit beside it.
-pub(crate) fn page_header(title: impl Into<SharedString>, about: impl IntoElement, actions: Vec<AnyElement>) -> View {
+pub(crate) fn page_header(
+    title: impl Into<SharedString>,
+    about: impl IntoElement,
+    actions: Vec<AnyElement>,
+) -> View {
     let mut buttons = view().flex_row().flex_wrap().gap_2();
     for a in actions {
         buttons = buttons.child(a);
@@ -70,7 +77,11 @@ pub(crate) fn page_header(title: impl Into<SharedString>, about: impl IntoElemen
                 .flex_1()
                 .min_w(px(220.0))
                 .gap_1()
-                .child(text(title.into()).text_2xl().font_weight(FontWeight::SEMIBOLD))
+                .child(
+                    text(title.into())
+                        .text_2xl()
+                        .font_weight(FontWeight::SEMIBOLD),
+                )
                 .child(about),
         )
         .child(buttons)
@@ -78,21 +89,31 @@ pub(crate) fn page_header(title: impl Into<SharedString>, about: impl IntoElemen
 
 /// A section title.
 pub(crate) fn heading(label: impl Into<SharedString>) -> Text {
-    text(label.into()).text_sm().font_weight(FontWeight::SEMIBOLD)
+    text(label.into())
+        .text_sm()
+        .font_weight(FontWeight::SEMIBOLD)
 }
 
 /// Secondary text.
 pub(crate) fn muted(label: impl Into<SharedString>) -> Text {
-    text(label.into()).text_sm().text_color(move || theme().muted_foreground)
+    text(label.into())
+        .text_sm()
+        .text_color(move || theme().muted_foreground)
 }
 
 /// A file system path, in the monospaced face paths are typed in.
 pub(crate) fn path_text(label: impl IntoReactive<SharedString>) -> Text {
-    text(label).text_xs().font_family("monospace").text_color(move || theme().muted_foreground)
+    text(label)
+        .text_xs()
+        .font_family("monospace")
+        .text_color(move || theme().muted_foreground)
 }
 
 /// A bordered button for secondary actions.
-pub(crate) fn action(label: impl Into<SharedString>, on_press: impl Fn() + 'static) -> impl IntoElement {
+pub(crate) fn action(
+    label: impl Into<SharedString>,
+    on_press: impl Fn() + 'static,
+) -> impl IntoElement {
     button()
         .px_3()
         .py_1()
@@ -107,7 +128,10 @@ pub(crate) fn action(label: impl Into<SharedString>, on_press: impl Fn() + 'stat
 }
 
 /// The button for the main action of a block.
-pub(crate) fn primary(label: impl Into<SharedString>, on_press: impl Fn() + 'static) -> impl IntoElement {
+pub(crate) fn primary(
+    label: impl Into<SharedString>,
+    on_press: impl Fn() + 'static,
+) -> impl IntoElement {
     button()
         .px_3()
         .py_1()
@@ -118,11 +142,20 @@ pub(crate) fn primary(label: impl Into<SharedString>, on_press: impl Fn() + 'sta
         .hover(|s| s.opacity(0.88))
         .active(|s| s.opacity(0.7))
         .on_press(on_press)
-        .child(text(label.into()).text_sm().font_weight(FontWeight::MEDIUM).text_color(move || theme().primary_foreground))
+        .child(
+            text(label.into())
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || theme().primary_foreground),
+        )
 }
 
 /// A square button holding an icon, for chrome such as the sidebar's.
-pub(crate) fn icon_button(paths: &'static str, label: &'static str, on_press: impl Fn() + 'static) -> impl IntoElement {
+pub(crate) fn icon_button(
+    paths: &'static str,
+    label: &'static str,
+    on_press: impl Fn() + 'static,
+) -> impl IntoElement {
     button()
         .w(px(28.0))
         .h(px(28.0))
@@ -130,7 +163,10 @@ pub(crate) fn icon_button(paths: &'static str, label: &'static str, on_press: im
         .justify_center()
         .rounded(move || theme().radius)
         .text_color(move || theme().muted_foreground)
-        .hover(|s| s.bg(move || theme().sidebar_accent).text_color(move || theme().foreground))
+        .hover(|s| {
+            s.bg(move || theme().sidebar_accent)
+                .text_color(move || theme().foreground)
+        })
         .active(|s| s.opacity(0.7))
         .accessibility_label(label)
         .on_press(on_press)
@@ -142,15 +178,16 @@ pub(crate) fn icon_button(paths: &'static str, label: &'static str, on_press: im
 pub(crate) trait WithHint: IntoElement + Sized {
     fn with_hint(self, label: impl Into<SharedString>) -> View {
         let label: SharedString = label.into();
-        view().tooltip(
-            nsh_base::tooltip()
-                .px_2()
-                .py_1()
-                .rounded(move || theme().radius)
-                .bg(move || theme().foreground)
-                .child(text(label).text_xs().text_color(move || theme().background)),
-        )
-        .child(self)
+        view()
+            .tooltip(
+                nsh_base::tooltip()
+                    .px_2()
+                    .py_1()
+                    .rounded(move || theme().radius)
+                    .bg(move || theme().foreground)
+                    .child(text(label).text_xs().text_color(move || theme().background)),
+            )
+            .child(self)
     }
 }
 
@@ -166,7 +203,11 @@ pub(crate) enum Level {
 
 /// A check: its outcome, what it is, and what it found. Buttons added to it sit at its right,
 /// level with the title.
-pub(crate) fn check(level: Level, title: impl Into<SharedString>, detail: impl Into<SharedString>) -> View {
+pub(crate) fn check(
+    level: Level,
+    title: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
+) -> View {
     let (mark, color) = match level {
         Level::Ok => ("✓", "ok"),
         Level::Warn => ("!", "warn"),
@@ -189,12 +230,25 @@ pub(crate) fn check(level: Level, title: impl Into<SharedString>, detail: impl I
                 .rounded_full()
                 .border_1()
                 .border_color(color)
-                .child(text(mark).text_xs().font_weight(FontWeight::BOLD).text_color(color)),
+                .child(
+                    text(mark)
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(color),
+                ),
         )
         .child({
             let detail: SharedString = detail.into();
-            let body = view().flex_1().min_w(px(0.0)).gap_1().child(text(title.into()).font_weight(FontWeight::MEDIUM));
-            if detail.is_empty() { body } else { body.child(muted(detail)) }
+            let body = view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap_1()
+                .child(text(title.into()).font_weight(FontWeight::MEDIUM));
+            if detail.is_empty() {
+                body
+            } else {
+                body.child(muted(detail))
+            }
         })
 }
 
@@ -235,7 +289,13 @@ pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
                     text(label)
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(move || if on() { theme().foreground } else { theme().muted_foreground }),
+                        .text_color(move || {
+                            if on() {
+                                theme().foreground
+                            } else {
+                                theme().muted_foreground
+                            }
+                        }),
                 ),
         );
     }
@@ -263,7 +323,13 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
                 .px_3()
                 .py_1()
                 .rounded(move || theme().radius - px(2.0))
-                .bg(move || if on() { theme().card } else { AdaptiveColor::TRANSPARENT })
+                .bg(move || {
+                    if on() {
+                        theme().card
+                    } else {
+                        AdaptiveColor::TRANSPARENT
+                    }
+                })
                 .style_when(on, |s| s.shadow_xs())
                 .active(|s| s.opacity(0.7))
                 // Pressing the chosen one again keeps it: one of them is always chosen.
@@ -272,7 +338,13 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
                     text(label)
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(move || if on() { theme().foreground } else { theme().muted_foreground }),
+                        .text_color(move || {
+                            if on() {
+                                theme().foreground
+                            } else {
+                                theme().muted_foreground
+                            }
+                        }),
                 ),
         );
     }
@@ -281,7 +353,11 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
 
 /// An on/off setting that takes effect when the form is saved or at once, as `change` does
 /// (NSH's `Switch`).
-pub(crate) fn switch_control(on: impl Fn() -> bool + Copy + 'static, label: &str, change: impl Fn(bool) + 'static) -> impl IntoElement {
+pub(crate) fn switch_control(
+    on: impl Fn() -> bool + Copy + 'static,
+    label: &str,
+    change: impl Fn(bool) + 'static,
+) -> impl IntoElement {
     nsh_base::switch()
         .checked(on)
         .accessibility_label(label.to_string())
@@ -335,10 +411,20 @@ pub(crate) fn field(label: &str, help: &str, control: impl IntoElement) -> View 
                 .flex_shrink_0()
                 .gap_1()
                 .style_when(stacked, |s| s.w_full())
-                .child(text(label.to_string()).text_sm().font_weight(FontWeight::MEDIUM))
+                .child(
+                    text(label.to_string())
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM),
+                )
                 .child(muted(help.to_string()).text_xs()),
         )
-        .child(view().flex_1().min_w(px(0.0)).justify_center().child(control))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .justify_center()
+                .child(control),
+        )
 }
 
 /// A one-line text box bound to `value`.
@@ -359,12 +445,21 @@ pub(crate) fn text_box(value: Signal<String>, placeholder: &str) -> Input {
 
 /// A card with a slim bar of `color` along the inside of its left edge, for what stands out from
 /// the page (notices). The bar and what follows it sit close to that edge.
-pub(crate) fn callout(color: impl Fn() -> AdaptiveColor + Copy + 'static, body: impl IntoElement) -> View {
+pub(crate) fn callout(
+    color: impl Fn() -> AdaptiveColor + Copy + 'static,
+    body: impl IntoElement,
+) -> View {
     card()
         .flex_row()
         .gap_2()
         .pl_2()
-        .child(view().w(px(3.0)).self_stretch().rounded_full().bg(move || color().opacity(0.55)))
+        .child(
+            view()
+                .w(px(3.0))
+                .self_stretch()
+                .rounded_full()
+                .bg(move || color().opacity(0.55)),
+        )
         .child(view().flex_1().min_w(px(0.0)).gap_1().child(body))
 }
 
@@ -388,14 +483,24 @@ pub(crate) fn notice_area() -> AnyElement {
                 Notice::SetUp(done) => {
                     lines.extend(done.changed.iter().map(|f| format!("Updated {f}")));
                     lines.extend(done.manual.iter().map(|m| format!("Next: {m}")));
-                    (Level::Ok, format!("{} is set up", done.agent.label()), String::new())
+                    (
+                        Level::Ok,
+                        format!("{} is set up", done.agent.label()),
+                        String::new(),
+                    )
                 }
             };
             let mut body = view().child(check(level, title, detail).py_0());
             for l in lines {
                 body = body.child(muted(l).pl(px(30.0)));
             }
-            let body = body.child(view().flex_row().pt_3().pl(px(30.0)).child(action("Dismiss", state::dismiss_notice)));
+            let body = body.child(
+                view()
+                    .flex_row()
+                    .pt_3()
+                    .pl(px(30.0))
+                    .child(action("Dismiss", state::dismiss_notice)),
+            );
             let color = tone(match level {
                 Level::Ok => "ok",
                 Level::Warn => "warn",

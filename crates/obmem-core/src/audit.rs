@@ -24,8 +24,16 @@ use walkdir::WalkDir;
 
 pub const AUDIT_AUTHOR: &str = "agent:obmem-audit";
 pub const SUPPRESSIONS_FILE: &str = "_system/audit-suppressions.toml";
-pub const RULES: &[&str] =
-    &["broken-link", "orphan", "schema", "stale", "supersede", "duplicate", "code-drift", "sync-conflict"];
+pub const RULES: &[&str] = &[
+    "broken-link",
+    "orphan",
+    "schema",
+    "stale",
+    "supersede",
+    "duplicate",
+    "code-drift",
+    "sync-conflict",
+];
 /// In the name of a sync conflict copy, `<stem>.sync-conflict-<device>-<time>.<ext>`, which
 /// obmem-sync writes when two devices changed the same file.
 pub const SYNC_CONFLICT_MARK: &str = ".sync-conflict-";
@@ -34,7 +42,15 @@ pub const SYNC_CONFLICT_MARK: &str = ".sync-conflict-";
 const DEFAULT_IGNORE: &[&str] = &["Templates/", "_system/"];
 const KNOWLEDGE_TYPES: &[&str] = &["fact", "concept", "architecture", "decision", "procedure"];
 const ALL_TYPES: &[&str] = &[
-    "fact", "concept", "architecture", "decision", "procedure", "feedback", "preference", "finding", "session",
+    "fact",
+    "concept",
+    "architecture",
+    "decision",
+    "procedure",
+    "feedback",
+    "preference",
+    "finding",
+    "session",
 ];
 const NOTE_STATUSES: &[&str] = &["draft", "active", "superseded", "archived"];
 const FINDING_STATUSES: &[&str] = &["open", "accepted", "rejected", "fixed"];
@@ -53,7 +69,17 @@ ignore_paths = []
 "#;
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
 )]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
@@ -131,7 +157,9 @@ impl Doc {
         !self.ignored && !self.is_audit_finding()
     }
     fn extra(&self, key: &str) -> Option<String> {
-        self.fm().and_then(|f| f.extra.get(key)).and_then(yaml_to_string)
+        self.fm()
+            .and_then(|f| f.extra.get(key))
+            .and_then(yaml_to_string)
     }
 }
 
@@ -279,7 +307,11 @@ impl Vault {
                 continue;
             }
             let p = entry.path();
-            let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let rel = p
+                .strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .replace('\\', "/");
             let name = entry.file_name().to_string_lossy().to_lowercase();
             if p.extension().is_none_or(|e| e != "md") {
                 v.files.insert(name);
@@ -288,8 +320,11 @@ impl Vault {
             }
             let id = p.file_stem().unwrap().to_string_lossy().into_owned();
             v.stems.insert(id.to_lowercase());
-            v.paths.insert(rel.to_lowercase().trim_end_matches(".md").to_string());
-            let Ok(src) = std::fs::read_to_string(p) else { continue };
+            v.paths
+                .insert(rel.to_lowercase().trim_end_matches(".md").to_string());
+            let Ok(src) = std::fs::read_to_string(p) else {
+                continue;
+            };
             let note = Note::parse(&src).map_err(|e| format!("{e:#}"));
             let (fm_text, body) = match &note {
                 Ok(n) => src.split_at(src.len() - n.body.len()),
@@ -298,7 +333,8 @@ impl Vault {
             let links = wikilinks(&format!("{fm_text}{}", strip_code(body)));
             v.docs.push(Doc {
                 // A conflict copy is reported once, by `sync-conflict`, not as a duplicate or orphan too.
-                ignored: ignore.iter().any(|i| rel.starts_with(i.as_str())) || rel.contains(SYNC_CONFLICT_MARK),
+                ignored: ignore.iter().any(|i| rel.starts_with(i.as_str()))
+                    || rel.contains(SYNC_CONFLICT_MARK),
                 has_frontmatter: !fm_text.trim_start_matches('\u{feff}').is_empty(),
                 rel,
                 id,
@@ -316,7 +352,9 @@ impl Vault {
         if t.contains('/') {
             let suffix = format!("/{note_t}");
             let fsuffix = format!("/{t}");
-            self.paths.iter().any(|p| p == note_t || p.ends_with(&suffix))
+            self.paths
+                .iter()
+                .any(|p| p == note_t || p.ends_with(&suffix))
                 || self.files.iter().any(|f| *f == t || f.ends_with(&fsuffix))
         } else {
             self.stems.contains(note_t) || self.files.contains(&t)
@@ -349,18 +387,30 @@ impl Vault {
 
     /// Unresolved links as Obsidian reports them (it already ignores code and resolves
     /// attachments, aliases and paths exactly like the app). obmem only adds the fix hints.
-    fn check_broken_links(&self, other: Option<&Vault>, unresolved: &[Unresolved], out: &mut Vec<Issue>) {
+    fn check_broken_links(
+        &self,
+        other: Option<&Vault>,
+        unresolved: &[Unresolved],
+        out: &mut Vec<Issue>,
+    ) {
         // Agents often link by title; Obsidian links by filename. Map titles to ids for the hint.
         let by_title: HashMap<String, &str> = self
             .docs
             .iter()
-            .filter_map(|d| Some((d.fm()?.title.as_deref()?.trim().to_lowercase(), d.id.as_str())))
+            .filter_map(|d| {
+                Some((
+                    d.fm()?.title.as_deref()?.trim().to_lowercase(),
+                    d.id.as_str(),
+                ))
+            })
             .collect();
         let by_rel: HashMap<&str, &Doc> = self.docs.iter().map(|d| (d.rel.as_str(), d)).collect();
         for u in unresolved {
             let t = &u.link;
             for src in &u.sources {
-                let Some(d) = by_rel.get(src.as_str()).filter(|d| d.checkable()) else { continue };
+                let Some(d) = by_rel.get(src.as_str()).filter(|d| d.checkable()) else {
+                    continue;
+                };
                 if let Some(o) = other.filter(|o| o.resolves(t)) {
                     out.push(self.issue(
                         "broken-link",
@@ -386,7 +436,10 @@ impl Vault {
                         Severity::Warn,
                         d,
                         t,
-                        format!("`[[{t}]]` does not resolve to any note or file in the {} vault.", self.scope),
+                        format!(
+                            "`[[{t}]]` does not resolve to any note or file in the {} vault.",
+                            self.scope
+                        ),
                         &fix,
                         Some(t.clone()),
                     ));
@@ -446,7 +499,11 @@ impl Vault {
                 )),
                 _ => {}
             }
-            let allowed = if d.ty() == "finding" { FINDING_STATUSES } else { NOTE_STATUSES };
+            let allowed = if d.ty() == "finding" {
+                FINDING_STATUSES
+            } else {
+                NOTE_STATUSES
+            };
             match fm.status.as_deref() {
                 None => out.push(self.issue(
                     "schema",
@@ -462,13 +519,20 @@ impl Vault {
                     Severity::Warn,
                     d,
                     "status-invalid",
-                    format!("`status: {s}` is not valid for a {} note.", if d.ty().is_empty() { "?" } else { d.ty() }),
+                    format!(
+                        "`status: {s}` is not valid for a {} note.",
+                        if d.ty().is_empty() { "?" } else { d.ty() }
+                    ),
                     &format!("Use one of: {}.", allowed.join(", ")),
                     None,
                 )),
                 _ => {}
             }
-            if let Some(c) = fm.confidence.as_deref().filter(|c| !["high", "medium", "low"].contains(c)) {
+            if let Some(c) = fm
+                .confidence
+                .as_deref()
+                .filter(|c| !["high", "medium", "low"].contains(c))
+            {
                 out.push(self.issue(
                     "schema",
                     Severity::Warn,
@@ -542,7 +606,9 @@ impl Vault {
     fn check_orphans(&self, orphans: &[String], out: &mut Vec<Issue>) {
         let by_rel: HashMap<&str, &Doc> = self.docs.iter().map(|d| (d.rel.as_str(), d)).collect();
         for rel in orphans {
-            let Some(d) = by_rel.get(rel.as_str()).filter(|d| d.checkable()) else { continue };
+            let Some(d) = by_rel.get(rel.as_str()).filter(|d| d.checkable()) else {
+                continue;
+            };
             if !KNOWLEDGE_TYPES.contains(&d.ty())
                 || !["active", "draft"].contains(&d.status())
                 || d.id.eq_ignore_ascii_case("index")
@@ -554,7 +620,10 @@ impl Vault {
                 Severity::Info,
                 d,
                 "",
-                format!("No other note links to `{}`, so it is hard to find in Obsidian.", d.id),
+                format!(
+                    "No other note links to `{}`, so it is hard to find in Obsidian.",
+                    d.id
+                ),
                 "Link it from Index.md or a related note, or archive it if it is no longer useful.",
                 None,
             ));
@@ -564,22 +633,33 @@ impl Vault {
     /// Conflict copies that sync left next to a note: a person merges and deletes them.
     fn check_sync_conflicts(&self, out: &mut Vec<Issue>) {
         for d in self.docs.iter().filter(|d| !d.is_audit_finding()) {
-            let Some(at) = d.rel.find(SYNC_CONFLICT_MARK) else { continue };
+            let Some(at) = d.rel.find(SYNC_CONFLICT_MARK) else {
+                continue;
+            };
             let original = format!("{}.md", &d.rel[..at]);
             out.push(self.issue(
                 "sync-conflict",
                 Severity::Warn,
                 d,
                 "",
-                format!("{} is another device's version of {original}: both changed it before syncing", d.rel),
-                &format!("Merge what you need from this copy into {original}, then delete the copy."),
+                format!(
+                    "{} is another device's version of {original}: both changed it before syncing",
+                    d.rel
+                ),
+                &format!(
+                    "Merge what you need from this copy into {original}, then delete the copy."
+                ),
                 Some(original.clone()),
             ));
         }
     }
 
     fn check_supersede(&self, out: &mut Vec<Issue>) {
-        let status: HashMap<String, &str> = self.docs.iter().map(|d| (d.id.to_lowercase(), d.status())).collect();
+        let status: HashMap<String, &str> = self
+            .docs
+            .iter()
+            .map(|d| (d.id.to_lowercase(), d.status()))
+            .collect();
         let mut replaced_by: HashMap<String, String> = HashMap::new();
         for d in &self.docs {
             if let Some(s) = d.extra("supersedes") {
@@ -591,7 +671,9 @@ impl Vault {
             }
         }
         for d in self.docs.iter().filter(|d| d.checkable()) {
-            if !["active", "draft"].contains(&d.status()) || ["finding", "session"].contains(&d.ty()) {
+            if !["active", "draft"].contains(&d.status())
+                || ["finding", "session"].contains(&d.ty())
+            {
                 continue;
             }
             for t in &d.links {
@@ -629,8 +711,14 @@ impl Vault {
             {
                 continue;
             }
-            let title = d.fm().and_then(|f| f.title.clone()).unwrap_or_else(|| d.id.clone());
-            by_type.entry(ty).or_default().push((d, title_grams(&title)));
+            let title = d
+                .fm()
+                .and_then(|f| f.title.clone())
+                .unwrap_or_else(|| d.id.clone());
+            by_type
+                .entry(ty)
+                .or_default()
+                .push((d, title_grams(&title)));
         }
         for group in by_type.values() {
             for i in 0..group.len() {
@@ -666,7 +754,10 @@ impl Vault {
             {
                 continue;
             }
-            let verify = format!("then record the check with `obmem verify {}` (agents: memory_verify)", d.id);
+            let verify = format!(
+                "then record the check with `obmem verify {}` (agents: memory_verify)",
+                d.id
+            );
             let mut unknown_reported = false;
             for r in &fm.code_refs {
                 for drift in repo.check(r, fm.verified_commit.as_deref()) {
@@ -745,8 +836,17 @@ impl Vault {
     /// Fingerprints that must not be reported: listed in the suppressions file, or belonging
     /// to an audit finding a human rejected.
     fn suppressed_fingerprints(&self) -> HashSet<String> {
-        let mut s: HashSet<String> = self.supp.suppressed.iter().map(|x| x.fingerprint.clone()).collect();
-        for d in self.docs.iter().filter(|d| d.is_audit_finding() && d.status() == "rejected") {
+        let mut s: HashSet<String> = self
+            .supp
+            .suppressed
+            .iter()
+            .map(|x| x.fingerprint.clone())
+            .collect();
+        for d in self
+            .docs
+            .iter()
+            .filter(|d| d.is_audit_finding() && d.status() == "rejected")
+        {
             if let Some(fp) = d.extra("fingerprint") {
                 s.insert(fp);
             }
@@ -770,8 +870,16 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
         v
     };
     let vaults = vec![
-        Vault::load("project", &cfg.project_vault, opts.scope != Some(Scope::Global))?,
-        Vault::load("global", &cfg.global_vault, opts.scope != Some(Scope::Project))?,
+        Vault::load(
+            "project",
+            &cfg.project_vault,
+            opts.scope != Some(Scope::Global),
+        )?,
+        Vault::load(
+            "global",
+            &cfg.global_vault,
+            opts.scope != Some(Scope::Project),
+        )?,
     ];
 
     let mut issues = Vec::new();
@@ -785,13 +893,18 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
         checked_notes += v.docs.iter().filter(|d| d.checkable()).count();
         let other = vaults.get(1 - i);
         let mut found = Vec::new();
-        for rule in rules.iter().filter(|r| !v.supp.disabled_rules.iter().any(|d| d == *r)) {
+        for rule in rules
+            .iter()
+            .filter(|r| !v.supp.disabled_rules.iter().any(|d| d == *r))
+        {
             match *rule {
                 // Link graph rules ask Obsidian; if it can't answer, skip them and say so.
                 "broken-link" | "orphan" if v.docs.is_empty() => {}
                 "broken-link" => match obs.unresolved(&v.root) {
                     Ok(u) => v.check_broken_links(other, &u, &mut found),
-                    Err(e) => notices.push(format!("{} vault: broken-link skipped: {e:#}", v.scope)),
+                    Err(e) => {
+                        notices.push(format!("{} vault: broken-link skipped: {e:#}", v.scope))
+                    }
                 },
                 "orphan" => match obs.orphans(&v.root) {
                     Ok(o) => v.check_orphans(&o, &mut found),
@@ -802,7 +915,9 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
                 "supersede" => v.check_supersede(&mut found),
                 "duplicate" => v.check_duplicates(cfg.audit.duplicate_threshold, &mut found),
                 // code_refs are relative to this project; global-vault notes may describe others.
-                "code-drift" if v.scope == "project" => v.check_code_drift(&cfg.project_root, &mut found),
+                "code-drift" if v.scope == "project" => {
+                    v.check_code_drift(&cfg.project_root, &mut found)
+                }
                 "code-drift" => {}
                 "sync-conflict" => v.check_sync_conflicts(&mut found),
                 _ => unreachable!(),
@@ -821,7 +936,14 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
             .then(a.scope.cmp(b.scope))
             .then(a.path.cmp(&b.path))
     });
-    Ok(Audit { vaults, rules, issues, suppressed, checked_notes, notices })
+    Ok(Audit {
+        vaults,
+        rules,
+        issues,
+        suppressed,
+        checked_notes,
+        notices,
+    })
 }
 
 impl Audit {
@@ -831,8 +953,12 @@ impl Audit {
         let mut stats = WriteStats::default();
         let date = today.format("%Y-%m-%d").to_string();
         for v in self.vaults.iter().filter(|v| v.checked) {
-            let rules_run: Vec<&str> =
-                self.rules.iter().copied().filter(|r| !v.supp.disabled_rules.iter().any(|d| d == r)).collect();
+            let rules_run: Vec<&str> = self
+                .rules
+                .iter()
+                .copied()
+                .filter(|r| !v.supp.disabled_rules.iter().any(|d| d == r))
+                .collect();
             let detected: HashMap<&str, &Issue> = self
                 .issues
                 .iter()
@@ -847,7 +973,12 @@ impl Audit {
             }
 
             // 1. human rejections → permanent suppressions
-            let listed: HashSet<&str> = v.supp.suppressed.iter().map(|s| s.fingerprint.as_str()).collect();
+            let listed: HashSet<&str> = v
+                .supp
+                .suppressed
+                .iter()
+                .map(|s| s.fingerprint.as_str())
+                .collect();
             for (fp, d) in &existing {
                 if d.status() == "rejected" && !listed.contains(fp.as_str()) {
                     let entry = Suppressed {
@@ -863,7 +994,11 @@ impl Audit {
             }
 
             // 2. new or returning problems
-            for i in self.issues.iter().filter(|i| i.scope == v.scope && i.severity >= min) {
+            for i in self
+                .issues
+                .iter()
+                .filter(|i| i.scope == v.scope && i.severity >= min)
+            {
                 match existing.get(&i.fingerprint) {
                     None => {
                         let (rel, content) = finding_note(i, &date)?;
@@ -871,13 +1006,22 @@ impl Audit {
                         stats.created.push(format!("{}:{rel}", v.scope));
                     }
                     Some(d) if d.status() == "fixed" => {
-                        update_finding(&v.root, d, "open", &format!("{date}: detected again by obmem audit; reopened."), &date)?;
+                        update_finding(
+                            &v.root,
+                            d,
+                            "open",
+                            &format!("{date}: detected again by obmem audit; reopened."),
+                            &date,
+                        )?;
                         stats.reopened.push(format!("{}:{}", v.scope, d.rel));
                     }
                     // Anything but the four lifecycle states (e.g. `draft`, a typo) would hide the
                     // finding from both the board and auto-close: normalize it back to open.
                     Some(d) if !FINDING_STATUSES.contains(&d.status()) => {
-                        let msg = format!("{date}: status `{}` is not a finding state; reset to open.", d.status());
+                        let msg = format!(
+                            "{date}: status `{}` is not a finding state; reset to open.",
+                            d.status()
+                        );
                         update_finding(&v.root, d, "open", &msg, &date)?;
                         stats.reopened.push(format!("{}:{}", v.scope, d.rel));
                     }
@@ -892,7 +1036,15 @@ impl Audit {
                     && rules_run.contains(&rule.as_str())
                     && !detected.contains_key(fp.as_str())
                 {
-                    update_finding(&v.root, d, "fixed", &format!("{date}: no longer detected by obmem audit; closed automatically."), &date)?;
+                    update_finding(
+                        &v.root,
+                        d,
+                        "fixed",
+                        &format!(
+                            "{date}: no longer detected by obmem audit; closed automatically."
+                        ),
+                        &date,
+                    )?;
                     stats.closed.push(format!("{}:{}", v.scope, d.rel));
                 }
             }
@@ -903,7 +1055,11 @@ impl Audit {
 
 fn finding_note(i: &Issue, date: &str) -> Result<(String, String)> {
     let stem: String = slugify(&i.note_id).chars().take(40).collect();
-    let rel = format!("Findings/audit-{}-{stem}-{}.md", i.rule, &i.fingerprint[..6]);
+    let rel = format!(
+        "Findings/audit-{}-{stem}-{}.md",
+        i.rule,
+        &i.fingerprint[..6]
+    );
     let title = match &i.related {
         Some(r) => format!("{}: {} → {r}", i.rule, i.note_id),
         None => format!("{}: {}", i.rule, i.note_id),
@@ -972,18 +1128,31 @@ fn append_suppression(vault_root: &Path, entry: &Suppressed) -> Result<()> {
         suppressed: [&'a Suppressed; 1],
     }
     let path = vault_root.join(SUPPRESSIONS_FILE);
-    let mut content = if path.exists() { std::fs::read_to_string(&path)? } else { SUPPRESSIONS_TEMPLATE.to_string() };
+    let mut content = if path.exists() {
+        std::fs::read_to_string(&path)?
+    } else {
+        SUPPRESSIONS_TEMPLATE.to_string()
+    };
     if !content.ends_with('\n') {
         content.push('\n');
     }
     content.push('\n');
-    content.push_str(&toml::to_string(&Wrap { suppressed: [entry] })?);
+    content.push_str(&toml::to_string(&Wrap {
+        suppressed: [entry],
+    })?);
     atomic_write(vault_root, &path, &content)
 }
 
 /// Suppress the finding note at `rel` immediately (used when a human rejects it via the CLI).
-pub fn suppress_finding(vault_root: &Path, rel: &str, fm: &Frontmatter, date: &str) -> Result<bool> {
-    let Some(fp) = fm.extra.get("fingerprint").and_then(yaml_to_string) else { return Ok(false) };
+pub fn suppress_finding(
+    vault_root: &Path,
+    rel: &str,
+    fm: &Frontmatter,
+    date: &str,
+) -> Result<bool> {
+    let Some(fp) = fm.extra.get("fingerprint").and_then(yaml_to_string) else {
+        return Ok(false);
+    };
     let path = vault_root.join(SUPPRESSIONS_FILE);
     if path.exists() {
         let s: Suppressions = toml::from_str(&std::fs::read_to_string(&path)?)?;
@@ -995,8 +1164,16 @@ pub fn suppress_finding(vault_root: &Path, rel: &str, fm: &Frontmatter, date: &s
         vault_root,
         &Suppressed {
             fingerprint: fp,
-            rule: fm.extra.get("rule").and_then(yaml_to_string).unwrap_or_default(),
-            note: fm.extra.get("target").and_then(yaml_to_string).unwrap_or_default(),
+            rule: fm
+                .extra
+                .get("rule")
+                .and_then(yaml_to_string)
+                .unwrap_or_default(),
+            note: fm
+                .extra
+                .get("target")
+                .and_then(yaml_to_string)
+                .unwrap_or_default(),
             reason: format!("rejected in {rel}"),
             date: date.into(),
         },
@@ -1029,16 +1206,27 @@ pub fn report_text(
     for i in shown.iter().take(max_issues) {
         out.push_str(&format!(
             "{:<5} {:<11} {}:{}\n      {}\n      fix: {}\n",
-            i.severity.as_str(), i.rule, i.scope, i.path, i.message, i.fix
+            i.severity.as_str(),
+            i.rule,
+            i.scope,
+            i.path,
+            i.message,
+            i.fix
         ));
     }
     if shown.len() > max_issues {
-        out.push_str(&format!("… and {} more (narrow with scope / rules)\n", shown.len() - max_issues));
+        out.push_str(&format!(
+            "… and {} more (narrow with scope / rules)\n",
+            shown.len() - max_issues
+        ));
     }
     if let Some(st) = stats {
         out.push_str(&format!(
             "Findings: {} created, {} reopened, {} closed, {} newly suppressed.\n",
-            st.created.len(), st.reopened.len(), st.closed.len(), st.newly_suppressed
+            st.created.len(),
+            st.reopened.len(),
+            st.closed.len(),
+            st.newly_suppressed
         ));
         for c in &st.created {
             out.push_str(&format!("  + {c}\n"));
@@ -1073,7 +1261,11 @@ mod tests {
             vault.file_name().unwrap().to_string_lossy().into_owned()
         }
         fn check(&self) -> Result<()> {
-            if *self.down.lock().unwrap() { bail!("Obsidian CLI not found") } else { Ok(()) }
+            if *self.down.lock().unwrap() {
+                bail!("Obsidian CLI not found")
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -1086,11 +1278,23 @@ mod tests {
         }
         fn unresolved(&self, vault: &Path) -> Result<Vec<Unresolved>> {
             self.check()?;
-            Ok(self.unresolved.lock().unwrap().get(&Self::key(vault)).cloned().unwrap_or_default())
+            Ok(self
+                .unresolved
+                .lock()
+                .unwrap()
+                .get(&Self::key(vault))
+                .cloned()
+                .unwrap_or_default())
         }
         fn orphans(&self, vault: &Path) -> Result<Vec<String>> {
             self.check()?;
-            Ok(self.orphans.lock().unwrap().get(&Self::key(vault)).cloned().unwrap_or_default())
+            Ok(self
+                .orphans
+                .lock()
+                .unwrap()
+                .get(&Self::key(vault))
+                .cloned()
+                .unwrap_or_default())
         }
     }
 
@@ -1102,7 +1306,8 @@ mod tests {
 
     impl Fixture {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("obmem-audit-{name}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("obmem-audit-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let cfg = Config {
@@ -1115,7 +1320,11 @@ mod tests {
                 auto_approve: false,
                 device: "test".into(),
             };
-            Self { dir, cfg, obs: FakeObsidian::default() }
+            Self {
+                dir,
+                cfg,
+                obs: FakeObsidian::default(),
+            }
         }
         fn put(&self, vault: &str, rel: &str, content: &str) {
             let p = self.dir.join(vault).join(rel);
@@ -1126,16 +1335,31 @@ mod tests {
         fn unresolved(&self, vault: &str, links: &[(&str, &[&str])]) {
             let v = links
                 .iter()
-                .map(|(l, src)| Unresolved { link: l.to_string(), sources: src.iter().map(|s| s.to_string()).collect() })
+                .map(|(l, src)| Unresolved {
+                    link: l.to_string(),
+                    sources: src.iter().map(|s| s.to_string()).collect(),
+                })
                 .collect();
             self.obs.unresolved.lock().unwrap().insert(vault.into(), v);
         }
         fn orphans(&self, vault: &str, rels: &[&str]) {
-            self.obs.orphans.lock().unwrap().insert(vault.into(), rels.iter().map(|s| s.to_string()).collect());
+            self.obs
+                .orphans
+                .lock()
+                .unwrap()
+                .insert(vault.into(), rels.iter().map(|s| s.to_string()).collect());
         }
         fn audit(&self, today: &str) -> Audit {
-            run(&self.cfg, &AuditOptions { scope: None, rules: vec![], today: parse_date(today).unwrap() }, &self.obs)
-                .unwrap()
+            run(
+                &self.cfg,
+                &AuditOptions {
+                    scope: None,
+                    rules: vec![],
+                    today: parse_date(today).unwrap(),
+                },
+                &self.obs,
+            )
+            .unwrap()
         }
     }
 
@@ -1146,19 +1370,42 @@ mod tests {
     }
 
     fn note(ty: &str, status: &str, extra: &str, body: &str) -> String {
-        format!("---\ntype: {ty}\ntitle: {ty} note\nstatus: {status}\nauthor: human\n{extra}---\n{body}\n")
+        format!(
+            "---\ntype: {ty}\ntitle: {ty} note\nstatus: {status}\nauthor: human\n{extra}---\n{body}\n"
+        )
     }
 
     fn rules_for<'a>(a: &'a Audit, path: &str) -> Vec<(&'a str, Severity)> {
-        a.issues.iter().filter(|i| i.path == path).map(|i| (i.rule, i.severity)).collect()
+        a.issues
+            .iter()
+            .filter(|i| i.path == path)
+            .map(|i| (i.rule, i.severity))
+            .collect()
     }
 
     #[test]
     fn broken_links_come_from_obsidian_with_hints() {
         let f = Fixture::new("links");
-        f.put("kb", "Index.md", &note("concept", "active", "", "[[missing]]"));
-        f.put("kb", "Decisions/a.md", &note("decision", "active", "", "[[only-global]], [[Decision Note]]"));
-        f.put("kb", "Templates/decision.md", "---\ntype: decision\n---\n[[nowhere]]");
+        f.put(
+            "kb",
+            "Index.md",
+            &note("concept", "active", "", "[[missing]]"),
+        );
+        f.put(
+            "kb",
+            "Decisions/a.md",
+            &note(
+                "decision",
+                "active",
+                "",
+                "[[only-global]], [[Decision Note]]",
+            ),
+        );
+        f.put(
+            "kb",
+            "Templates/decision.md",
+            "---\ntype: decision\n---\n[[nowhere]]",
+        );
         f.put("global", "only-global.md", &note("fact", "active", "", ""));
         f.unresolved(
             "kb",
@@ -1171,13 +1418,35 @@ mod tests {
             ],
         );
         let a = f.audit("2026-01-01");
-        let links: Vec<_> = a.issues.iter().filter(|i| i.rule == "broken-link").collect();
+        let links: Vec<_> = a
+            .issues
+            .iter()
+            .filter(|i| i.rule == "broken-link")
+            .collect();
         assert_eq!(links.len(), 3, "{links:?}");
-        assert_eq!(links.iter().find(|i| i.path == "Index.md").unwrap().related.as_deref(), Some("missing"));
-        let cross = links.iter().find(|i| i.related.as_deref() == Some("only-global")).unwrap();
+        assert_eq!(
+            links
+                .iter()
+                .find(|i| i.path == "Index.md")
+                .unwrap()
+                .related
+                .as_deref(),
+            Some("missing")
+        );
+        let cross = links
+            .iter()
+            .find(|i| i.related.as_deref() == Some("only-global"))
+            .unwrap();
         assert_eq!(cross.severity, Severity::Info);
-        let by_title = links.iter().find(|i| i.related.as_deref() == Some("Decision Note")).unwrap();
-        assert!(by_title.fix.contains("`[[a|Decision Note]]`"), "{}", by_title.fix);
+        let by_title = links
+            .iter()
+            .find(|i| i.related.as_deref() == Some("Decision Note"))
+            .unwrap();
+        assert!(
+            by_title.fix.contains("`[[a|Decision Note]]`"),
+            "{}",
+            by_title.fix
+        );
         assert!(a.notices.is_empty());
     }
 
@@ -1197,39 +1466,105 @@ mod tests {
         let f = Fixture::new("rules");
         f.put("kb", "bad-yaml.md", "---\ntags: [unclosed\n---\nx");
         f.put("kb", "no-fm.md", "plain text");
-        f.put("kb", "weird.md", &note("thing", "done", "confidence: sure\nupdated: last week\n", ""));
-        f.put("kb", "old.md", &note("fact", "active", "updated: 2025-01-01\n", "[[jwt-rotation-policy]] [[legacy]]"));
-        f.put("kb", "legacy.md", &note("decision", "superseded", "", "[[old]]"));
+        f.put(
+            "kb",
+            "weird.md",
+            &note(
+                "thing",
+                "done",
+                "confidence: sure\nupdated: last week\n",
+                "",
+            ),
+        );
+        f.put(
+            "kb",
+            "old.md",
+            &note(
+                "fact",
+                "active",
+                "updated: 2025-01-01\n",
+                "[[jwt-rotation-policy]] [[legacy]]",
+            ),
+        );
+        f.put(
+            "kb",
+            "legacy.md",
+            &note("decision", "superseded", "", "[[old]]"),
+        );
         f.put("kb", "jwt-rotation-policy.md", "---\ntype: decision\ntitle: JWT rotation policy\nstatus: active\nsupersedes: \"[[legacy]]\"\nupdated: 2025-12-01\n---\n[[old]]\n");
-        f.put("kb", "jwt-rotation-policy-2.md", "---\ntype: decision\ntitle: JWT rotation policy v2\nstatus: draft\n---\n");
-        f.put("kb", "Templates/decision.md", "---\ntype: decision\ntitle: \"{{title}}\"\n---\n[[nowhere]]");
+        f.put(
+            "kb",
+            "jwt-rotation-policy-2.md",
+            "---\ntype: decision\ntitle: JWT rotation policy v2\nstatus: draft\n---\n",
+        );
+        f.put(
+            "kb",
+            "Templates/decision.md",
+            "---\ntype: decision\ntitle: \"{{title}}\"\n---\n[[nowhere]]",
+        );
         // Obsidian's orphans: only the draft decision qualifies (superseded / template / no type don't)
-        f.orphans("kb", &["jwt-rotation-policy-2.md", "legacy.md", "Templates/decision.md", "no-fm.md"]);
+        f.orphans(
+            "kb",
+            &[
+                "jwt-rotation-policy-2.md",
+                "legacy.md",
+                "Templates/decision.md",
+                "no-fm.md",
+            ],
+        );
         let a = f.audit("2026-01-01");
 
-        assert_eq!(rules_for(&a, "bad-yaml.md"), vec![("schema", Severity::Error)]);
+        assert_eq!(
+            rules_for(&a, "bad-yaml.md"),
+            vec![("schema", Severity::Error)]
+        );
         assert_eq!(rules_for(&a, "no-fm.md"), vec![("schema", Severity::Warn)]);
         let weird = rules_for(&a, "weird.md");
-        assert_eq!(weird.iter().filter(|(r, _)| *r == "schema").count(), 4, "{weird:?}"); // type, status, confidence, date
+        assert_eq!(
+            weird.iter().filter(|(r, _)| *r == "schema").count(),
+            4,
+            "{weird:?}"
+        ); // type, status, confidence, date
         let old = rules_for(&a, "old.md");
         assert!(old.contains(&("stale", Severity::Warn)), "{old:?}");
-        let sup = a.issues.iter().find(|i| i.path == "old.md" && i.rule == "supersede").unwrap();
-        assert!(sup.message.contains("`jwt-rotation-policy`"), "{}", sup.message);
-        let orphans: Vec<_> = a.issues.iter().filter(|i| i.rule == "orphan").map(|i| i.path.as_str()).collect();
+        let sup = a
+            .issues
+            .iter()
+            .find(|i| i.path == "old.md" && i.rule == "supersede")
+            .unwrap();
+        assert!(
+            sup.message.contains("`jwt-rotation-policy`"),
+            "{}",
+            sup.message
+        );
+        let orphans: Vec<_> = a
+            .issues
+            .iter()
+            .filter(|i| i.rule == "orphan")
+            .map(|i| i.path.as_str())
+            .collect();
         assert_eq!(orphans, vec!["jwt-rotation-policy-2.md"]);
         let jwt = rules_for(&a, "jwt-rotation-policy.md");
         assert!(!jwt.iter().any(|(r, _)| *r == "supersede"), "{jwt:?}"); // its own `supersedes:` link
         let dup = a.issues.iter().find(|i| i.rule == "duplicate").unwrap();
         assert_eq!(dup.path, "jwt-rotation-policy-2.md"); // reported once, on the first path
         assert_eq!(dup.related.as_deref(), Some("jwt-rotation-policy"));
-        assert!(!rules_for(&a, "jwt-rotation-policy.md").iter().any(|(r, _)| *r == "stale"));
+        assert!(
+            !rules_for(&a, "jwt-rotation-policy.md")
+                .iter()
+                .any(|(r, _)| *r == "stale")
+        );
         assert!(rules_for(&a, "Templates/decision.md").is_empty());
     }
 
     #[test]
     fn findings_lifecycle() {
         let f = Fixture::new("life");
-        f.put("kb", "a.md", &note("fact", "active", "", "[[gone]] [[also-gone]]"));
+        f.put(
+            "kb",
+            "a.md",
+            &note("fact", "active", "", "[[gone]] [[also-gone]]"),
+        );
         f.unresolved("kb", &[("gone", &["a.md"]), ("also-gone", &["a.md"])]);
         let today = parse_date("2026-01-01").unwrap();
 
@@ -1244,43 +1579,84 @@ mod tests {
             let outside_code: String = src.split('`').step_by(2).collect();
             assert!(!outside_code.contains("[["), "{src}");
         }
-        assert!(a.write_findings(Severity::Warn, today).unwrap().created.is_empty());
+        assert!(
+            a.write_findings(Severity::Warn, today)
+                .unwrap()
+                .created
+                .is_empty()
+        );
 
         // fix one link → its finding closes; reject the other → suppressed for good
         f.put("kb", "a.md", &note("fact", "active", "", "[[also-gone]]"));
         f.unresolved("kb", &[("also-gone", &["a.md"])]);
-        let findings: Vec<PathBuf> = std::fs::read_dir(f.dir.join("kb/Findings")).unwrap().map(|e| e.unwrap().path()).collect();
-        let other = findings.iter().find(|p| std::fs::read_to_string(p).unwrap().contains("also-gone")).unwrap();
-        let src = std::fs::read_to_string(other).unwrap().replace("status: open", "status: rejected");
+        let findings: Vec<PathBuf> = std::fs::read_dir(f.dir.join("kb/Findings"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        let other = findings
+            .iter()
+            .find(|p| std::fs::read_to_string(p).unwrap().contains("also-gone"))
+            .unwrap();
+        let src = std::fs::read_to_string(other)
+            .unwrap()
+            .replace("status: open", "status: rejected");
         std::fs::write(other, src).unwrap();
 
         let a = f.audit("2026-01-02");
-        assert!(a.issues.iter().all(|i| i.rule != "broken-link"), "{:?}", a.issues);
+        assert!(
+            a.issues.iter().all(|i| i.rule != "broken-link"),
+            "{:?}",
+            a.issues
+        );
         assert_eq!(a.suppressed, 1);
         let st = a.write_findings(Severity::Warn, today).unwrap();
         assert_eq!((st.closed.len(), st.newly_suppressed), (1, 1), "{st:?}");
         let supp = std::fs::read_to_string(f.dir.join("kb").join(SUPPRESSIONS_FILE)).unwrap();
-        assert!(supp.contains("[[suppressed]]") && supp.contains("broken-link"), "{supp}");
+        assert!(
+            supp.contains("[[suppressed]]") && supp.contains("broken-link"),
+            "{supp}"
+        );
 
         // the suppression holds even after the rejected finding note is deleted
         std::fs::remove_file(other).unwrap();
         let a = f.audit("2026-01-03");
         assert!(a.issues.iter().all(|i| i.rule != "broken-link"));
-        assert_eq!(a.write_findings(Severity::Warn, today).unwrap().newly_suppressed, 0);
+        assert_eq!(
+            a.write_findings(Severity::Warn, today)
+                .unwrap()
+                .newly_suppressed,
+            0
+        );
 
         // a finding tampered into `draft` is normalized back to open
-        let gone = std::fs::read_dir(f.dir.join("kb/Findings")).unwrap().map(|e| e.unwrap().path()).next().unwrap();
-        let src = std::fs::read_to_string(&gone).unwrap().replace("status: fixed", "status: draft");
+        let gone = std::fs::read_dir(f.dir.join("kb/Findings"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .next()
+            .unwrap();
+        let src = std::fs::read_to_string(&gone)
+            .unwrap()
+            .replace("status: fixed", "status: draft");
         std::fs::write(&gone, src).unwrap();
         f.put("kb", "a.md", &note("fact", "active", "", "[[gone]]"));
         f.unresolved("kb", &[("gone", &["a.md"])]);
-        let st = f.audit("2026-01-03").write_findings(Severity::Warn, today).unwrap();
+        let st = f
+            .audit("2026-01-03")
+            .write_findings(Severity::Warn, today)
+            .unwrap();
         assert_eq!(st.reopened.len(), 1, "{st:?}");
 
         // the problem comes back → the fixed finding reopens
-        f.put("kb", "a.md", &note("fact", "active", "", "[[gone]] [[also-gone]]"));
+        f.put(
+            "kb",
+            "a.md",
+            &note("fact", "active", "", "[[gone]] [[also-gone]]"),
+        );
         f.unresolved("kb", &[("gone", &["a.md"]), ("also-gone", &["a.md"])]);
-        let st = f.audit("2026-01-04").write_findings(Severity::Warn, today).unwrap();
+        let st = f
+            .audit("2026-01-04")
+            .write_findings(Severity::Warn, today)
+            .unwrap();
         assert_eq!((st.reopened.len(), st.created.len()), (0, 0), "{st:?}"); // already open again
     }
 
@@ -1288,12 +1664,22 @@ mod tests {
     fn sync_conflict_copies_are_reported_once() {
         let f = Fixture::new("conflict");
         f.put("global", "Global/a.md", &note("fact", "active", "", "mine"));
-        f.put("global", "Global/a.sync-conflict-win-20261109-101500.md", &note("fact", "active", "", "theirs"));
+        f.put(
+            "global",
+            "Global/a.sync-conflict-win-20261109-101500.md",
+            &note("fact", "active", "", "theirs"),
+        );
         let a = f.audit("2026-01-01");
         let rel = "Global/a.sync-conflict-win-20261109-101500.md";
         assert_eq!(rules_for(&a, rel), vec![("sync-conflict", Severity::Warn)]);
         let i = a.issues.iter().find(|i| i.rule == "sync-conflict").unwrap();
         assert_eq!(i.related.as_deref(), Some("Global/a.md"));
-        assert!(rules_for(&a, "Global/a.md").iter().all(|(r, _)| *r != "duplicate"), "{:?}", a.issues);
+        assert!(
+            rules_for(&a, "Global/a.md")
+                .iter()
+                .all(|(r, _)| *r != "duplicate"),
+            "{:?}",
+            a.issues
+        );
     }
 }

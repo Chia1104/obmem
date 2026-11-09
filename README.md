@@ -58,7 +58,7 @@ Once set up:
 | `memory_resolve` | Mark a finding `fixed`, `accepted` or `open` |
 | `memory_verify` | Record that a note still matches the code |
 
-The CLI has the same features. Run `obmem --help` to list the commands.
+The CLI has the same features, plus what only people may do: `obmem approve <note>` accepts a draft, and `obmem resolve <finding> rejected` silences a false positive. Run `obmem --help` to list the commands.
 
 ## Audit
 
@@ -100,6 +100,14 @@ For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks t
 
 `obmem import-claude` imports `~/.claude/projects/<project>/memory/*.md` as draft notes. User and feedback memories go to the global vault, project and reference memories to the project vault. Files that already exist are skipped.
 
+## Desktop app
+
+`apps/obmem-gui` is a control panel for macOS and Windows. It lists the projects obmem has seen (each agent session records its project, and you can add one by hand), checks each project's health, and sets up agents with one click.
+
+```sh
+cargo run -p obmem-gui
+```
+
 ## Development
 
 A Cargo workspace:
@@ -110,9 +118,10 @@ A Cargo workspace:
 | `crates/obmem-mcp` | The MCP server |
 | `crates/obmem-agents` | Agent hooks and `obmem setup` |
 | `crates/obmem` | The `obmem` binary |
+| `apps/obmem-gui` | The desktop app ([Native Shell](https://nsh.dev)) |
 
 ```sh
-cargo test --workspace
+cargo test --workspace    # includes the desktop app, which needs the latest stable Rust
 ```
 
 How the code works and the rules for changing it are in [AGENTS.md](AGENTS.md) and each crate's `AGENTS.md`.

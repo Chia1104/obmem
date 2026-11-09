@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
+# The GUI pulls in Native Shell and the platform toolkits: build it with `-p obmem-gui` or `nsh`.
+default-members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,11 +15,21 @@ obmem-core = { path = "crates/obmem-core" }
 obmem-mcp = { path = "crates/obmem-mcp" }
 obmem-agents = { path = "crates/obmem-agents" }
 
+# Native Shell (apps/obmem-gui). The nsh CLI builds against its own version of these crates, so
+# upgrade the CLI and these together.
+nsh-core = "0.4.0"
+nsh-base = "0.4.0"
+nsh-engine = "0.4.0"
+nsh-testing = "0.4.0"
+nsh-platform-macos = { version = "0.4.0", default-features = false }
+nsh-platform-windows = { version = "0.4.0", default-features = false }
+
 aho-corasick = "1.1.5"
 anyhow = "1.0.104"
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
 dirs = "7.0.0"
+env_logger = "0.11"
 hex = "0.4.3"
 regex = "1.13.1"
 rmcp = { version = "3.9.0", features = ["server", "transport-io", "macros"] }

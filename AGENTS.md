@@ -20,8 +20,9 @@ Long-term memory for coding agents: an MCP server, agent hooks and a CLI in one 
 | `crates/obmem-mcp` | The MCP server and how it finds the project | `crates/obmem-mcp/AGENTS.md` |
 | `crates/obmem-agents` | Hook entry points and `obmem setup` for each agent | `crates/obmem-agents/AGENTS.md` |
 | `crates/obmem` | The `obmem` binary: clap CLI | `crates/obmem/AGENTS.md` |
+| `apps/obmem-gui` | The desktop control panel (Native Shell, macOS and Windows) | `apps/obmem-gui/AGENTS.md` |
 
-Dependencies flow one way: `obmem` → `obmem-mcp` / `obmem-agents` → `obmem-core`. Put logic in the lowest crate that needs it, so every front end, including a future GUI, can reuse it.
+Dependencies flow one way: `obmem` and `obmem-gui` → `obmem-mcp` / `obmem-agents` → `obmem-core`. Put logic in the lowest crate that needs it, so every front end can reuse it. `default-members` leaves out the GUI, so a plain `cargo build` stays free of Native Shell. `--workspace` includes it.
 
 ## Workflow
 

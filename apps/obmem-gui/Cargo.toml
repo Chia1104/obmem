@@ -1,0 +1,31 @@
+[package]
+name = "obmem-gui"
+description = "obmem's desktop control panel, built with Native Shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+obmem-core.workspace = true
+obmem-agents.workspace = true
+anyhow.workspace = true
+nsh-core.workspace = true
+nsh-base.workspace = true
+env_logger.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows.workspace = true
+
+[dev-dependencies]
+nsh-engine.workspace = true
+nsh-testing.workspace = true
+
+[lints.rust]
+# macOS's linker notes that a build with all of Native Shell has more unwind data than its
+# compact table encodes; it only affects how fast a panic unwinds.
+linker_messages = "allow"

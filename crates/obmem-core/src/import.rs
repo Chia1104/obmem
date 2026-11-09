@@ -82,6 +82,11 @@ pub fn plan(dir: &Path) -> Result<Vec<Planned>> {
     Ok(out)
 }
 
+/// Where an import would write the note. An existing file there means it is skipped.
+pub fn target(store: &Store, it: &Planned) -> PathBuf {
+    store.vault_for(it.scope).join(it.note_type.folder()).join(format!("{}.md", crate::note::slugify(&it.name)))
+}
+
 pub enum ImportResult {
     Imported(String),
     Skipped(String),
@@ -92,7 +97,7 @@ pub enum ImportResult {
 pub fn run(store: &mut Store, items: Vec<Planned>) -> Result<Vec<(PathBuf, ImportResult)>> {
     let mut out = Vec::new();
     for it in items {
-        let target = store.vault_for(it.scope).join(it.note_type.folder()).join(format!("{}.md", crate::note::slugify(&it.name)));
+        let target = target(store, &it);
         if target.exists() {
             out.push((it.source, ImportResult::Skipped(format!("{} already exists", target.display()))));
             continue;

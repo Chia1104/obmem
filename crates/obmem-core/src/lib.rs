@@ -16,6 +16,7 @@ pub mod obsidian;
 pub mod projects;
 pub mod review;
 pub mod secrets;
+pub mod sessions;
 pub mod settings;
 pub mod status;
 pub mod store;

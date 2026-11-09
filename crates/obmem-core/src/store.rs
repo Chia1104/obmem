@@ -650,31 +650,9 @@ impl Store {
 
     /// The last `n` entries of the most recently modified session log of this project.
     fn last_session_log(&self, n: usize) -> Option<(String, String)> {
-        let dir = self.cfg.global_project_dir().join("Sessions");
-        let latest = std::fs::read_dir(&dir)
-            .ok()?
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
-            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())?
-            .path();
-        let body = Note::parse(&std::fs::read_to_string(&latest).ok()?).ok()?.body;
-        // an entry is a `- ` line plus its indented continuation lines
-        let mut entries: Vec<String> = Vec::new();
-        for line in body.lines() {
-            if line.starts_with("- ") {
-                entries.push(line.to_string());
-            } else if line.starts_with("  ")
-                && let Some(last) = entries.last_mut()
-            {
-                last.push('\n');
-                last.push_str(line);
-            }
-        }
-        if entries.is_empty() {
-            return None;
-        }
-        let tail = entries[entries.len().saturating_sub(n)..].join("\n");
-        Some((latest.file_stem()?.to_string_lossy().into_owned(), tail))
+        let log = crate::sessions::logs(&self.cfg, 1).ok()?.into_iter().next()?;
+        let tail = log.entries[log.entries.len().saturating_sub(n)..].join("\n");
+        Some((log.name, tail))
     }
 
     /// Compact context for the start of a session: the project Index plus review queue.

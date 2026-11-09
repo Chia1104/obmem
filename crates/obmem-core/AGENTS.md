@@ -16,7 +16,14 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 
 ## Review (`review.rs`)
 
-`Store::review` lists what waits for a person: drafts (except findings and session logs), and findings that are `open` or `accepted`. An audit finding's `target` is the vault-relative path of the note it is about, in the same vault. People act on items through `Store::approve`, `resolve_finding` and `verify`, naming the note by its vault-relative path.
+`Store::review` lists what waits for a person: drafts (except findings and session logs), and findings that are `open` or `accepted`. An audit finding's `target` is the vault-relative path of the note it is about, in the same vault.
+
+`Store::approve`, `resolve_finding` and `verify` take a `NoteRef`. A `Key` (id, title or path, in either vault) is for names people type. When the name comes from a note's own content, such as a finding's `target`, use `At { scope, rel }`: it matches only that exact path in that vault. A planted finding in a cloned project vault could otherwise aim the action at a note in the personal vault.
+
+## Session logs and import (`sessions.rs`, `import.rs`)
+
+- `sessions::logs` reads a project's session logs, newest first, and `sessions::entries` splits a log into entries. The session-start context uses the same parser.
+- `import::target` is where an imported memory would go. A file already there means it is skipped, so a front end can show that before importing.
 
 ## Obsidian (`obsidian.rs`)
 

@@ -158,7 +158,7 @@ pub fn context(store: &mut Store, task: &str, limit: usize, max_chars: usize) ->
     let query = terms.iter().map(|t| format!("\"{t}\"")).collect::<Vec<_>>().join(" OR ");
     let (hits, problems) = store.search(&query, None, None, 40)?;
     let mut ranked: Vec<(usize, Hit)> = hits.into_iter().map(|h| (score(store, &h, &terms), h)).collect();
-    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    ranked.sort_by_key(|a| std::cmp::Reverse(a.0));
     // findings are listed separately below, against the notes they are about
     let (findings, notes): (Vec<_>, Vec<_>) = ranked.into_iter().partition(|(_, h)| h.note_type == "finding");
 

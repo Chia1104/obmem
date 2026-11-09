@@ -110,7 +110,7 @@ impl Catalog {
     /// Most recently modified first.
     pub fn list_by_status(&self, status: &str, limit: usize) -> Result<Vec<(String, String, String)>> {
         let mut v: Vec<&Meta> = self.notes.iter().filter(|m| m.status == status).collect();
-        v.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+        v.sort_by_key(|a| std::cmp::Reverse(a.mtime));
         Ok(v.into_iter().take(limit).map(|m| (m.id.clone(), m.title.clone(), m.note_type.clone())).collect())
     }
 

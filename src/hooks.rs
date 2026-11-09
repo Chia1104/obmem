@@ -83,6 +83,9 @@ pub struct HookInput {
     pub trigger: Option<String>,
     pub cwd: Option<PathBuf>,
     pub workspace_roots: Vec<PathBuf>,
+    /// The payload is Cursor's: it has `cursor_version` (T3 Code's Cursor driver) or
+    /// `generation_id` (also cursor-agent 2026.11.05, which omits `cursor_version`).
+    pub from_cursor: bool,
 }
 
 impl HookInput {
@@ -112,7 +115,17 @@ impl HookInput {
                 .and_then(|x| x.as_array())
                 .map(|a| a.iter().filter_map(|x| x.as_str()).map(PathBuf::from).collect())
                 .unwrap_or_default(),
+            from_cursor: first(&["cursor_version", "generation_id"]).is_some(),
         }
+    }
+
+    /// Cursor can also run the Claude Code hooks in `.claude/settings.json` (herdr guards its
+    /// Claude hook against this). Cursor is served by its own hooks (`--agent cursor`), so a
+    /// Claude-format hook called by Cursor must do nothing: otherwise the context arrives twice
+    /// and the stop answer is in a format Cursor ignores. Only the payload is trusted, not the
+    /// `CURSOR_VERSION` env var, which Claude Code started from Cursor's terminal may inherit.
+    pub fn misrouted(&self, agent: Agent) -> bool {
+        agent == Agent::Claude && self.from_cursor
     }
 
     /// The project directory the agent is working in, if it says.
@@ -509,6 +522,15 @@ mod tests {
         );
         assert_eq!(real.session_id.as_deref(), Some("5adb2d73"));
         assert_eq!(real.project_dir(), Some(Path::new("/Users/x/obmem")));
+        assert!(real.misrouted(Agent::Claude) && !real.misrouted(Agent::Cursor));
+        // T3 Code's Cursor driver (2026-11-09) adds cursor_version
+        let t3 = HookInput::parse(
+            r#"{"conversation_id":"agent-be80","generation_id":"agent-be80","model":"composer-2.5","session_id":"agent-be80","hook_event_name":"stop","cursor_version":"1.0.0","loop_count":0,"workspace_roots":["/w"]}"#,
+        );
+        assert!(t3.misrouted(Agent::Claude) && !t3.misrouted(Agent::Cursor));
+        // Claude Code's own payload is never misrouted
+        let claude = HookInput::parse(r#"{"session_id":"c","transcript_path":"/t","cwd":"/repo","hook_event_name":"Stop"}"#);
+        assert!(!claude.misrouted(Agent::Claude));
 
         assert_eq!(Agent::Claude.session_start_output("ctx"), "ctx");
         assert_eq!(Agent::Codex.session_start_output("ctx"), "ctx");

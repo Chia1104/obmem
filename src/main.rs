@@ -152,6 +152,9 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
     let agent = match which {
         HookCmd::SessionStart { agent, .. } | HookCmd::Stop { agent } | HookCmd::PreCompact { agent } => *agent,
     };
+    if input.misrouted(agent) {
+        return;
+    }
     let dir = project.map(PathBuf::from).or_else(|| input.project_dir().map(PathBuf::from));
     let out = (|| -> Result<String> {
         let cfg = config::Config::load(dir.as_deref())?;

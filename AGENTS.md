@@ -27,7 +27,7 @@ Dependencies flow one way: `obmem` and `obmem-gui` → `obmem-mcp` / `obmem-agen
 
 ## Workflow
 
-- Before committing: `cargo fmt --all`, then `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass. CI (`.github/workflows/ci.yml`) runs the same three checks on every push to `main` and every pull request, and the pre-commit hook refuses unformatted code.
+- Before committing: `cargo fmt --all`, then `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass. CI (`.github/workflows/ci.yml`) runs the same three checks on every push to `main` and every pull request, and the pre-commit hook refuses staged Rust files that are not formatted. `.github/workflows/clear-caches.yml` drops a pull request's Actions caches when it closes; run it by hand to clear a branch's caches or all of them.
 - Commits that only reformat go in `.git-blame-ignore-revs`. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so local `git blame` skips them.
 - This repo dogfoods obmem. `.mcp.json`, the agent hooks and `.githooks/pre-commit` (enabled with `git config core.hooksPath .githooks`) all run `obmem` from `PATH`. After a change you want the hooks to pick up, run `cargo install --path crates/obmem`.
 - Commit messages use Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:`, `style:`, `chore:`).

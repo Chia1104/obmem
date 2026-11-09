@@ -1,0 +1,33 @@
+name: Clear caches
+
+# A closed pull request's caches can never be restored again (only the PR's own runs read them),
+# so drop them right away instead of letting them push main's cache out of the 10 GB limit.
+# Run it by hand to clear one branch's caches, or every cache when a cache has gone bad.
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Only this ref: refs/heads/<branch> or refs/pull/<number>/merge. Leave empty to clear every cache."
+        required: false
+        default: ""
+
+permissions:
+  actions: write
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || inputs.ref }}
+        run: |
+          if [ -n "$REF" ]; then
+            gh cache delete --all --ref "$REF" --succeed-on-no-caches
+          else
+            gh cache delete --all --succeed-on-no-caches
+          fi

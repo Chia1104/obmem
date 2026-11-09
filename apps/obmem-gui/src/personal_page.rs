@@ -116,10 +116,10 @@ fn sync_settings(s: &SyncSettings) -> View {
         .child(field("Bucket", "Empty turns sync off.", text_box(bucket, "my-obmem-vault").test_id("sync-bucket")))
         .child(field("Region", "AWS needs the bucket's region. Empty: auto, which R2 expects.", text_box(region, "auto")))
         .child(field("Prefix", "Where in the bucket the vault goes. Empty: obmem.", text_box(prefix, "obmem")))
-        .child(field("This device's name", "Shown in snapshots and conflict copies, and part of session log names. Empty: the host name.", text_box(device, "work-mac").test_id("sync-device")))
+        .child(field("This device's name", "Shown in snapshots and conflict copies, and part of session log names. Connecting sets it to the host name plus four random hex digits, so two machines never share one.", text_box(device, "work-mac").test_id("sync-device")))
         .child(field(
             "Sync automatically",
-            "Sync in the background whenever an agent session starts or stops in an obmem project.",
+            "Sync in the background when an agent session starts or a turn ends in an obmem project, at most once a minute.",
             switch_control(move || auto.get(), "Sync automatically", move |v| auto.set(v)),
         ))
         .child(field(

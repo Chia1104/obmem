@@ -68,7 +68,8 @@ pub struct SyncConfig {
     pub bucket: Option<String>,
     /// Key prefix inside the bucket, so one bucket can hold more than one vault. Unset: `obmem`.
     pub prefix: Option<String>,
-    /// This machine's name in snapshots. Unset: the host name.
+    /// This machine's name in snapshots, conflict copies and session log names. Connecting a
+    /// device sets it (see [`new_device_name`]). Unset: the host name.
     pub device: Option<String>,
     /// Also sync `.obsidian/plugins/` and `community-plugins.json`.
     pub community_plugins: Option<bool>,
@@ -257,13 +258,26 @@ pub fn global_vault() -> Result<PathBuf> {
 }
 
 /// This machine's name, which keeps what two devices write to the synced personal vault apart:
-/// `[sync] device`, else the host name without its domain.
+/// `[sync] device`, else the host name without its domain. Connecting a device to a bucket sets
+/// `[sync] device` (see [`new_device_name`]), because two machines can share a host name.
 pub fn device_name(sync: &SyncConfig) -> String {
-    sync.device.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(|| {
-        let host = gethostname::gethostname().to_string_lossy().into_owned();
-        let host = host.split('.').next().unwrap_or_default();
-        if host.is_empty() { "device".into() } else { host.into() }
-    })
+    sync.device.clone().filter(|d| !d.trim().is_empty()).unwrap_or_else(host_name)
+}
+
+/// A name for a device joining sync: the host name and four random hex digits, so that two
+/// laptops that both call themselves `MacBook-Pro` still write different session logs.
+pub fn new_device_name() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.write_u32(std::process::id());
+    format!("{}-{:04x}", host_name(), h.finish() & 0xffff)
+}
+
+fn host_name() -> String {
+    let host = gethostname::gethostname().to_string_lossy().into_owned();
+    let host = host.split('.').next().unwrap_or_default();
+    if host.is_empty() { "device".into() } else { host.into() }
 }
 
 /// The user's `[sync]` settings.

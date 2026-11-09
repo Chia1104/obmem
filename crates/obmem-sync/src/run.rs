@@ -49,11 +49,15 @@ pub fn run(cfg: &SyncConfig, allow_mass_delete: bool, wait: std::time::Duration)
 }
 
 /// Connect this device to the configured bucket: unlock its key with the passphrase, or create
-/// the key when the bucket holds none yet, and keep both in the keychain. `true`: created.
+/// the key when the bucket holds none yet, and keep both in the keychain. Without `[sync] device`,
+/// give the device a name of its own ([`config::new_device_name`]). `true`: created.
 pub fn connect(cfg: &SyncConfig, creds: crate::Credentials, passphrase: &age::secrecy::SecretString) -> Result<bool> {
     let remote = Remote::s3(cfg, &creds)?;
     let (key, created) = crate::unlock_or_create(&remote, passphrase)?;
     keychain::save(cfg, &creds, &key)?;
+    if cfg.device.as_deref().is_none_or(|d| d.trim().is_empty()) {
+        obmem_core::settings::set_sync_device(&config::new_device_name())?;
+    }
     Ok(created)
 }
 

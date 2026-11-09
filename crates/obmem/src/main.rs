@@ -192,10 +192,12 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
         return;
     }
     let dir = project.map(PathBuf::from).or_else(|| input.project_dir().map(PathBuf::from));
-    let out = (|| -> Result<String> {
+    // The hook's answer, and whether to sync the personal vault after it.
+    let out = (|| -> Result<(String, bool)> {
         let cfg = config::Config::load(dir.as_deref())?;
+        // Like every hook, a no-op outside obmem projects: hooks installed user-wide stay harmless.
         if !cfg.project_root.join(config::PROJECT_CONFIG_FILE).exists() {
-            return Ok(agent.empty().to_string());
+            return Ok((agent.empty().to_string(), false));
         }
         let now = std::time::SystemTime::now();
         Ok(match which {
@@ -204,18 +206,24 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
                     eprintln!("obmem: could not record the project: {e:#}");
                 }
                 let mut store = store::Store::open(cfg)?;
-                hooks::session_start(&mut store, &input, agent, *max_chars, now)?
+                (hooks::session_start(&mut store, &input, agent, *max_chars, now)?, true)
             }
-            HookCmd::Stop { .. } => agent.stop_output(hooks::stop(&cfg, &input, agent, now)?.as_deref()),
+            HookCmd::Stop { .. } => {
+                // A stop that asks the agent to log first is not the end of the turn: sync after
+                // the stop that lets it end, so the log entry goes along.
+                let ask = hooks::stop(&cfg, &input, agent, now)?;
+                (agent.stop_output(ask.as_deref()), ask.is_none())
+            }
             HookCmd::PreCompact { .. } => {
                 let mut store = store::Store::open(cfg)?;
-                hooks::pre_compact(&mut store, &input, agent)?
+                (hooks::pre_compact(&mut store, &input, agent)?, false)
             }
         })
     })();
+    let sync_after = matches!(out, Ok((_, true)));
     match out {
-        Ok(s) if s.is_empty() => {}
-        Ok(s) => println!("{s}"),
+        Ok((s, _)) if s.is_empty() => {}
+        Ok((s, _)) => println!("{s}"),
         Err(e) => {
             eprintln!("obmem: {e:#}");
             if !agent.empty().is_empty() {
@@ -223,14 +231,9 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
             }
         }
     }
-    // Like every hook, only in obmem projects: hooks installed user-wide stay harmless elsewhere.
-    if matches!(which, HookCmd::SessionStart { .. } | HookCmd::Stop { .. }) && in_obmem_project(dir.as_deref()) {
+    if sync_after {
         spawn_background_sync();
     }
-}
-
-fn in_obmem_project(dir: Option<&std::path::Path>) -> bool {
-    config::Config::load(dir).is_ok_and(|c| c.project_root.join(config::PROJECT_CONFIG_FILE).exists())
 }
 
 fn main() -> Result<()> {
@@ -558,7 +561,7 @@ fn sync_status_line() -> String {
     }
 }
 
-/// After a session starts or stops, sync the personal vault in a process of its own, so the
+/// After a session starts or a turn ends, sync the personal vault in a process of its own, so the
 /// agent never waits on the network. Errors go to the sync status, never to the agent.
 fn spawn_background_sync() {
     let Ok(cfg) = config::sync_config() else { return };

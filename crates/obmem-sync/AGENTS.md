@@ -21,7 +21,8 @@ Under `[sync] prefix` (default `obmem`):
 ## Running a sync (`run.rs`)
 
 - `run` is what front ends call. It loads the credentials from the keychain, syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. `connect` stores a device's credentials and unlocks the key, or creates it.
-- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and stop, when `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `BACKGROUND_WAIT` for a running one. At most one sync waits (a `.queued` marker); any other returns `Queued`, because the waiting sync will see its changes. A queued return is not recorded as a status.
+- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `BACKGROUND_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records. At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
+- `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
 
 ## Invariants
 

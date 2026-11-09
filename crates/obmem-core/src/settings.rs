@@ -149,6 +149,13 @@ pub fn save_sync(s: &SyncSettings) -> Result<()> {
     save_sync_at(&global_config_path(), s)
 }
 
+/// Set `[sync] device`, keeping the rest.
+pub fn set_sync_device(name: &str) -> Result<()> {
+    let mut s = read_sync()?;
+    s.device = name.to_string();
+    save_sync(&s)
+}
+
 fn read_sync_at(path: &Path) -> Result<SyncSettings> {
     let file: GlobalFile = toml::from_str(&read_doc(path)?.to_string())?;
     let sync = file.sync;
@@ -320,5 +327,14 @@ mod tests {
         assert!(save_sync_at(&path, &SyncSettings { endpoint: "acct.r2.dev".into(), ..s.clone() }).is_err());
         assert!(save_sync_at(&path, &SyncSettings { bucket: "a/b".into(), ..s.clone() }).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_device_names_differ_on_one_host() {
+        let (a, b) = (crate::config::new_device_name(), crate::config::new_device_name());
+        assert_ne!(a, b);
+        let (host_a, tag) = a.rsplit_once('-').unwrap();
+        assert_eq!(host_a, b.rsplit_once('-').unwrap().0);
+        assert!(tag.len() == 4 && tag.bytes().all(|c| c.is_ascii_hexdigit()), "{a}");
     }
 }

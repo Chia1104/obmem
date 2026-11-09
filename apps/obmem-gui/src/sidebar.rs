@@ -36,16 +36,22 @@ pub(crate) fn sidebar() -> impl IntoElement {
                 }))
                 .child(each(rows, |r: &ProjectRow| r.path.clone(), |row, _| project_row(row))),
         )
-        .child(
-            button()
-                .px_2()
-                .py_2()
-                .rounded(move || theme().radius)
-                .bg(move || if state::screen() == Screen::Personal { theme().sidebar_accent } else { theme().sidebar })
-                .active(|s| s.opacity(0.7))
-                .on_press(state::show_personal)
-                .child(text("Personal settings")),
-        )
+        .child(screen_button("Review", Screen::Review, state::show_review))
+        .child(screen_button("Personal settings", Screen::Personal, state::show_personal))
+}
+
+/// An entry for a screen that is not a project.
+fn screen_button(label: &'static str, screen: Screen, show: fn()) -> impl IntoElement {
+    view().test_id(&format!("screen-{}", label.to_lowercase().replace(' ', "-"))).child(
+        button()
+            .px_2()
+            .py_2()
+            .rounded(move || theme().radius)
+            .bg(move || if state::screen() == screen { theme().sidebar_accent } else { theme().sidebar })
+            .active(|s| s.opacity(0.7))
+            .on_press(show)
+            .child(text(label)),
+    )
 }
 
 /// The listed projects; none while loading.

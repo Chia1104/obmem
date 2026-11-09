@@ -6,7 +6,7 @@ obmem's desktop control panel for macOS and Windows, built with Native Shell (NS
 
 - `data.rs`: everything the window reads or changes, through obmem-core and obmem-agents. All of it blocks.
 - `state.rs`: the window's signals and the actions that change them. Views call actions; actions run `data` on a blocking thread and write the result back.
-- `sidebar.rs`, `project_page.rs` (header, tabs, Overview), `settings_tab.rs`, `secrets_tab.rs`, `personal_page.rs`, `widgets.rs`: views only.
+- `sidebar.rs`, `project_page.rs` (header, tabs, Overview), `settings_tab.rs`, `secrets_tab.rs`, `review_page.rs`, `personal_page.rs`, `widgets.rs`: views only.
 - `login_env.rs`: on macOS, the PATH from a login shell (see below).
 
 Logic another front end could use belongs in obmem-core or obmem-agents, not here.
@@ -17,6 +17,8 @@ Logic another front end could use belongs in obmem-core or obmem-agents, not her
 
 - A task started with `spawn` ends with its owner, and the button that starts one is usually re-rendered away when the task updates the page. Start tasks through `state::run_task` / `in_background`, which run them under the window's owner.
 - `nsh_core::blocking` moves work off the engine thread. Every `data` call goes through it.
+- Background loads must not change the screen. `state::select` picks a project quietly; only `state::open`, which the user triggers, switches to the project screen. Otherwise the project list, which loads after startup, pulls the user off Review or Personal settings.
+- `ButtonElement` has no `test_id`. Wrap the button in a `view().test_id(..)` and select it with `id:… >> role:button`.
 - Folder dialogs, revealing a path and opening URLs are NSH services (`pick_paths`, `reveal_path`, `open_url`); no extra crate is needed.
 - `#[native_module] fn native` runs in the runner's `main` before the engine starts any thread. It is the only safe place for process setup such as changing the environment, and `main.rs` calls the same `prepare_process` first.
 - Apps opened from Finder get launchd's short PATH, without `~/.cargo/bin` or `/usr/local/bin`, so they would not find `obmem` or the Obsidian CLI. `login_env` adopts a login shell's PATH on macOS.

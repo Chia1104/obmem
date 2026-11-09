@@ -62,7 +62,11 @@ pub(crate) fn check(level: Level, title: impl Into<SharedString>, detail: impl I
                 .font_weight(FontWeight::BOLD)
                 .text_color(move || if level == Level::Ok { theme().foreground } else { theme().destructive }),
         )
-        .child(view().flex_1().gap_1().child(text(title.into())).child(muted(detail)))
+        .child({
+            let detail: SharedString = detail.into();
+            let body = view().flex_1().gap_1().child(text(title.into()));
+            if detail.is_empty() { body } else { body.child(muted(detail)) }
+        })
 }
 
 /// A bordered block of related rows.
@@ -131,6 +135,13 @@ pub(crate) fn notice_area() -> AnyElement {
             let body = match n {
                 Notice::Error(e) => card().child(check(Level::Error, "That did not work", e)),
                 Notice::Done(msg) => card().child(check(Level::Ok, msg, "")),
+                Notice::Audit(done) => {
+                    let mut c = card().child(check(Level::Ok, done.summary, ""));
+                    for n in done.notes {
+                        c = c.child(muted(n));
+                    }
+                    c
+                }
                 Notice::SetUp(done) => {
                     let mut c = card().child(text(format!("{} is set up", done.agent.label())).font_weight(FontWeight::MEDIUM));
                     for f in &done.changed {
@@ -142,7 +153,7 @@ pub(crate) fn notice_area() -> AnyElement {
                     c
                 }
             };
-            body.child(view().flex_row().pt_2().child(action("Dismiss", state::dismiss_notice)))
+            body.test_id("notice").child(view().flex_row().pt_2().child(action("Dismiss", state::dismiss_notice)))
         })
     })
 }

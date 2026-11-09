@@ -7,8 +7,9 @@ use obmem_core::allowlist::{self, Allowlist, Kind};
 use obmem_core::config::{self, Config};
 use obmem_core::settings::{self, GlobalSettings, ProjectSettings};
 use obmem_core::status::{self, Status};
-use obmem_core::store::Store;
-use obmem_core::{init, projects};
+use obmem_core::audit::{AuditOptions, Severity};
+use obmem_core::store::{Store, Verdict};
+use obmem_core::{init, obsidian, projects, review};
 use std::path::{Path, PathBuf};
 
 /// A project in the sidebar.
@@ -185,4 +186,99 @@ pub fn set_up(path: &Path, agent: Agent) -> Result<SetupDone, String> {
     let cfg = Config::load(Some(path)).map_err(text)?;
     let r = setup::setup(&cfg, agent).map_err(text)?;
     Ok(SetupDone { agent, changed: r.changed, manual: r.manual })
+}
+
+/// One project's review items, or the personal vault's (shared by every project, listed once).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewGroup {
+    pub title: String,
+    /// The project actions go through; for the personal vault, any listed project.
+    pub root: PathBuf,
+    /// `None` for the personal vault, which has no audit of its own here.
+    pub project: Option<PathBuf>,
+    /// Obsidian's id for the vault, to open its notes; `None` when Obsidian does not know it.
+    pub vault_id: Option<String>,
+    pub items: Vec<review::Item>,
+}
+
+/// Drafts and unresolved findings of every listed project that is set up, then the personal vault's.
+pub fn review() -> Result<Vec<ReviewGroup>, String> {
+    let mut groups = Vec::new();
+    let mut personal: Option<ReviewGroup> = None;
+    for p in projects::list().map_err(text)? {
+        let Ok(cfg) = Config::load(Some(&p.path)) else { continue };
+        if !cfg.project_root.join(config::PROJECT_CONFIG_FILE).exists() {
+            continue;
+        }
+        let mut store = Store::open(cfg.clone()).map_err(text)?;
+        let (mine, shared): (Vec<_>, Vec<_>) = store.review().map_err(text)?.into_iter().partition(|i| i.scope == "project");
+        if personal.is_none() {
+            personal = Some(ReviewGroup {
+                title: "Personal vault".into(),
+                root: cfg.project_root.clone(),
+                project: None,
+                vault_id: obsidian::vault_id(&cfg.global_vault).ok().flatten(),
+                items: shared,
+            });
+        }
+        groups.push(ReviewGroup {
+            title: cfg.project_name.clone(),
+            root: cfg.project_root.clone(),
+            project: Some(cfg.project_root.clone()),
+            vault_id: obsidian::vault_id(&cfg.project_vault).ok().flatten(),
+            items: mine,
+        });
+    }
+    groups.extend(personal);
+    Ok(groups)
+}
+
+fn store_at(root: &Path) -> Result<Store, String> {
+    Store::open(Config::load(Some(root)).map_err(text)?).map_err(text)
+}
+
+const BY: &str = "human (gui)";
+
+pub fn approve(root: &Path, rel: &str) -> Result<String, String> {
+    store_at(root)?.approve(rel, BY).map_err(text)
+}
+
+pub fn resolve(root: &Path, rel: &str, verdict: Verdict) -> Result<String, String> {
+    store_at(root)?.resolve_finding(rel, verdict, None, BY, true).map_err(text)
+}
+
+/// Records that the note was re-checked against the current code.
+pub fn verify(root: &Path, rel: &str) -> Result<String, String> {
+    store_at(root)?.verify(rel, BY, true).map_err(text)
+}
+
+/// What an audit run reported.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditDone {
+    pub summary: String,
+    /// What the audit could not check, and why.
+    pub notes: Vec<String>,
+}
+
+/// `obmem audit --write`: checks both vaults and keeps the finding notes in step.
+pub fn run_audit(root: &Path) -> Result<AuditDone, String> {
+    let mut store = store_at(root)?;
+    let opts = AuditOptions { scope: None, rules: vec![], today: chrono::Local::now().date_naive() };
+    let (report, stats) = store.audit(&opts, Some(Severity::Warn)).map_err(text)?;
+    let count = |s: Severity| report.issues.iter().filter(|i| i.severity == s).count();
+    let mut summary = format!(
+        "Checked {} notes: {} errors, {} warnings.",
+        report.checked_notes,
+        count(Severity::Error),
+        count(Severity::Warn)
+    );
+    if let Some(st) = stats {
+        summary.push_str(&format!(
+            " Findings: {} new, {} reopened, {} closed.",
+            st.created.len(),
+            st.reopened.len(),
+            st.closed.len()
+        ));
+    }
+    Ok(AuditDone { summary, notes: report.notices })
 }

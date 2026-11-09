@@ -4,12 +4,13 @@
 //! which run obmem's blocking work off the engine thread and write the result back. A global is
 //! per surface, so each test has its own.
 
-use crate::data::{self, Detail, Hit, Personal, ProjectRow, SetupDone, Vault};
+use crate::data::{self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, SetupDone, Vault};
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
 use obmem_core::allowlist::Kind;
 use obmem_core::settings::{GlobalSettings, ProjectSettings};
+use obmem_core::store::Verdict;
 use std::path::PathBuf;
 
 /// Something loaded in the background.
@@ -25,6 +26,7 @@ pub(crate) enum Load<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Notice {
     SetUp(SetupDone),
+    Audit(AuditDone),
     Done(String),
     Error(String),
 }
@@ -37,6 +39,8 @@ pub(crate) enum Screen {
     Project,
     /// The user's own settings, which apply to every project.
     Personal,
+    /// Drafts and findings waiting for a person, across projects.
+    Review,
 }
 
 /// A project's tab.
@@ -62,6 +66,8 @@ struct Screens(Screen);
 struct Tabs(Tab);
 #[derive(Clone, Default)]
 struct PersonalState(Load<Personal>);
+#[derive(Clone, Default)]
+struct ReviewState(Load<Vec<ReviewGroup>>);
 /// The text last scanned and what the scanner found in it.
 #[derive(Clone, Default)]
 struct ScanResult(Option<(String, Vec<Hit>)>);
@@ -92,6 +98,10 @@ pub(crate) fn tab() -> Tab {
 
 pub(crate) fn personal() -> Load<Personal> {
     global::<PersonalState>().with(|v| v.0.clone())
+}
+
+pub(crate) fn review() -> Load<Vec<ReviewGroup>> {
+    global::<ReviewState>().with(|v| v.0.clone())
 }
 
 /// The secrets the last test found; `None` before a test.
@@ -168,7 +178,7 @@ fn change_project(work: impl FnOnce(PathBuf) -> Result<(), String> + Send + 'sta
 // --- Projects ----------------------------------------------------------------
 
 /// Reads the project list again; selects `select`, or keeps the selection, or picks the first.
-pub(crate) fn load_projects(select: Option<PathBuf>) {
+pub(crate) fn load_projects(wanted: Option<PathBuf>) {
     in_background(data::projects, move |r| {
         let rows = match r {
             Ok(rows) => rows,
@@ -177,11 +187,11 @@ pub(crate) fn load_projects(select: Option<PathBuf>) {
                 return;
             }
         };
-        let current = select.or_else(selected).filter(|p| rows.iter().any(|r| &r.path == p));
+        let current = wanted.or_else(selected).filter(|p| rows.iter().any(|r| &r.path == p));
         let next = current.or_else(|| rows.first().map(|r| r.path.clone()));
         global::<Projects>().set(Projects(Load::Ready(rows)));
         match next {
-            Some(path) => open(path),
+            Some(path) => select(path),
             None => {
                 global::<Selected>().set(Selected(None));
                 global::<Shown>().set(Shown(Load::Loading));
@@ -190,16 +200,24 @@ pub(crate) fn load_projects(select: Option<PathBuf>) {
     });
 }
 
-/// Shows a project.
+/// Shows a project: the user picked it.
 pub(crate) fn open(path: PathBuf) {
+    select(path);
+    global::<Screens>().set(Screens(Screen::Project));
+}
+
+/// Makes `path` the selected project and reads it, without leaving the screen the user is on:
+/// the project list loads in the background and must not pull them away from another screen.
+fn select(path: PathBuf) {
     if selected().as_ref() != Some(&path) {
-        set_notice(None);
+        if screen() == Screen::Project {
+            set_notice(None);
+        }
         global::<Tabs>().set(Tabs(Tab::Overview));
         global::<ScanResult>().set(ScanResult(None));
         global::<Shown>().set(Shown(Load::Loading));
     }
     global::<Selected>().set(Selected(Some(path.clone())));
-    global::<Screens>().set(Screens(Screen::Project));
     reload(path);
 }
 
@@ -379,6 +397,62 @@ pub(crate) fn save_personal(s: GlobalSettings) {
                 Err(e) => fail(e),
             }
             load_personal();
+        },
+    );
+}
+
+// --- Review ------------------------------------------------------------------
+
+pub(crate) fn show_review() {
+    set_notice(None);
+    global::<Screens>().set(Screens(Screen::Review));
+    load_review();
+}
+
+pub(crate) fn load_review() {
+    in_background(data::review, |r| {
+        global::<ReviewState>().set(ReviewState(match r {
+            Ok(groups) => Load::Ready(groups),
+            Err(e) => Load::Failed(e),
+        }));
+    });
+}
+
+/// Runs a review action, reports its message, and reads the review list (and the shown project,
+/// whose counts it changed) again.
+fn review_action(work: impl FnOnce() -> Result<String, String> + Send + 'static) {
+    in_background(work, |r| {
+        set_notice(Some(match r {
+            Ok(msg) => Notice::Done(msg),
+            Err(e) => Notice::Error(e),
+        }));
+        load_review();
+        refresh();
+    });
+}
+
+pub(crate) fn approve(root: PathBuf, rel: String) {
+    review_action(move || data::approve(&root, &rel));
+}
+
+pub(crate) fn resolve(root: PathBuf, rel: String, verdict: Verdict) {
+    review_action(move || data::resolve(&root, &rel, verdict));
+}
+
+pub(crate) fn verify(root: PathBuf, rel: String) {
+    review_action(move || data::verify(&root, &rel));
+}
+
+pub(crate) fn run_audit(root: PathBuf) {
+    in_background(
+        move || data::run_audit(&root),
+        |r| {
+            set_notice(Some(match r {
+                Ok(done) => Notice::Audit(done),
+                Err(e) => Notice::Error(e),
+            }));
+            load_review();
+            refresh();
         },
     );
 }

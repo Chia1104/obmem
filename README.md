@@ -107,6 +107,7 @@ For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks t
 - **Overview:** each project's health, and setting up agents with one click.
 - **Settings:** `.obmem.toml`, and whether Codex runs obmem's tools without asking.
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
+- **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.
 - **Personal settings:** your personal vault, environment-variable scanning, and the patterns and words allowed in every project.
 
 ```sh

@@ -53,7 +53,7 @@ fn settings_secrets_and_personal_settings_are_saved() {
     app.wait_for_within("Nothing found", SLOW).unwrap();
     assert_eq!(allowlist::read(&cfg.project_vault).unwrap().fingerprints.len(), 1);
 
-    app.press("role:button[Personal settings]").unwrap();
+    app.press("id:screen-personal-settings >> role:button").unwrap();
     app.wait_for_within("id:personal-settings", SLOW).unwrap();
     app.type_text("id:add-words", "sandbox-only").unwrap();
     app.press("id:entries-words >> role:button[Add]").unwrap();

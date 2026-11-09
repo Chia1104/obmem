@@ -1,11 +1,12 @@
-//! obmem's desktop control panel: the projects obmem knows, their health, agent setup, settings
-//! and secret scanning.
+//! obmem's desktop control panel: the projects obmem knows, their health, agent setup, settings,
+//! secret scanning, and reviewing what agents wrote.
 //! `nsh.json` `"root"` names [`App`]. Notes themselves are read and edited in Obsidian.
 
 mod data;
 mod login_env;
 mod personal_page;
 mod project_page;
+mod review_page;
 mod secrets_tab;
 mod settings_tab;
 mod sidebar;
@@ -43,5 +44,6 @@ pub fn App() -> impl IntoElement {
         .child(dynamic(move || match state::screen() {
             state::Screen::Project => project_page::project_page().into_element(),
             state::Screen::Personal => personal_page::personal_page().into_element(),
+            state::Screen::Review => review_page::review_page().into_element(),
         }))
 }

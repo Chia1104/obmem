@@ -103,11 +103,14 @@ fn health(d: &Detail) -> View {
         .child(cli)
         .child(vault("Project vault", &st.project_vault))
         .child(vault("Personal vault", &st.global_vault))
-        .child(check(
-            if st.open_findings > 0 { Level::Warn } else { Level::Ok },
-            "Review",
-            format!("{} drafts and {} open findings in the project vault. Review them in Obsidian.", st.drafts, st.open_findings),
-        ))
+        .child(
+            check(
+                if st.open_findings > 0 { Level::Warn } else { Level::Ok },
+                "Review",
+                format!("{} drafts and {} open findings in the project vault.", st.drafts, st.open_findings),
+            )
+            .child(action("Review", state::show_review)),
+        )
 }
 
 fn vault(title: &str, v: &VaultStatus) -> View {

@@ -11,7 +11,7 @@
 
 use crate::key::VaultKey;
 use crate::remote::Remote;
-use crate::{BLOBS, SNAPSHOTS, load_snapshot};
+use crate::{BLOBS, SNAPSHOTS, load_snapshot, seq_of};
 use anyhow::Result;
 use chrono::{DateTime, Datelike, TimeDelta, Utc};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -35,7 +35,7 @@ pub fn prune(remote: &Remote, key: &VaultKey, now: DateTime<Utc>, dry_run: bool)
         .list_meta(SNAPSHOTS)?
         .into_iter()
         .filter_map(|o| {
-            let seq = o.key.rsplit('/').next()?.strip_suffix(".age")?.parse().ok()?;
+            let seq = seq_of(&o.key)?;
             Some((seq, o.modified, o.size, o.key))
         })
         .collect();

@@ -60,6 +60,11 @@ fn snapshot_key(seq: u64) -> String {
     format!("{SNAPSHOTS}/{seq:012}.age")
 }
 
+/// The snapshot number in a key `snapshot_key` made; `None` for any other object.
+fn seq_of(key: &str) -> Option<u64> {
+    key.rsplit('/').next()?.strip_suffix(".age")?.parse().ok()
+}
+
 fn blob_key(id: &str) -> String {
     format!("{BLOBS}/{}/{id}.age", &id[..2])
 }
@@ -88,7 +93,7 @@ pub fn snapshot_seqs(remote: &Remote) -> Result<Vec<u64>> {
     let mut seqs: Vec<u64> = remote
         .list(SNAPSHOTS)?
         .iter()
-        .filter_map(|k| k.rsplit('/').next()?.strip_suffix(".age")?.parse().ok())
+        .filter_map(|k| seq_of(k))
         .collect();
     seqs.sort_unstable();
     Ok(seqs)

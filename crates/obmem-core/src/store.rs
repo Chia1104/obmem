@@ -501,9 +501,12 @@ impl Store {
         let date = now.format("%Y-%m-%d").to_string();
         let dir = self.cfg.global_project_dir().join("Sessions");
         crate::config::ensure_within(&self.cfg.global_vault, &dir)?;
+        // The device is in the name: with the personal vault synced, two machines writing the same
+        // day's log would otherwise conflict every day.
+        let device = slugify(&self.cfg.device);
         let name = match session {
-            Some(s) if !s.is_empty() => format!("{date}-{}", slugify(&s.chars().take(12).collect::<String>())),
-            _ => date.clone(),
+            Some(s) if !s.is_empty() => format!("{date}-{device}-{}", slugify(&s.chars().take(12).collect::<String>())),
+            _ => format!("{date}-{device}"),
         };
         // Projects of the same name share this folder, and the name comes from repo config: add
         // only to a log this project started, else start one under the next free name.
@@ -897,6 +900,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
         assert!(!store.project_ready());
@@ -928,6 +932,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
         let Ok(WriteOutcome::Written { id, path, .. }) = store.write(req(Scope::Project)) else { panic!("write") };
@@ -968,6 +973,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: true,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
         let fm = |p: &Path| Note::parse(&std::fs::read_to_string(p).unwrap()).unwrap().fm;
@@ -1013,6 +1019,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let mut store = Store::open(cfg).unwrap();
 
@@ -1075,6 +1082,7 @@ mod tests {
             secrets: crate::config::SecretsConfig { mode, ..Default::default() },
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let titles = [format!("Use {multi_line} for auth"), format!("Use {} for auth", spaced.replace(' ', "\n"))];
 
@@ -1111,6 +1119,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         })
         .unwrap()
     }
@@ -1132,6 +1141,7 @@ mod tests {
         let mut clone = log_store(&dir, &dir.join("clone"), "p");
 
         let (pa, _) = a.log(None, "from a", "agent:test").unwrap();
+        assert!(pa.file_stem().unwrap().to_string_lossy().ends_with("-test"), "the device is in the name: {}", pa.display());
         let (pc, _) = clone.log(None, "NEXT STEP: from the clone", "agent:test").unwrap();
         assert_ne!(pa, pc);
         assert!(pc.file_stem().unwrap().to_string_lossy().ends_with("-2"), "{}", pc.display());

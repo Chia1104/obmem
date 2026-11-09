@@ -116,11 +116,14 @@ enum Cmd {
     Guide,
     /// Show resolved paths and counts.
     Status,
-    /// Encrypted backup of the personal vault to an S3-compatible bucket (`[sync]` in
-    /// ~/.config/obmem/config.toml).
+    /// Sync the personal vault with an S3-compatible bucket, encrypted (`[sync]` in
+    /// ~/.config/obmem/config.toml). Without a subcommand: sync now; every sync is also a snapshot.
     Sync {
+        /// Go ahead even if the sync would delete more than half of the vault.
+        #[arg(long)]
+        allow_deletes: bool,
         #[command(subcommand)]
-        action: SyncCmd,
+        action: Option<SyncCmd>,
     },
 }
 
@@ -129,8 +132,6 @@ enum SyncCmd {
     /// Save the bucket's access key on this device, and choose the backup passphrase (first
     /// device) or unlock the backup with it (every other device).
     Setup,
-    /// Back up the personal vault now (a new snapshot, unless nothing changed).
-    Backup,
     /// List the snapshots in the bucket.
     List,
     /// Restore a snapshot into an empty folder. Default: the latest snapshot, into the personal
@@ -237,9 +238,9 @@ fn main() -> Result<()> {
         run_hook(which, cli.project.as_deref(), session.as_deref());
         return Ok(());
     }
-    if let Cmd::Sync { action } = &cli.cmd {
+    if let Cmd::Sync { action, allow_deletes } = &cli.cmd {
         // Only the personal vault and the user's config are involved: no project to load.
-        return run_sync(action);
+        return run_sync(action.as_ref(), *allow_deletes);
     }
     let cfg = config::Config::load(cli.project.as_deref())?;
 
@@ -432,7 +433,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_sync(action: &SyncCmd) -> Result<()> {
+fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
     use obmem_sync as sync;
     let cfg = config::sync_config()?;
     if cfg.bucket.is_none() {
@@ -441,6 +442,9 @@ fn run_sync(action: &SyncCmd) -> Result<()> {
             config::global_config_path().display()
         );
     }
+    let Some(action) = action else {
+        return sync_now(&cfg, allow_deletes);
+    };
     match action {
         SyncCmd::Setup => {
             let creds = sync::Credentials {
@@ -470,22 +474,6 @@ fn run_sync(action: &SyncCmd) -> Result<()> {
                 cfg.bucket.as_deref().unwrap_or_default()
             );
         }
-        SyncCmd::Backup => {
-            let (creds, key) = sync::keychain::load(&cfg)?;
-            let remote = sync::Remote::s3(&cfg, &creds)?;
-            let vault = config::global_vault()?;
-            let device = sync::device_name(&cfg);
-            let opts = sync::BackupOptions { device: &device, community_plugins: cfg.community_plugins.unwrap_or(false) };
-            let r = sync::backup(&remote, &key, &vault, &opts)?;
-            for (name, why) in &r.skipped {
-                eprintln!("skipped {name}: {why}");
-            }
-            if r.created {
-                println!("snapshot {}: {} files, {} uploaded", r.seq, r.files, r.uploaded);
-            } else {
-                println!("nothing changed since snapshot {} ({} files)", r.seq, r.files);
-            }
-        }
         SyncCmd::List => {
             let (creds, key) = sync::keychain::load(&cfg)?;
             let remote = sync::Remote::s3(&cfg, &creds)?;
@@ -507,8 +495,41 @@ fn run_sync(action: &SyncCmd) -> Result<()> {
             };
             let r = sync::restore(&remote, &key, *snapshot, &target)?;
             println!("restored snapshot {} ({} files) into {}", r.seq, r.files, target.display());
-            println!("next: open the folder in Obsidian (\"Open folder as vault\")");
+            println!("next: open the folder in Obsidian (\"Open folder as vault\"); if it is the personal vault, `obmem sync` keeps it in sync from now on");
         }
+    }
+    Ok(())
+}
+
+fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
+    use obmem_sync as sync;
+    let (creds, key) = sync::keychain::load(cfg)?;
+    let remote = sync::Remote::s3(cfg, &creds)?;
+    let vault = config::global_vault()?;
+    let device = config::device_name(cfg);
+    let opts = sync::SyncOptions { device: &device, community_plugins: cfg.community_plugins.unwrap_or(false), allow_mass_delete };
+    let r = sync::sync(&remote, &key, &vault, &sync::state_path(cfg, &vault), &opts)?;
+    for (name, why) in &r.skipped {
+        eprintln!("skipped {name}: {why}");
+    }
+    for (label, names) in [
+        ("uploaded", &r.uploaded),
+        ("downloaded", &r.downloaded),
+        ("deleted here", &r.deleted_local),
+        ("deleted in the bucket", &r.deleted_remote),
+        ("left for the next sync (changed while syncing)", &r.deferred),
+    ] {
+        for n in names {
+            println!("{label}: {n}");
+        }
+    }
+    for n in &r.conflicts {
+        println!("CONFLICT: {n} is another device's version; merge it into the original, then delete it");
+    }
+    match (r.created, r.seq) {
+        (_, 0) => println!("nothing to sync yet"),
+        (true, seq) => println!("synced: snapshot {seq}"),
+        (false, seq) => println!("up to date with snapshot {seq}"),
     }
     Ok(())
 }
@@ -583,6 +604,7 @@ mod tests {
             secrets: Default::default(),
             audit: Default::default(),
             auto_approve: false,
+            device: "test".into(),
         };
         let token = concat!("gh", "p_Qm4Zr8Lx2Vb6Nc9Tw3Yh7Kp1Sd5Fg0Jk2LmA");
 

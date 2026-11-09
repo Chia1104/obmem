@@ -87,6 +87,7 @@ Agent notes are then written `active`, with `approved_by: auto-approve`, and so 
 | `duplicate` | Notes with near-identical titles |
 | `orphan` | Notes nothing links to |
 | `code-drift` | `code_refs` whose file or symbol is gone, or whose code changed since the note was verified |
+| `sync-conflict` | Conflict copies that [sync](#sync-and-backup) left next to a note |
 
 ```sh
 obmem audit                        # report warnings and errors
@@ -110,32 +111,41 @@ By default a write that contains a secret is refused. Set `mode = "redact"` to w
 
 For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks the staged files in the project vault.
 
-## Backup
+## Sync and backup
 
-obmem can back up the personal vault to an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Everything in the bucket is encrypted with a key that only your passphrase unlocks, file names included. A backup made on macOS restores on Windows and the other way round.
+obmem can sync the personal vault between your machines through an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Every sync is also a backup snapshot. Everything in the bucket is encrypted with a key that only your passphrase unlocks, file names included. macOS and Windows machines can share one bucket.
 
 ```toml
 # ~/.config/obmem/config.toml
 [sync]
 endpoint = "https://<account-id>.r2.cloudflarestorage.com"  # leave out for AWS S3
-bucket = "my-obmem-backup"
+bucket = "my-obmem-vault"
 # region = "us-east-1"   # AWS needs the bucket's region; R2 uses "auto", the default
 # prefix = "obmem"       # key prefix inside the bucket
-# device = "work-mac"    # this machine's name in snapshots; default: the host name
+# device = "work-mac"    # this machine's name; default: the host name
 # community_plugins = false
 ```
 
 ```sh
 obmem sync setup                  # access key, then choose (first device) or enter the passphrase
-obmem sync backup                 # a new snapshot, uploading only what changed
+obmem sync                        # sync now
 obmem sync list                   # snapshots: number, time, device, file count
-obmem sync restore                # latest snapshot into the personal vault (must be empty or missing)
-obmem sync restore --snapshot 12 --to ~/restored
+obmem sync restore --snapshot 12 --to ~/restored   # an older state, into an empty folder
 ```
 
-`setup` keeps the access key and the unlocked backup key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the backup cannot be read.**
+`setup` keeps the access key and the unlocked vault key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the bucket cannot be read.**
 
-Each snapshot is a restore point; unchanged files are stored once. The backup holds the notes, `_system/`, and Obsidian's settings, themes and snippets from `.obsidian/`. It leaves out the workspace layout, other dot-folders and symlinks, plus community plugins unless `community_plugins = true`. A file whose name Windows cannot hold (`:` or `?`, a name like `con`, a trailing dot) is skipped with a warning.
+On a new machine, run `obmem sync setup` and then `obmem sync`. What the machine already has is merged in, not replaced.
+
+How a sync decides:
+- A file changed on one side only: that version wins. Deletions travel the same way.
+- A file changed on both sides: your version stays, and the other machine's version lands next to it as `<name>.sync-conflict-<device>-<time>.md`. `obmem audit` reports it (rule `sync-conflict`) until you merge what you need and delete the copy.
+- A file deleted on one side and edited on the other: the edit is kept.
+- A sync that would delete more than half of the vault stops and asks for `--allow-deletes`.
+
+Session logs carry the machine's name (`2026-11-09-work-mac.md`), so two machines never write the same log.
+
+A sync covers the notes, `_system/`, and Obsidian's settings, themes and snippets from `.obsidian/`. It leaves out the workspace layout, other dot-folders and symlinks, plus community plugins unless `community_plugins = true`. A file whose name Windows cannot hold (`:` or `?`, a name like `con`, a trailing dot) is skipped with a warning. Older snapshots stay in the bucket as restore points.
 
 ## Import Claude Code memory
 
@@ -166,7 +176,7 @@ A Cargo workspace:
 | `crates/obmem-core` | Config, vaults, notes, search, audit, secret scanning |
 | `crates/obmem-mcp` | The MCP server |
 | `crates/obmem-agents` | Agent hooks and `obmem setup` |
-| `crates/obmem-sync` | Encrypted backup of the personal vault to S3-compatible storage |
+| `crates/obmem-sync` | Encrypted sync and backup of the personal vault through S3-compatible storage |
 | `crates/obmem` | The `obmem` binary |
 | `apps/obmem-gui` | The desktop app ([Native Shell](https://nsh.dev)) |
 

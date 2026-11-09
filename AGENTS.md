@@ -19,7 +19,7 @@ Long-term memory for coding agents: an MCP server, agent hooks and a CLI in one 
 | `crates/obmem-core` | The memory model: config, vaults, notes, search, context ranking, audit, code drift, secret scanning, `init`, `import` | `crates/obmem-core/AGENTS.md` |
 | `crates/obmem-mcp` | The MCP server and how it finds the project | `crates/obmem-mcp/AGENTS.md` |
 | `crates/obmem-agents` | Hook entry points and `obmem setup` for each agent | `crates/obmem-agents/AGENTS.md` |
-| `crates/obmem-sync` | Encrypted backup of the personal vault to an S3-compatible bucket | `crates/obmem-sync/AGENTS.md` |
+| `crates/obmem-sync` | Encrypted sync and backup of the personal vault through an S3-compatible bucket | `crates/obmem-sync/AGENTS.md` |
 | `crates/obmem` | The `obmem` binary: clap CLI | `crates/obmem/AGENTS.md` |
 | `apps/obmem-gui` | The desktop control panel (Native Shell, macOS and Windows) | `apps/obmem-gui/AGENTS.md` |
 

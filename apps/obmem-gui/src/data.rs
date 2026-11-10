@@ -7,7 +7,7 @@ use obmem_core::allowlist::{self, Allowlist, Kind};
 use obmem_core::audit::{AuditOptions, Severity};
 use obmem_core::config::{self, Config};
 use obmem_core::note::Scope;
-use obmem_core::settings::{self, GlobalSettings, ProjectSettings, SyncSettings};
+use obmem_core::settings::{self, GlobalSettings, Problem, ProjectSettings, SyncSettings};
 use obmem_core::status::{self, Status};
 use obmem_core::store::{NoteRef, Store, Verdict};
 use obmem_core::{import, init, obsidian, projects, review, sessions};
@@ -232,6 +232,54 @@ pub fn save_sync(s: &SyncSettings) -> Result<(), String> {
     settings::save_sync(s).map_err(text)
 }
 
+/// What connecting a device asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectField {
+    KeyId,
+    Secret,
+    Passphrase,
+    Repeat,
+}
+
+/// Every rule the connect form's values break, by field.
+pub fn connect_problems(
+    access_key_id: &str,
+    secret_access_key: &str,
+    passphrase: &str,
+    repeat: &str,
+) -> Vec<Problem<ConnectField>> {
+    let mut out = Vec::new();
+    let mut need = |empty: bool, field, message: &str| {
+        if empty {
+            out.push(Problem {
+                field,
+                message: message.into(),
+            });
+        }
+    };
+    need(
+        access_key_id.trim().is_empty(),
+        ConnectField::KeyId,
+        "Enter the bucket's access key ID.",
+    );
+    need(
+        secret_access_key.is_empty(),
+        ConnectField::Secret,
+        "Enter the bucket's secret access key.",
+    );
+    need(
+        passphrase.is_empty(),
+        ConnectField::Passphrase,
+        "Enter a passphrase.",
+    );
+    need(
+        !passphrase.is_empty() && passphrase != repeat,
+        ConnectField::Repeat,
+        "The passphrases differ.",
+    );
+    out
+}
+
 /// Connect this device to the bucket the saved settings name.
 pub fn connect_sync(
     access_key_id: String,
@@ -241,11 +289,11 @@ pub fn connect_sync(
 ) -> Result<String, String> {
     let cfg = config::sync_config().map_err(text)?;
     let bucket = cfg.bucket.clone().ok_or("Save a bucket first.")?;
-    if access_key_id.trim().is_empty() || secret_access_key.is_empty() || passphrase.is_empty() {
-        return Err("Fill in the access key, the secret and the passphrase.".into());
-    }
-    if passphrase != repeat {
-        return Err("The passphrases differ.".into());
+    if let Some(p) = connect_problems(&access_key_id, &secret_access_key, &passphrase, &repeat)
+        .into_iter()
+        .next()
+    {
+        return Err(p.message);
     }
     let creds = obmem_sync::Credentials {
         access_key_id: access_key_id.trim().to_string(),

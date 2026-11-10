@@ -4,6 +4,7 @@
 
 mod agent_tab;
 mod data;
+mod form;
 mod icons;
 mod login_env;
 mod personal_page;
@@ -14,6 +15,7 @@ mod sessions_tab;
 mod settings_tab;
 mod sidebar;
 mod state;
+mod toasts;
 mod widgets;
 
 use nsh_base::theme;
@@ -63,6 +65,7 @@ pub fn App() -> impl IntoElement {
             state::Screen::Review => review_page::review_page().into_element(),
         }))
         .child(sidebar::drawer())
+        .child(toasts::toaster())
 }
 
 #[cfg(test)]

@@ -1,15 +1,16 @@
 //! The user's own settings (`~/.config/obmem/config.toml`) and their personal vault's allowlist,
 //! which apply to every project.
 
-use crate::data::{Personal, SyncInfo, Vault};
-use crate::state::{self, Load};
+use crate::data::{self, ConnectField, Personal, SyncInfo, Vault};
+use crate::form::Problems;
+use crate::state::{self, Load, Work};
 use crate::widgets::{
-    Level, action, card, check, field, heading, muted, notice_area, page, page_header, primary,
-    switch_control, text_box,
+    Level, Marked, action, card, check, checked_field, field, heading, loading, muted, notice_area,
+    page, page_header, primary, problem_text, switch_control, text_box,
 };
 use nsh_core::prelude::*;
-use obmem_core::allowlist::{Allowlist, Kind};
-use obmem_core::settings::{GlobalSettings, SyncSettings};
+use obmem_core::allowlist::{self, Allowlist, Kind};
+use obmem_core::settings::{GlobalField, GlobalSettings, Problem, SyncField, SyncSettings};
 
 pub(crate) fn personal_page() -> impl IntoElement {
     page(
@@ -27,7 +28,7 @@ pub(crate) fn personal_page() -> impl IntoElement {
                 view()
                     .gap_4()
                     .child(dynamic(move || match state::personal() {
-                        Load::Loading => vec![muted("Loading…").into_element()],
+                        Load::Loading => vec![loading("Loading…").into_element()],
                         Load::Failed(e) => vec![
                             check(Level::Error, "Could not read your settings", e).into_element(),
                         ],
@@ -45,20 +46,25 @@ fn form(p: &Personal) -> View {
     let vault = signal(p.settings.vault.clone());
     let scan_env = signal(p.settings.scan_process_env);
     let auto_approve = signal(p.settings.auto_approve);
+    let draft = move || GlobalSettings {
+        vault: vault.get(),
+        scan_process_env: scan_env.get(),
+        auto_approve: auto_approve.get(),
+    };
+    let problems = Problems::of(move || draft().problems());
     let save = move || {
-        state::save_personal(GlobalSettings {
-            vault: vault.get_untracked(),
-            scan_process_env: scan_env.get_untracked(),
-            auto_approve: auto_approve.get_untracked(),
-        })
+        if problems.none() {
+            state::save_personal(untracked(draft));
+        }
     };
     card()
         .test_id("personal-settings")
         .child(heading("Settings"))
-        .child(field(
+        .child(checked_field(
             "Personal vault",
             &format!("Your feedback, preferences and session logs. Now: {}. Empty: ~/Obsidian/AgentMemory.", p.vault.display()),
-            text_box(vault, "~/Obsidian/AgentMemory"),
+            text_box(vault, "~/Obsidian/AgentMemory").marked(problems.marks(GlobalField::Vault)).test_id("personal-vault"),
+            problems.at(GlobalField::Vault),
         ))
         .child(field(
             "Scan environment variables",
@@ -70,7 +76,7 @@ fn form(p: &Personal) -> View {
             "Agents' notes are saved active instead of waiting in Review as drafts. Only you can turn this on; a project's .obmem.toml can turn it off with [review] auto_approve = false.",
             switch_control(move || auto_approve.get(), "Approve agent notes automatically", move |v| auto_approve.set(v)),
         ))
-        .child(view().flex_row().pt_2().child(primary("Save", save)))
+        .child(view().flex_row().pt_2().child(primary("Save", save).busy(state::running(Work::SavePersonal))))
 }
 
 fn sync_card(p: &Personal) -> View {
@@ -135,7 +141,7 @@ fn sync_status(info: &SyncInfo) -> View {
     row.child(line).child(
         view()
             .flex_row()
-            .child(primary("Sync now", state::sync_now)),
+            .child(primary("Sync now", state::sync_now).busy(state::running(Work::Sync))),
     )
 }
 
@@ -147,21 +153,35 @@ fn sync_settings(s: &SyncSettings) -> View {
     let device = signal(s.device.clone());
     let auto = signal(s.auto);
     let plugins = signal(s.community_plugins);
+    let draft = move || SyncSettings {
+        endpoint: endpoint.get(),
+        region: region.get(),
+        bucket: bucket.get(),
+        prefix: prefix.get(),
+        device: device.get(),
+        auto: auto.get(),
+        community_plugins: plugins.get(),
+    };
+    let problems = Problems::of(move || draft().problems());
     let save = move || {
-        state::save_sync(SyncSettings {
-            endpoint: endpoint.get_untracked(),
-            region: region.get_untracked(),
-            bucket: bucket.get_untracked(),
-            prefix: prefix.get_untracked(),
-            device: device.get_untracked(),
-            auto: auto.get_untracked(),
-            community_plugins: plugins.get_untracked(),
-        })
+        if problems.none() {
+            state::save_sync(untracked(draft));
+        }
     };
     view()
         .gap_1()
-        .child(field("Endpoint", "The S3 API URL, e.g. https://<account-id>.r2.cloudflarestorage.com. Empty: AWS S3.", text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com").test_id("sync-endpoint")))
-        .child(field("Bucket", "Empty turns sync off.", text_box(bucket, "my-obmem-vault").test_id("sync-bucket")))
+        .child(checked_field(
+            "Endpoint",
+            "The S3 API URL, e.g. https://<account-id>.r2.cloudflarestorage.com. Empty: AWS S3.",
+            text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com").marked(problems.marks(SyncField::Endpoint)).test_id("sync-endpoint"),
+            problems.at(SyncField::Endpoint),
+        ))
+        .child(checked_field(
+            "Bucket",
+            "Empty turns sync off.",
+            text_box(bucket, "my-obmem-vault").marked(problems.marks(SyncField::Bucket)).test_id("sync-bucket"),
+            problems.at(SyncField::Bucket),
+        ))
         .child(field("Region", "AWS needs the bucket's region. Empty: auto, which R2 expects.", text_box(region, "auto")))
         .child(field("Prefix", "Where in the bucket the vault goes. Empty: obmem.", text_box(prefix, "obmem")))
         .child(field("This device's name", "Shown in snapshots and conflict copies, and part of session log names. Connecting sets it to the host name plus four random hex digits, so two machines never share one.", text_box(device, "work-mac").test_id("sync-device")))
@@ -175,7 +195,7 @@ fn sync_settings(s: &SyncSettings) -> View {
             "Also sync .obsidian/plugins. Settings, themes and snippets always sync; the workspace layout never does.",
             switch_control(move || plugins.get(), "Sync community plugins", move |v| plugins.set(v)),
         ))
-        .child(view().flex_row().pt_2().child(primary("Save", save)))
+        .child(view().flex_row().pt_2().child(primary("Save", save).busy(state::running(Work::SaveSync))))
 }
 
 fn connect_form() -> View {
@@ -183,25 +203,47 @@ fn connect_form() -> View {
     let secret = signal(String::new());
     let passphrase = signal(String::new());
     let repeat = signal(String::new());
-    let connect = move || {
-        state::connect_sync(
-            key_id.get_untracked(),
-            secret.get_untracked(),
-            passphrase.get_untracked(),
-            repeat.get_untracked(),
+    let problems = Problems::of(move || {
+        data::connect_problems(
+            &key_id.get(),
+            &secret.get(),
+            &passphrase.get(),
+            &repeat.get(),
         )
+    });
+    let connect = move || {
+        if problems.none() {
+            state::connect_sync(
+                key_id.get_untracked(),
+                secret.get_untracked(),
+                passphrase.get_untracked(),
+                repeat.get_untracked(),
+            )
+        }
     };
+    let row =
+        move |field: ConnectField, label: &str, value: Signal<String>, masked: bool, id: &str| {
+            checked_field(
+                label,
+                "",
+                text_box(value, label)
+                    .marked(problems.marks(field))
+                    .masked(masked)
+                    .test_id(id),
+                problems.at(field),
+            )
+        };
     view()
         .test_id("sync-connect")
         .gap_1()
         .pt_3()
         .child(text("Connect this device").font_weight(FontWeight::MEDIUM))
         .child(muted("The access key stays in this device's keychain. On the first device the passphrase you choose starts the vault; every other device unlocks it with the same one. If you forget it, the bucket cannot be read."))
-        .child(field("Access key ID", "", text_box(key_id, "Access key ID")))
-        .child(field("Secret access key", "", text_box(secret, "Secret access key").masked(true)))
-        .child(field("Passphrase", "", text_box(passphrase, "Passphrase").masked(true)))
-        .child(field("Repeat passphrase", "", text_box(repeat, "Repeat passphrase").masked(true)))
-        .child(view().flex_row().pt_2().child(primary("Connect", connect)))
+        .child(row(ConnectField::KeyId, "Access key ID", key_id, false, "connect-key-id"))
+        .child(row(ConnectField::Secret, "Secret access key", secret, true, "connect-secret"))
+        .child(row(ConnectField::Passphrase, "Passphrase", passphrase, true, "connect-passphrase"))
+        .child(row(ConnectField::Repeat, "Repeat passphrase", repeat, true, "connect-repeat"))
+        .child(view().flex_row().pt_2().child(primary("Connect", connect).busy(state::running(Work::ConnectSync))))
 }
 
 fn allowlist(p: &Personal) -> View {
@@ -266,27 +308,56 @@ fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool
                 .gap_3()
                 .py_1()
                 .child(text(e).flex_1().text_sm())
-                .child(action("Remove", move || {
-                    state::disallow(Vault::Personal, kind, entry.clone())
-                })),
+                .child(
+                    action("Remove", {
+                        let entry = entry.clone();
+                        move || state::disallow(Vault::Personal, kind, entry.clone())
+                    })
+                    .busy(state::running(Work::Disallow(
+                        Vault::Personal,
+                        kind,
+                        entry,
+                    ))),
+                ),
         );
     }
     if addable {
         let draft = signal(String::new());
-        block = block.child(
-            view()
-                .flex_row()
-                .gap_2()
-                .pt_1()
-                .child(
-                    text_box(draft, &format!("Add to {}", title.to_lowercase()))
-                        .test_id(&format!("add-{}", title.to_lowercase()))
-                        .flex_1(),
-                )
-                .child(action("Add", move || {
-                    state::allow(Vault::Personal, kind, draft.get_untracked())
-                })),
-        );
+        // The scanner's own rule for an entry: one it would ignore is not added.
+        let problems = Problems::of(move || {
+            allowlist::problem(kind, &draft.get())
+                .map(|message| Problem { field: (), message })
+                .into_iter()
+                .collect()
+        });
+        let add = move || {
+            if problems.none() {
+                state::allow(Vault::Personal, kind, draft.get_untracked())
+            }
+        };
+        let adding = move || {
+            state::running(Work::Allow(
+                Vault::Personal,
+                kind,
+                draft.get().trim().to_string(),
+            ))()
+        };
+        let problem = problems.at(());
+        block = block
+            .child(
+                view()
+                    .flex_row()
+                    .gap_2()
+                    .pt_1()
+                    .child(
+                        text_box(draft, &format!("Add to {}", title.to_lowercase()))
+                            .marked(problems.marks(()))
+                            .test_id(&format!("add-{}", title.to_lowercase()))
+                            .flex_1(),
+                    )
+                    .child(action("Add", add).busy(adding)),
+            )
+            .child(dynamic(move || problem().map(problem_text)));
     }
     block
 }

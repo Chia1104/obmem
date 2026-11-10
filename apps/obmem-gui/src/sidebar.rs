@@ -8,7 +8,7 @@
 use crate::data::ProjectRow;
 use crate::icons::{self, INBOX, PERSON, PLUS, SIDEBAR};
 use crate::state::{self, Load, Screen};
-use crate::widgets::{self, WithHint, icon_button, muted, path_text};
+use crate::widgets::{self, WithHint, icon_button, loading, muted, path_text};
 use nsh_base::{HandleEdge, ResizeHandleState, button, resize_handle, theme};
 use nsh_core::element::desktop::title_bar;
 use nsh_core::geometry::Axis;
@@ -240,11 +240,12 @@ fn panel(in_drawer: bool) -> View {
                         .gap(px(2.0))
                         .px_2()
                         .child(dynamic(move || match state::projects() {
-                            Load::Loading => Some(muted("Loading…").px_2()),
-                            Load::Failed(e) => Some(muted(e).px_2()),
+                            Load::Loading => Some(loading("Loading…").px_2().into_element()),
+                            Load::Failed(e) => Some(muted(e).px_2().into_element()),
                             Load::Ready(rows) if rows.is_empty() => Some(
                                 muted("No projects yet. A project shows up here once an agent session starts in it, or add one with +.")
-                                    .px_2(),
+                                    .px_2()
+                                    .into_element(),
                             ),
                             Load::Ready(_) => None,
                         }))

@@ -149,8 +149,9 @@ fn drafts_and_findings_are_decided_on() {
     app.wait_for_gone("id:item-audit-stale-old", SLOW).unwrap();
     assert_eq!(status(&finding), "rejected");
 
-    app.press("id:notice >> role:button[Dismiss]").unwrap();
-    app.wait_for_gone("id:notice", SLOW).unwrap();
+    // What each decision did was a toast; the audit's report has more to read and stays on
+    // the page until it is dismissed.
+    assert!(!app.screen().shows("Dismiss"));
     app.press("id:review-review-repo >> role:button[Run audit]")
         .unwrap();
     app.wait_for_within("id:notice", SLOW).unwrap();

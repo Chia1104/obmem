@@ -1,13 +1,13 @@
 //! The project's session logs, newest first: what each session did and left for the next one.
 
 use crate::state::{self, Load};
-use crate::widgets::{Level, action, card, check, heading, muted};
+use crate::widgets::{Level, action, card, check, heading, loading, muted};
 use nsh_core::prelude::*;
 use obmem_core::obsidian;
 
 pub(crate) fn sessions_tab() -> AnyElement {
     dynamic(move || match state::sessions() {
-        Load::Loading => vec![muted("Loading…").into_element()],
+        Load::Loading => vec![loading("Loading…").into_element()],
         Load::Failed(e) => {
             vec![check(Level::Error, "Could not read the session logs", e).into_element()]
         }

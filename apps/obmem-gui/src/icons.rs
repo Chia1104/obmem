@@ -18,6 +18,9 @@ pub(crate) const INBOX: &str = r#"<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M
 /// The user's own settings.
 pub(crate) const PERSON: &str = r#"<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>"#;
 
+/// How the window looks.
+pub(crate) const PALETTE: &str = r#"<path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>"#;
+
 /// `paths` as an icon `size` points square, drawn in the text color around it.
 pub(crate) fn icon(paths: &str, size: f32) -> impl IntoElement {
     let markup = format!(

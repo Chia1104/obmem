@@ -9,6 +9,7 @@
 //! a toast (`crate::toasts`). An outcome with more to read is a [`Notice`] on the page.
 //! While an action's work runs, the control that started it is busy ([`running`]).
 
+use crate::appearance::{self, Chosen, Mode, Scheme, ThemeFile};
 use crate::data::{
     self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, SetupDone, Vault,
 };
@@ -65,6 +66,8 @@ pub(crate) enum Work {
     Audit(PathBuf),
     /// A decision on a review item: the item's id, and the button's label.
     Review(String, &'static str),
+    /// Copying the theme an appearance shows into the user's themes folder.
+    DuplicateTheme(Scheme),
 }
 
 /// What the main area shows.
@@ -77,6 +80,8 @@ pub(crate) enum Screen {
     Personal,
     /// Drafts and findings waiting for a person, across projects.
     Review,
+    /// How the window looks.
+    Appearance,
 }
 
 /// A project's tab.
@@ -731,6 +736,142 @@ pub(crate) fn run_audit(root: PathBuf) {
             }
             load_review();
             refresh();
+        },
+    );
+}
+
+// --- Appearance --------------------------------------------------------------
+
+/// Every theme. Before the user's files are read: the built-in ones.
+#[derive(Clone)]
+struct Themes(Vec<ThemeFile>);
+impl Default for Themes {
+    fn default() -> Self {
+        Themes(appearance::built_in())
+    }
+}
+
+/// What the user chose.
+#[derive(Clone, Default)]
+struct Picked(Chosen);
+
+pub(crate) fn themes() -> Vec<ThemeFile> {
+    global::<Themes>().with(|t| t.0.clone())
+}
+
+pub(crate) fn mode() -> Mode {
+    global::<Picked>().with(|p| p.0.mode)
+}
+
+/// The id of the theme chosen for `scheme`, which is gone when no theme has it.
+pub(crate) fn chosen_theme(scheme: Scheme) -> String {
+    global::<Picked>().with(|p| p.0.theme(scheme).to_owned())
+}
+
+/// The id of the theme `scheme` shows: the chosen one, or the default when that one is gone.
+pub(crate) fn shown_theme(scheme: Scheme) -> String {
+    global::<Picked>().with(|p| {
+        global::<Themes>().with(|t| appearance::shown(&t.0, p.0.theme(scheme)).id.clone())
+    })
+}
+
+/// Called by the root component: draws the window as the user chose, and keeps it so. The files
+/// are read here, on the engine thread, so that the first frame already has the theme; they are
+/// a few small ones.
+pub(crate) fn start_appearance() {
+    let chosen = appearance::chosen();
+    set_color_scheme(chosen.mode.into());
+    global::<Picked>().set(Picked(chosen));
+    global::<Themes>().set(Themes(appearance::themes()));
+    // Again whenever a theme is picked or read again, and when the appearance shown changes: a
+    // theme's corner radius and fonts are those of the theme that shows.
+    effect(|| {
+        let showing_dark = dark();
+        set_tokens(
+            global::<Picked>().with(|p| {
+                global::<Themes>().with(|t| appearance::tokens(&t.0, &p.0, showing_dark))
+            }),
+        );
+    });
+    // A theme file edited in another app shows when the user comes back to the window.
+    effect(|| {
+        if lifecycle() == nsh_core::platform::Lifecycle::Active {
+            untracked(load_themes);
+        }
+    });
+}
+
+pub(crate) fn show_appearance() {
+    set_notice(None);
+    global::<Screens>().set(Screens(Screen::Appearance));
+    load_themes();
+}
+
+/// Reads the theme files again. What is chosen stays as it is in the window: `appearance.toml`
+/// is read once, when the app starts.
+fn load_themes() {
+    in_background(appearance::themes, set_themes);
+}
+
+fn set_themes(themes: Vec<ThemeFile>) {
+    if global::<Themes>().with_untracked(|t| t.0 != themes) {
+        global::<Themes>().set(Themes(themes));
+    }
+}
+
+/// Changes what is chosen, at once, and keeps it.
+fn choose(change: impl FnOnce(&mut Chosen)) {
+    global::<Picked>().update(|p| change(&mut p.0));
+    let chosen = global::<Picked>().get_untracked().0;
+    in_background(
+        move || appearance::save(&chosen),
+        |r| {
+            if let Err(e) = r {
+                fail(format!("Could not save the appearance: {e}"));
+            }
+        },
+    );
+}
+
+pub(crate) fn set_mode(mode: Mode) {
+    set_color_scheme(mode.into());
+    choose(|c| c.mode = mode);
+}
+
+pub(crate) fn pick_theme(scheme: Scheme, id: String) {
+    choose(|c| c.set_theme(scheme, id));
+}
+
+/// Copies the theme `scheme` shows into the user's themes folder and shows the copy, which is
+/// theirs to edit.
+pub(crate) fn duplicate_theme(scheme: Scheme) {
+    let id = untracked(|| shown_theme(scheme));
+    in_background_as(
+        Work::DuplicateTheme(scheme),
+        move || appearance::duplicate(&id).map(|copy| (copy, appearance::themes())),
+        move |r| match r {
+            Ok((copy, themes)) => {
+                done(format!(
+                    "Saved as {copy}.json in your themes folder. Edit it and come back."
+                ));
+                set_themes(themes);
+                pick_theme(scheme, copy);
+            }
+            Err(e) => fail(e),
+        },
+    );
+}
+
+/// Shows `file`, or the themes folder, in the file manager.
+pub(crate) fn reveal_theme(file: Option<PathBuf>) {
+    in_background(
+        move || match file {
+            Some(file) => Ok(file),
+            None => appearance::ensure_themes_dir(),
+        },
+        |r| match r {
+            Ok(path) => drop(reveal_path(path)),
+            Err(e) => fail(e),
         },
     );
 }

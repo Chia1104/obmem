@@ -286,6 +286,7 @@ In a repository you share, the bucket is yours and not the team's: take `endpoin
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
 - **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.
 - **Personal settings:** your personal vault, environment-variable scanning, and the patterns and words allowed in every project.
+- **Appearance:** light, dark or the system's, and a theme for each. Thirteen themes are built in. Your own are JSON files in `~/.config/obmem/themes/`, in shadcn/ui's theme format (what [tweakcn](https://tweakcn.com) exports): duplicate a built-in one from the app and edit the file. `~/.config/obmem/appearance.toml` keeps what you chose.
 
 ```sh
 cargo run -p obmem-gui

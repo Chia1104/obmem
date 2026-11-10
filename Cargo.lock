@@ -3848,6 +3848,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "env_logger",
+ "log",
  "nsh-base",
  "nsh-core",
  "nsh-engine",
@@ -3857,6 +3858,9 @@ dependencies = [
  "obmem-agents",
  "obmem-core",
  "obmem-sync",
+ "serde",
+ "serde_json",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]

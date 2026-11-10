@@ -157,6 +157,22 @@ pub fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// The file that running `program` would start: a path that is a file, or a name in a `PATH`
+/// folder, with the platform's `.exe` added when it is missing, as `Command` does.
+pub fn find_program(program: &str) -> Option<PathBuf> {
+    let with_suffix = format!("{program}{}", std::env::consts::EXE_SUFFIX);
+    let in_dir = |dir: &Path| {
+        [program, with_suffix.as_str()]
+            .into_iter()
+            .map(|name| dir.join(name))
+            .find(|file| file.is_file())
+    };
+    if Path::new(program).components().count() > 1 {
+        return in_dir(Path::new(""));
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?).find_map(|dir| in_dir(&dir))
+}
+
 pub fn expand_tilde(p: &str) -> PathBuf {
     if let Some(rest) = p.strip_prefix("~/") {
         home().join(rest)

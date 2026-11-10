@@ -120,6 +120,13 @@ enum Cmd {
     Guide,
     /// Show resolved paths and counts.
     Status,
+    /// Update obmem to the newest release. A binary from the install script is replaced; for
+    /// one that npm or cargo installed, this prints the command that updates it.
+    Update {
+        /// Only say whether a newer version exists.
+        #[arg(long)]
+        check: bool,
+    },
     /// Sync the personal vault with an S3-compatible bucket, encrypted (`[sync]` in
     /// ~/.config/obmem/config.toml). Without a subcommand: sync now; every sync is also a snapshot.
     Sync {
@@ -312,6 +319,9 @@ fn main() -> Result<()> {
             return Ok(());
         }
         return run_sync(action.as_ref(), *allow_deletes);
+    }
+    if let Cmd::Update { check } = &cli.cmd {
+        return run_update(*check);
     }
     let cfg = config::Config::load(cli.project.as_deref())?;
 
@@ -542,9 +552,12 @@ fn main() -> Result<()> {
             let mut store = store::Store::open(cfg)?;
             println!("{}", store.verify(&id, "human (cli)", true)?);
         }
-        Cmd::Hook { .. } | Cmd::Sync { .. } => unreachable!("handled before loading config"),
+        Cmd::Hook { .. } | Cmd::Sync { .. } | Cmd::Update { .. } => {
+            unreachable!("handled before loading config")
+        }
         Cmd::Status => {
             let st = status::status(&store::Store::open(cfg)?);
+            print_binary();
             println!("project root:   {}", st.project_root.display());
             println!("project name:   {}", st.project_name);
             if !st.initialized {
@@ -585,6 +598,49 @@ fn main() -> Result<()> {
             println!("secret mode:    {:?}", st.secret_mode);
             println!("sync:           {}", sync_status_line());
         }
+    }
+    Ok(())
+}
+
+/// Which `obmem` this is: with several installs on one machine, the one that runs is the first
+/// on PATH, which is not always the one just installed or updated.
+fn print_binary() {
+    use obmem_update::Install;
+    let Ok((exe, install)) = Install::current() else {
+        return;
+    };
+    println!("binary:         {} ({})", exe.display(), install.label());
+    // npm's command on PATH is its launcher script, never the binary itself.
+    if install == Install::Npm {
+        return;
+    }
+    let first = config::find_program("obmem").map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    if let Some(first) = first.filter(|first| *first != exe) {
+        println!(
+            "                `obmem` on PATH is another install: {}",
+            first.display()
+        );
+    }
+}
+
+fn run_update(check: bool) -> Result<()> {
+    use obmem_update::Install;
+    let (exe, install) = Install::current()?;
+    let current = obmem_update::current_version();
+    let latest = obmem_update::latest(install)?;
+    if latest <= current {
+        println!("obmem {current} is the newest version");
+        return Ok(());
+    }
+    println!(
+        "obmem {latest} is available: this is {current}, {} at {}",
+        install.label(),
+        exe.display()
+    );
+    match install.update_command() {
+        Some(command) => println!("update it with: {command}"),
+        None if check => println!("update it with: obmem update"),
+        None => obmem_update::install(&exe, &latest)?,
     }
     Ok(())
 }

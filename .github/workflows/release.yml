@@ -147,3 +147,5 @@ jobs:
         run: |
           test "$(obmem --version)" = "obmem ${GITHUB_REF_NAME#v}"
           obmem status
+          # It reaches GitHub over TLS and finds itself to be the newest.
+          obmem update --check

@@ -3742,6 +3742,7 @@ dependencies = [
  "obmem-core",
  "obmem-mcp",
  "obmem-sync",
+ "obmem-update",
  "rpassword",
  "serde_json",
  "tokio",
@@ -3836,6 +3837,19 @@ dependencies = [
  "tracing",
  "unicode-normalization",
  "walkdir",
+]
+
+[[package]]
+name = "obmem-update"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "obmem-core",
+ "reqwest",
+ "semver",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

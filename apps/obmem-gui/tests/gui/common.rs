@@ -17,8 +17,8 @@ const CHILD: &str = "OBMEM_GUI_TEST_CHILD";
 /// Children run one after another, as separate test binaries used to.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
-/// The tests set process-wide environment (`OBMEM_CONFIG`, and `HOME` for the Claude Code
-/// import), so each one runs in a process of its own. All tests share one binary, which links
+/// The tests set process-wide environment (`OBMEM_CONFIG`, `OBMEM_OBSIDIAN_BIN`, and `HOME` for
+/// the Claude Code import), so each one runs in a process of its own. All tests share one binary, which links
 /// Native Shell once.
 ///
 /// In the test harness's process this runs the calling test in a child process of the same
@@ -40,6 +40,11 @@ pub fn sandbox(name: &str) -> Option<PathBuf> {
     .unwrap();
     // SAFETY: see above.
     unsafe { std::env::set_var("OBMEM_CONFIG", dir.join("config/config.toml")) };
+    // The tests expect the Obsidian backend on every machine, with or without Obsidian: any
+    // existing program stands for the CLI, and it never runs, because the sandbox's vaults are
+    // not registered in Obsidian.
+    // SAFETY: see above.
+    unsafe { std::env::set_var("OBMEM_OBSIDIAN_BIN", std::env::current_exe().unwrap()) };
     Some(dir)
 }
 

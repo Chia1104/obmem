@@ -1,5 +1,5 @@
 //! `memory_context(task)`: the notes most relevant to a task description, within a size budget.
-//! Obsidian does the searching; this only turns free text into an OR query (Obsidian ANDs
+//! `Store::search` does the searching; this only turns free text into an OR query (Obsidian ANDs
 //! words, and many scripts have no spaces) and ranks the hits, which Obsidian search does not.
 //!
 //! Terms are cut by *script*, not by language, so any language gets usable terms without a

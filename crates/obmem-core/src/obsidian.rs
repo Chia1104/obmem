@@ -1,5 +1,7 @@
 //! Obsidian itself does search, backlinks, unresolved links and orphans (official CLI, 1.12+).
-//! obmem only maps vault folders to Obsidian vault ids and parses the output.
+//! obmem only maps vault folders to Obsidian vault ids and parses the output. On a machine
+//! without the CLI, [`crate::headless`] answers the same questions from the files
+//! ([`Backend`]).
 //!
 //! Notes on the CLI that shape this module (verified against Obsidian 1.14):
 //! - Without `vault=`, a folder that is not a registered vault silently falls back to the
@@ -33,12 +35,61 @@ pub struct Unresolved {
     pub sources: Vec<String>,
 }
 
-/// What obmem needs from Obsidian. A trait so tests can run without the app.
+/// What obmem needs from Obsidian. [`Cli`] asks the app; [`crate::headless::Headless`] reads
+/// the files where there is no app.
 pub trait Api: Send {
     fn search(&self, vault: &Path, query: &str, limit: usize) -> Result<Vec<SearchHit>>;
     fn backlinks(&self, vault: &Path, rel: &str) -> Result<Vec<String>>;
     fn unresolved(&self, vault: &Path) -> Result<Vec<Unresolved>>;
     fn orphans(&self, vault: &Path) -> Result<Vec<String>>;
+}
+
+/// Which [`Api`] a store uses. It is chosen once, when the store opens, and never changed
+/// after a failed call: the two do not agree in every detail, and one process switching between
+/// them would give answers that cannot be compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// The Obsidian app, through its CLI.
+    App,
+    /// obmem's own reading of the vault files, for a machine without Obsidian.
+    Headless,
+}
+
+impl Backend {
+    /// [`Backend::App`] when the Obsidian CLI command is installed, whether or not the app is
+    /// running or knows the vaults: on a machine with Obsidian, a problem with it is reported,
+    /// not hidden behind the other backend.
+    pub fn detect() -> Self {
+        if installed(&cli_bin()) {
+            Backend::App
+        } else {
+            Backend::Headless
+        }
+    }
+
+    pub fn api(self) -> Box<dyn Api> {
+        match self {
+            Backend::App => Box::new(Cli::default()),
+            Backend::Headless => Box::new(crate::headless::Headless),
+        }
+    }
+}
+
+/// The Obsidian CLI command: `OBMEM_OBSIDIAN_BIN`, else `obsidian`.
+fn cli_bin() -> String {
+    std::env::var("OBMEM_OBSIDIAN_BIN").unwrap_or_else(|_| "obsidian".into())
+}
+
+/// Whether running `bin` would find a program: a path that is a file, or a name in a `PATH`
+/// folder, with the platform's `.exe` added when it is missing, as `Command` does.
+fn installed(bin: &str) -> bool {
+    let with_suffix = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
+    let is_program = |dir: &Path| dir.join(bin).is_file() || dir.join(&with_suffix).is_file();
+    if Path::new(bin).components().count() > 1 {
+        return is_program(Path::new(""));
+    }
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|d| is_program(&d)))
 }
 
 pub struct Cli {
@@ -49,7 +100,7 @@ pub struct Cli {
 impl Default for Cli {
     fn default() -> Self {
         Self {
-            bin: std::env::var("OBMEM_OBSIDIAN_BIN").unwrap_or_else(|_| "obsidian".into()),
+            bin: cli_bin(),
             timeout: Duration::from_secs(30),
         }
     }
@@ -406,6 +457,14 @@ mod tests {
         assert_eq!(vault_id(&dir).unwrap(), None);
         unsafe { std::env::remove_var("OBMEM_OBSIDIAN_CONFIG") };
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn finds_an_installed_command() {
+        let exe = std::env::current_exe().unwrap();
+        assert!(installed(&exe.to_string_lossy()));
+        assert!(!installed(&exe.with_extension("missing").to_string_lossy()));
+        assert!(!installed("obmem-no-such-command"));
     }
 
     #[test]

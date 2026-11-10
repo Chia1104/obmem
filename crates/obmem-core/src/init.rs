@@ -254,12 +254,15 @@ pub fn setup_snippets(bin: &str, cfg: &Config) -> String {
 2) Agents without hooks still get the usage guide as MCP server instructions; for agents
    that ignore those:  {bin} guide >> AGENTS.md
 
-3) Required: obmem uses Obsidian itself (1.12+) for search, backlinks and link checks.
+3) On a machine with Obsidian: obmem uses Obsidian itself (1.12+) for search, backlinks and
+   link checks.
    - Obsidian → Settings → General → enable "Command line interface"
    - "Open folder as vault" for both folders (Obsidian cannot register vaults from the CLI):
        {pv}
        {gv}
    Check with `{bin} status`. If Obsidian is closed, obmem starts it in the background.
+   Without the `obsidian` command on PATH (a server, a cloud sandbox), obmem reads the vault
+   files itself and this step does not apply.
 4) Optional: guard human commits to the vault too:
      git config core.hooksPath .githooks   # with a pre-commit running `{bin} scan --staged`
 5) Review the vault when you want: `{bin} audit --write` (or ask the agent to run memory_audit);

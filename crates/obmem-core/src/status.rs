@@ -13,6 +13,8 @@ pub struct Status {
     /// The project has `.obmem.toml` (`obmem init` ran). Without it, hooks do nothing and the
     /// MCP server refuses project-vault writes.
     pub initialized: bool,
+    /// Where search, backlinks and link checks come from.
+    pub backend: obsidian::Backend,
     pub project_vault: VaultStatus,
     pub global_vault: VaultStatus,
     pub secret_rules: usize,
@@ -31,7 +33,8 @@ pub struct VaultStatus {
     pub obsidian: Registration,
 }
 
-/// Whether Obsidian knows the vault. Search, backlinks and link checks need it.
+/// Whether Obsidian knows the vault. With [`obsidian::Backend::App`], search, backlinks and
+/// link checks need it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Registration {
     Registered {
@@ -57,6 +60,7 @@ pub fn status(store: &Store) -> Status {
         project_root: cfg.project_root.clone(),
         project_name: cfg.project_name.clone(),
         initialized: cfg.project_root.join(PROJECT_CONFIG_FILE).exists(),
+        backend: store.backend(),
         project_vault: vault(&cfg.project_vault),
         global_vault: vault(&cfg.global_vault),
         secret_rules: store.scanner().rule_count(),

@@ -1,5 +1,5 @@
 //! Note catalog: id / title / type / status of every note, read straight from the vault files.
-//! Full-text search, backlinks and link resolution are Obsidian's job (see `obsidian.rs`);
+//! Full-text search, backlinks and link resolution are the backend's job (see `obsidian.rs`);
 //! this only answers "which file is note X" and "which notes are drafts", which Obsidian has no
 //! command for. Rescanning is cheap (frontmatter of a few thousand files), so there is no index.
 

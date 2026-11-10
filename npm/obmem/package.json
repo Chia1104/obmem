@@ -1,5 +1,5 @@
 {
-  "name": "obmem",
+  "name": "@chia1104/obmem",
   "version": "0.0.0",
   "description": "Long-term memory for coding agents, stored as Obsidian notes that people review",
   "license": "MIT",

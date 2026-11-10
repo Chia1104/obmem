@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Runs the obmem binary for this machine. npm installed it as the one optional dependency
-// whose `os` and `cpu` fit (see ../targets.json and npm/build.mjs in the repository).
+// whose `os` and `cpu` fit (see ../targets.json and npm/build.mjs in the repository): the
+// package named like this one, with the platform added.
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const { name } = require("../package.json");
 const targets = require("../targets.json");
 
 const platform = `${process.platform}-${process.arch}`;
@@ -17,11 +19,11 @@ if (!(platform in targets)) {
 let binary;
 try {
   binary = require.resolve(
-    `obmem-${platform}/${process.platform === "win32" ? "obmem.exe" : "obmem"}`,
+    `${name}-${platform}/${process.platform === "win32" ? "obmem.exe" : "obmem"}`,
   );
 } catch {
   console.error(
-    `obmem: the package obmem-${platform} is missing. npm leaves it out when optional dependencies are off (--omit=optional): install again without that.`,
+    `obmem: the package ${name}-${platform} is missing. npm leaves it out when optional dependencies are off (--omit=optional): install again without that.`,
   );
   process.exit(1);
 }

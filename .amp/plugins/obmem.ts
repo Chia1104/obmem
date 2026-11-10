@@ -8,23 +8,30 @@ const MARKER = '[obmem]'
 export default function (amp: PluginAPI) {
 	const started = new Set<string>()
 
+	// A hook's answer. What it says on stderr (a failed sync, say) goes to the plugin log:
+	// on a remote machine nothing else shows it.
+	const answer = (out: { stdout: string; stderr: string }) => {
+		const problem = out.stderr.trim()
+		if (problem) amp.logger.log(problem)
+		return out.stdout.trim()
+	}
+
 	amp.on('agent.start', async (event: any, ctx: any) => {
 		const thread = String(event.thread?.id ?? ctx?.thread?.id ?? 'default')
 		if (started.has(thread)) return
 		started.add(thread)
-		const out = await amp.$`obmem hook session-start --agent amp --session ${thread}`
-		const text = out.stdout.trim()
+		const text = answer(await amp.$`obmem hook session-start --agent amp --session ${thread}`)
 		if (!text) return
 		return { message: { content: text, display: false } }
 	})
 
 	amp.on('agent.end', async (event: any, ctx: any) => {
-		// a turn we started ourselves carries the marker: never chain another one
-		if (String(event.message ?? '').includes(MARKER)) return
 		const thread = String(event.thread?.id ?? ctx?.thread?.id ?? 'default')
-		const out = await amp.$`obmem hook stop --agent amp --session ${thread}`
-		const reason = out.stdout.trim()
-		if (!reason) return
+		// Every turn end runs the hook, also the turn we started ourselves: the hook syncs the
+		// personal vault, and that turn is the one in which the agent wrote its log.
+		const reason = answer(await amp.$`obmem hook stop --agent amp --session ${thread}`)
+		// a turn we started ourselves carries the marker: never chain another one
+		if (!reason || String(event.message ?? '').includes(MARKER)) return
 		return { action: 'continue', userMessage: `${MARKER} ${reason}` }
 	})
 }

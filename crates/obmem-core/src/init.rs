@@ -249,7 +249,7 @@ pub fn setup_snippets(bin: &str, cfg: &Config) -> String {
      {bin} setup codex             # .codex/config.toml, .codex/hooks.json (trust the project in Codex)
      {bin} setup cursor            # .cursor/mcp.json, .cursor/hooks.json, AGENTS.md
      {bin} setup copilot           # .github/hooks/obmem.json, AGENTS.md (+ MCP in ~/.copilot)
-     {bin} setup amp               # .amp/plugins/obmem.ts, AGENTS.md (+ amp mcp add --workspace)
+     {bin} setup amp               # .amp/settings.json, .amp/plugins/obmem.ts, AGENTS.md
    Any other MCP client: {{ "mcpServers": {{ "obmem": {{ "command": "obmem", "args": ["serve"] }} }} }}
 2) Agents without hooks still get the usage guide as MCP server instructions; for agents
    that ignore those:  {bin} guide >> AGENTS.md

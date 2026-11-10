@@ -129,17 +129,14 @@ fn merge_json(path: &Path, w: &Writer, edit: impl FnOnce(&mut Value) -> bool) ->
     Ok(true)
 }
 
-/// `{"mcpServers": {"obmem": {...}}}` (Claude Code `.mcp.json`, Cursor `.cursor/mcp.json`).
-fn add_mcp_json(path: &Path, w: &Writer) -> Result<bool> {
-    add_mcp_json_args(path, w, &["serve"])
-}
-
-fn add_mcp_json_args(path: &Path, w: &Writer, args: &[&str]) -> Result<bool> {
+/// `{"<key>": {"obmem": {...}}}`: `mcpServers` in Claude Code's `.mcp.json` and Cursor's
+/// `.cursor/mcp.json`, `amp.mcpServers` in Amp's `.amp/settings.json`.
+fn add_mcp_server(path: &Path, w: &Writer, key: &str, args: &[&str]) -> Result<bool> {
     merge_json(path, w, |v| {
         let servers = v
             .as_object_mut()
             .unwrap()
-            .entry("mcpServers")
+            .entry(key)
             .or_insert_with(|| json!({}));
         if mentions(servers, "obmem") {
             return false;
@@ -262,23 +259,30 @@ const MARKER = '[obmem]'
 export default function (amp: PluginAPI) {
 	const started = new Set<string>()
 
+	// A hook's answer. What it says on stderr (a failed sync, say) goes to the plugin log:
+	// on a remote machine nothing else shows it.
+	const answer = (out: { stdout: string; stderr: string }) => {
+		const problem = out.stderr.trim()
+		if (problem) amp.logger.log(problem)
+		return out.stdout.trim()
+	}
+
 	amp.on('agent.start', async (event: any, ctx: any) => {
 		const thread = String(event.thread?.id ?? ctx?.thread?.id ?? 'default')
 		if (started.has(thread)) return
 		started.add(thread)
-		const out = await amp.$`obmem hook session-start --agent amp --session ${thread}`
-		const text = out.stdout.trim()
+		const text = answer(await amp.$`obmem hook session-start --agent amp --session ${thread}`)
 		if (!text) return
 		return { message: { content: text, display: false } }
 	})
 
 	amp.on('agent.end', async (event: any, ctx: any) => {
-		// a turn we started ourselves carries the marker: never chain another one
-		if (String(event.message ?? '').includes(MARKER)) return
 		const thread = String(event.thread?.id ?? ctx?.thread?.id ?? 'default')
-		const out = await amp.$`obmem hook stop --agent amp --session ${thread}`
-		const reason = out.stdout.trim()
-		if (!reason) return
+		// Every turn end runs the hook, also the turn we started ourselves: the hook syncs the
+		// personal vault, and that turn is the one in which the agent wrote its log.
+		const reason = answer(await amp.$`obmem hook stop --agent amp --session ${thread}`)
+		// a turn we started ourselves carries the marker: never chain another one
+		if (!reason || String(event.message ?? '').includes(MARKER)) return
 		return { action: 'continue', userMessage: `${MARKER} ${reason}` }
 	})
 }
@@ -332,7 +336,7 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
     match agent {
         Agent::Claude => {
             let p = root.join(".mcp.json");
-            r.note(&p, add_mcp_json(&p, w)?);
+            r.note(&p, add_mcp_server(&p, w, "mcpServers", &["serve"])?);
             let p = root.join(".claude/settings.json");
             let events = [
                 ("SessionStart", cmd("session-start")),
@@ -369,10 +373,8 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
             // Some Cursor hosts (T3 Code's driver) start MCP servers in the home directory, so pin
             // the project; obmem ignores the placeholder if a host does not interpolate it.
             let p = root.join(".cursor/mcp.json");
-            r.note(
-                &p,
-                add_mcp_json_args(&p, w, &["serve", "--project", "${workspaceFolder}"])?,
-            );
+            let args = ["serve", "--project", "${workspaceFolder}"];
+            r.note(&p, add_mcp_server(&p, w, "mcpServers", &args)?);
             let p = root.join(".cursor/hooks.json");
             let events = [
                 ("sessionStart", json!({ "command": cmd("session-start") })),
@@ -407,6 +409,10 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
             );
         }
         Agent::Amp => {
+            // The workspace settings, not the user's: an orb (Amp's remote machine) has the
+            // repository and nothing from the user's own settings file.
+            let p = root.join(".amp/settings.json");
+            r.note(&p, add_mcp_server(&p, w, "amp.mcpServers", &["serve"])?);
             let p = root.join(".amp/plugins/obmem.ts");
             let changed = !p.exists();
             if changed && w.apply {
@@ -416,7 +422,8 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
             let p = root.join("AGENTS.md");
             r.note(&p, upsert_guide(&p, w)?);
             r.manual.push(format!(
-                "Register the MCP server for this workspace: cd {} && amp mcp add obmem --workspace -- obmem serve",
+                "Amp runs a workspace MCP server only after you approve it: cd {} && amp mcp approve obmem \
+                 (in an orb, Amp asks in the thread).",
                 root.display()
             ));
         }
@@ -529,6 +536,41 @@ mod tests {
             "{fresh}"
         );
         assert!(!upsert_guide(&root.join("AGENTS.md"), &w).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn amp_gets_the_mcp_server_in_the_workspace_settings() {
+        let root = std::env::temp_dir().join(format!("obmem-setup-amp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".amp")).unwrap();
+        let theirs = r#"{"amp.mcpServers":{"other":{"command":"x"}},"amp.tools.disable":["y"]}"#;
+        std::fs::write(root.join(".amp/settings.json"), theirs).unwrap();
+        let c = cfg(&root);
+
+        let first = setup(&c, Agent::Amp).unwrap();
+        assert_eq!(first.changed.len(), 3, "{:?}", first.changed); // settings.json, obmem.ts, AGENTS.md
+        let settings: Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(".amp/settings.json")).unwrap(),
+        )
+        .unwrap();
+        // The shape `amp mcp add obmem --workspace -- obmem serve` writes (amp 2026-11-08).
+        assert_eq!(
+            settings["amp.mcpServers"]["obmem"],
+            json!({ "command": "obmem", "args": ["serve"] })
+        );
+        assert!(settings["amp.mcpServers"]["other"].is_object());
+        assert_eq!(settings["amp.tools.disable"], json!(["y"]));
+        // The turn the plugin starts itself still runs the stop hook, which syncs the log.
+        let plugin = std::fs::read_to_string(root.join(".amp/plugins/obmem.ts")).unwrap();
+        let (hook, guard) = (
+            plugin.find("obmem hook stop").unwrap(),
+            plugin.find("includes(MARKER)").unwrap(),
+        );
+        assert!(hook < guard, "{plugin}");
+
+        assert!(setup(&c, Agent::Amp).unwrap().changed.is_empty());
+        assert!(check(&c, Agent::Amp).unwrap().changed.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 

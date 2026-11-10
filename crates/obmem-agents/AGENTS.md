@@ -22,6 +22,8 @@ How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`) and `ob
   - Claude Code: read from the transcript. Real work is an Edit / Write / MultiEdit / NotebookEdit call, or at least 5 tool calls since the last `memory_log`, because edits are often made through Bash.
   - Other agents: their transcripts are undocumented or unstable, so obmem uses git. Real work means repo files outside the vault that changed or were committed after the later of the session start and the last session-log entry. Writes to the vault do not count.
 - Before compaction, the hook writes a mechanical log entry with secrets redacted.
+- The Amp plugin runs the stop hook at every turn end, also at the end of the turn it started itself with `continue`. That is the turn in which the agent writes its log, and the sync that carries the log belongs to the stop hook. The hook cannot ask twice (the 30 minute rule), and the plugin ignores its answer in a turn that carries the marker.
+- The Amp plugin sends a hook's stderr to the plugin log (`amp.logger`). In an orb nothing else shows a failed sync.
 
 ## Setup
 
@@ -29,12 +31,14 @@ How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`) and `ob
 - `check` runs the same code without writing, and reports the files `setup` would change. Keep both behind the one `Writer` so they cannot disagree.
 - Every write goes through `Writer::write` (`atomic_write`): the project may be an untrusted clone, and a config file planted as a symlink must not redirect a write outside it.
 - Generated commands call `obmem` from `PATH`, so the files can be committed. `setup cursor` writes `serve --project ${workspaceFolder}`.
+- `setup amp` writes the MCP server to the workspace settings (`amp.mcpServers` in `.amp/settings.json`), never to the user's. An orb, Amp's remote machine, has the repository and nothing from the user's own settings file. Amp runs a workspace server only after the user approves it.
+- The Amp plugin is written only when `.amp/plugins/obmem.ts` is missing, because people edit it. After changing `AMP_PLUGIN`, delete the file and run `setup amp` again.
 - In `AGENTS.md`, only the block between `<!-- obmem:guide -->` and `<!-- /obmem:guide -->` is rewritten.
 - `setup codex` leaves Codex asking before each obmem tool call. `set_codex_auto_approve` turns on `default_tools_approval_mode = "approve"` per project (the GUI's switch); `codex exec` needs it.
 
 ## Tested in the real apps
 
-These were tested on 2026-11-09, both standalone and as T3 Code children: Codex 0.167 and cursor-agent 2026.11.05. The Amp plugin and the Copilot hooks follow those agents' docs but have not been run. Known limits:
+These were tested on 2026-11-09, both standalone and as T3 Code children: Codex 0.167 and cursor-agent 2026.11.05. The Copilot hooks follow that agent's docs but have not been run. For Amp (CLI of 2026-11-08), `amp plugins list` loads the plugin with both events and `amp mcp doctor` finds the server in `.amp/settings.json`, awaiting approval. No Amp thread has run with them, and nothing was tried in an orb. Known limits:
 - Codex loads project config and hooks only after the project and each hook are trusted. `codex exec` can call obmem's tools only with `mcp_servers.obmem.default_tools_approval_mode = "approve"`.
 - `cursor-agent -p` needs `--force` for tool calls, and in that mode the stop hook did not fire.
 - T3 Code's Cursor driver drops the `sessionStart` context. The guide block in `AGENTS.md` covers that case.

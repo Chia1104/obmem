@@ -20,19 +20,43 @@ fn settings_secrets_and_personal_settings_are_saved() {
     app.press("role:tab[Settings]").unwrap();
     app.wait_for_within("id:project-settings", SLOW).unwrap();
 
-    // A save the rules refuse reports why and keeps what the user typed.
+    // Values that break a rule are not saved. Each field says what is wrong with it, all of
+    // them at once, and keeps what the user typed.
+    const VAULT_RULE: &str =
+        "The vault must be a relative path inside the project, without `..` or `~`.";
+    const STALE_RULE: &str = "Stale days must be a whole number.";
     app.clear("id:settings-vault").unwrap();
     app.type_text("id:settings-vault", "../elsewhere").unwrap();
+    app.clear("id:settings-stale").unwrap();
+    app.type_text("id:settings-stale", "soon").unwrap();
+    assert!(
+        !app.screen().shows(VAULT_RULE),
+        "nothing is marked before the first save"
+    );
     app.press("id:project-settings >> role:button[Save]")
         .unwrap();
-    app.wait_for_within("That did not work", SLOW).unwrap();
+    app.wait_for_within(VAULT_RULE, SLOW).unwrap();
+    assert!(app.screen().shows(STALE_RULE));
     assert_eq!(
         app.screen().input_text("id:settings-vault").unwrap(),
         Some("../elsewhere")
     );
+    assert_eq!(
+        settings::read_project(&repo).unwrap().vault,
+        "docs/kb",
+        "nothing was written"
+    );
 
+    // A problem goes as soon as its field is put right, without another save.
     app.clear("id:settings-vault").unwrap();
     app.type_text("id:settings-vault", "docs/kb").unwrap();
+    app.wait_for_gone(&format!("text:{VAULT_RULE}"), SLOW)
+        .unwrap();
+    assert!(app.screen().shows(STALE_RULE));
+    app.clear("id:settings-stale").unwrap();
+    app.type_text("id:settings-stale", "90").unwrap();
+    app.wait_for_gone(&format!("text:{STALE_RULE}"), SLOW)
+        .unwrap();
     app.clear("id:settings-name").unwrap();
     app.type_text("id:settings-name", "renamed").unwrap();
     app.press("role:button[Redact]").unwrap();
@@ -41,8 +65,8 @@ fn settings_secrets_and_personal_settings_are_saved() {
     app.wait_for_within("Settings saved.", SLOW).unwrap();
     let saved = settings::read_project(&repo).unwrap();
     assert_eq!(
-        (saved.name.as_str(), saved.secret_mode),
-        ("renamed", SecretMode::Redact)
+        (saved.name.as_str(), saved.secret_mode, saved.stale_days),
+        ("renamed", SecretMode::Redact, 90)
     );
     assert_eq!(Config::load(Some(&repo)).unwrap().project_name, "renamed");
 
@@ -77,7 +101,15 @@ fn settings_secrets_and_personal_settings_are_saved() {
     app.press("id:screen-personal-settings >> role:button")
         .unwrap();
     app.wait_for_within("id:personal-settings", SLOW).unwrap();
+    // An entry the scanner would ignore is not added, and its box says why.
+    const SHORT_WORD: &str = "The scanner would ignore \"abc\": it is shorter than 4 characters.";
+    app.type_text("id:add-words", "abc").unwrap();
+    app.press("id:entries-words >> role:button[Add]").unwrap();
+    app.wait_for_within(SHORT_WORD, SLOW).unwrap();
+    app.clear("id:add-words").unwrap();
     app.type_text("id:add-words", "sandbox-only").unwrap();
+    app.wait_for_gone(&format!("text:{SHORT_WORD}"), SLOW)
+        .unwrap();
     app.press("id:entries-words >> role:button[Add]").unwrap();
     app.wait_for_within("Allowed in every project.", SLOW)
         .unwrap();
@@ -86,6 +118,24 @@ fn settings_secrets_and_personal_settings_are_saved() {
         allowlist::read(&personal_vault).unwrap().stopwords,
         vec!["sandbox-only"]
     );
+
+    // The personal vault's rule shows at its box, and what was typed stays.
+    const PERSONAL_RULE: &str = "The personal vault must be an absolute path or start with ~/.";
+    let vault_before = settings::read_global().unwrap().vault;
+    app.clear("id:personal-vault").unwrap();
+    app.type_text("id:personal-vault", "relative/path").unwrap();
+    app.press("id:personal-settings >> role:button[Save]")
+        .unwrap();
+    app.wait_for_within(PERSONAL_RULE, SLOW).unwrap();
+    assert_eq!(
+        app.screen().input_text("id:personal-vault").unwrap(),
+        Some("relative/path")
+    );
+    assert_eq!(settings::read_global().unwrap().vault, vault_before);
+    app.clear("id:personal-vault").unwrap();
+    app.type_text("id:personal-vault", &vault_before).unwrap();
+    app.wait_for_gone(&format!("text:{PERSONAL_RULE}"), SLOW)
+        .unwrap();
 
     app.press("id:personal-settings >> role:switch[Scan environment variables]")
         .unwrap();
@@ -115,16 +165,19 @@ fn sync_settings_are_saved_and_ask_to_connect() {
     app.wait_for_within("id:personal-sync", SLOW).unwrap();
     assert!(app.screen().shows("Off: no bucket yet."));
 
-    // The rules the config loader applies refuse the save and keep what was typed.
+    // The rules the config loader applies show at the field that breaks them. Nothing is
+    // saved, and what was typed stays.
+    const ENDPOINT_RULE: &str = "The endpoint must be a URL starting with https://.";
     app.type_text("id:sync-endpoint", "acct.r2.cloudflarestorage.com")
         .unwrap();
     app.type_text("id:sync-bucket", "my-vault").unwrap();
     app.press("id:personal-sync >> role:button[Save]").unwrap();
-    app.wait_for_within("That did not work", SLOW).unwrap();
+    app.wait_for_within(ENDPOINT_RULE, SLOW).unwrap();
     assert_eq!(
         app.screen().input_text("id:sync-bucket").unwrap(),
         Some("my-vault")
     );
+    assert_eq!(settings::read_sync().unwrap().bucket, "");
 
     app.clear("id:sync-endpoint").unwrap();
     app.type_text("id:sync-endpoint", "https://acct.r2.cloudflarestorage.com")
@@ -155,5 +208,15 @@ fn sync_settings_are_saved_and_ask_to_connect() {
         screen.shows("This device is not connected") || screen.shows("Could not read the keychain"),
         "neither the connect prompt nor a keychain error"
     );
+
+    // Connecting asks for every value at its own box before it tries anything.
+    app.type_text("id:connect-passphrase", "one").unwrap();
+    app.type_text("id:connect-repeat", "another").unwrap();
+    app.press("id:sync-connect >> role:button[Connect]")
+        .unwrap();
+    app.wait_for_within("Enter the bucket's access key ID.", SLOW)
+        .unwrap();
+    assert!(app.screen().shows("Enter the bucket's secret access key."));
+    assert!(app.screen().shows("The passphrases differ."));
     let _ = std::fs::remove_dir_all(&dir);
 }

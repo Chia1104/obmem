@@ -3,10 +3,16 @@
 //! stay private: views read them through these functions and change them through the actions,
 //! which run obmem's blocking work off the engine thread and write the result back. A global is
 //! per surface, so each test has its own.
+//!
+//! An action says how it went in one of three places. A rule a form's value breaks shows at the
+//! field, before anything runs (`crate::form`). An outcome that is one line, and any failure, is
+//! a toast (`crate::toasts`). An outcome with more to read is a [`Notice`] on the page.
+//! While an action's work runs, the control that started it is busy ([`running`]).
 
 use crate::data::{
     self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, SetupDone, Vault,
 };
+use crate::toasts::{done, failed as fail};
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
@@ -25,15 +31,40 @@ pub(crate) enum Load<T> {
     Failed(String),
 }
 
-/// What the last action reported, shown above the page.
+/// What the last action reported, when that is more than a line: shown above the page until
+/// it is dismissed.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Notice {
     SetUp(SetupDone),
     Audit(AuditDone),
     /// A title and one line per thing that happened.
     Lines(String, Vec<String>),
-    Done(String),
-    Error(String),
+}
+
+/// Work a control starts and waits for. The control is busy while it runs ([`running`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Work {
+    AddProject,
+    RemoveProject,
+    Initialize,
+    /// Reading the shown project again: the Refresh button, and after a change to it.
+    Refresh,
+    SetUp(Agent),
+    ImportClaude,
+    PreviewTask,
+    SaveSettings,
+    Scan,
+    Allow(Vault, Kind, String),
+    Disallow(Vault, Kind, String),
+    SavePersonal,
+    SaveSync,
+    ConnectSync,
+    Sync,
+    /// Reading the review list again.
+    LoadReview,
+    Audit(PathBuf),
+    /// A decision on a review item: the item's id, and the button's label.
+    Review(String, &'static str),
 }
 
 /// What the main area shows.
@@ -159,17 +190,26 @@ fn set_notice(n: Option<Notice>) {
     global::<Notices>().set(Notices(n));
 }
 
-fn fail(message: String) {
-    set_notice(Some(Notice::Error(message)));
-}
-
-/// Shows a problem the view found itself (input it cannot use).
-pub(crate) fn report(message: String) {
-    fail(message);
-}
-
 pub(crate) fn dismiss_notice() {
     set_notice(None);
+}
+
+#[derive(Clone, Default)]
+struct Running(Vec<Work>);
+
+/// Whether `work` is running, for a button's `busy`.
+pub(crate) fn running(work: Work) -> impl Fn() -> bool + Clone + 'static {
+    move || global::<Running>().with(|r| r.0.contains(&work))
+}
+
+/// Whether a decision on the review item `id` is running: its other buttons wait for it.
+pub(crate) fn reviewing(id: String) -> impl Fn() -> bool + Clone + 'static {
+    move || {
+        global::<Running>().with(|r| {
+            r.0.iter()
+                .any(|w| matches!(w, Work::Review(item, _) if *item == id))
+        })
+    }
 }
 
 /// The owner the app's tasks run under. A task ends with its owner, and the button that starts
@@ -203,6 +243,28 @@ fn in_background<R: Send + 'static>(
     });
 }
 
+/// [`in_background`], with `what` running until the work ends: the control that started it is
+/// busy meanwhile.
+fn in_background_as<R: Send + 'static>(
+    what: Work,
+    work: impl FnOnce() -> R + Send + 'static,
+    then: impl FnOnce(R) + 'static,
+) {
+    global::<Running>().update(|r| r.0.push(what.clone()));
+    run_task(async move {
+        let result = blocking(work).await;
+        global::<Running>().update(|r| {
+            if let Some(i) = r.0.iter().position(|w| *w == what) {
+                r.0.remove(i);
+            }
+        });
+        match result {
+            Ok(r) => then(r),
+            Err(e) => fail(format!("the background task failed: {e}")),
+        }
+    });
+}
+
 /// Runs a change to the shown project, then reports `done` and reads the project again.
 fn change_project(
     work: impl FnOnce(PathBuf) -> Result<(), String> + Send + 'static,
@@ -215,7 +277,7 @@ fn change_project(
         move || work(path),
         move |r| {
             match r {
-                Ok(()) => set_notice(Some(Notice::Done(done))),
+                Ok(()) => crate::toasts::done(done),
                 Err(e) => fail(e),
             }
             reload(again);
@@ -275,7 +337,8 @@ fn select(path: PathBuf) {
 /// Reads the shown project again, keeping it on screen until the new state arrives.
 fn reload(path: PathBuf) {
     let wanted = path.clone();
-    in_background(
+    in_background_as(
+        Work::Refresh,
         move || data::detail(&path),
         move |r| {
             // The user may have picked another project meanwhile.
@@ -329,7 +392,8 @@ pub(crate) fn preview_task(task: String) {
     let Some(path) = selected() else { return };
     global::<TaskPreview>().set(TaskPreview(Some((task.clone(), Load::Loading))));
     let wanted = task.clone();
-    in_background(
+    in_background_as(
+        Work::PreviewTask,
         move || data::context_for(&path, &task),
         move |r| {
             // A newer preview may have started meanwhile.
@@ -347,13 +411,17 @@ pub(crate) fn preview_task(task: String) {
 pub(crate) fn import_claude(chosen: Vec<PathBuf>) {
     let Some(path) = selected() else { return };
     let again = path.clone();
-    in_background(
+    in_background_as(
+        Work::ImportClaude,
         move || data::import_claude(&path, &chosen),
         move |r| {
-            set_notice(Some(match r {
-                Ok(lines) => Notice::Lines("Claude Code memory imported".into(), lines),
-                Err(e) => Notice::Error(e),
-            }));
+            match r {
+                Ok(lines) => set_notice(Some(Notice::Lines(
+                    "Claude Code memory imported".into(),
+                    lines,
+                ))),
+                Err(e) => fail(e),
+            }
             reload(again);
         },
     );
@@ -370,7 +438,8 @@ pub(crate) fn add_project() {
                 let Some(folder) = paths.into_iter().next() else {
                     return;
                 };
-                in_background(
+                in_background_as(
+                    Work::AddProject,
                     move || data::add_project(&folder),
                     |r| match r {
                         Ok(root) => load_projects(Some(root)),
@@ -387,7 +456,8 @@ pub(crate) fn add_project() {
 /// Takes the shown project off the list (its files stay).
 pub(crate) fn remove_selected() {
     let Some(path) = selected() else { return };
-    in_background(
+    in_background_as(
+        Work::RemoveProject,
         move || data::remove_project(&path),
         |r| match r {
             Ok(()) => {
@@ -401,7 +471,8 @@ pub(crate) fn remove_selected() {
 
 pub(crate) fn initialize() {
     let Some(path) = selected() else { return };
-    in_background(
+    in_background_as(
+        Work::Initialize,
         move || data::initialize(&path),
         |r| match r {
             Ok(()) => load_projects(None),
@@ -413,13 +484,14 @@ pub(crate) fn initialize() {
 pub(crate) fn set_up(agent: Agent) {
     let Some(path) = selected() else { return };
     let again = path.clone();
-    in_background(
+    in_background_as(
+        Work::SetUp(agent),
         move || data::set_up(&path, agent),
         move |r| {
-            set_notice(Some(match r {
-                Ok(done) => Notice::SetUp(done),
-                Err(e) => Notice::Error(e),
-            }));
+            match r {
+                Ok(done) => set_notice(Some(Notice::SetUp(done))),
+                Err(e) => fail(e),
+            }
             reload(again);
         },
     );
@@ -430,11 +502,12 @@ pub(crate) fn set_up(agent: Agent) {
 pub(crate) fn save_settings(s: ProjectSettings) {
     let Some(path) = selected() else { return };
     let again = path.clone();
-    in_background(
+    in_background_as(
+        Work::SaveSettings,
         move || data::save_settings(&path, &s),
         move |r| match r {
             Ok(()) => {
-                set_notice(Some(Notice::Done("Settings saved.".into())));
+                done("Settings saved.");
                 reload(again);
             }
             // Reloading would rebuild the form from the file and lose what the user typed.
@@ -456,7 +529,8 @@ pub(crate) fn set_codex_auto_approve(on: bool) {
 pub(crate) fn scan(input: String) {
     let Some(path) = selected() else { return };
     let text = input.clone();
-    in_background(
+    in_background_as(
+        Work::Scan,
         move || data::scan(&path, &input),
         move |r| match r {
             Ok(hits) => global::<ScanResult>().set(ScanResult(Some((text, hits)))),
@@ -472,7 +546,9 @@ pub(crate) fn allow(vault: Vault, kind: Kind, entry: String) {
         Vault::Project => "Allowed in this project.",
         Vault::Personal => "Allowed in every project.",
     };
-    in_background(
+    let entry = entry.trim().to_string();
+    in_background_as(
+        Work::Allow(vault, kind, entry.clone()),
         move || data::allow(&path, vault, kind, &entry),
         move |r| after_allowlist_change(r, done),
     );
@@ -480,15 +556,16 @@ pub(crate) fn allow(vault: Vault, kind: Kind, entry: String) {
 
 pub(crate) fn disallow(vault: Vault, kind: Kind, entry: String) {
     let path = selected().unwrap_or_default();
-    in_background(
+    in_background_as(
+        Work::Disallow(vault, kind, entry.clone()),
         move || data::disallow(&path, vault, kind, &entry),
         move |r| after_allowlist_change(r, "Removed from the allowlist."),
     );
 }
 
-fn after_allowlist_change(r: Result<(), String>, done: &str) {
+fn after_allowlist_change(r: Result<(), String>, said: &str) {
     match r {
-        Ok(()) => set_notice(Some(Notice::Done(done.into()))),
+        Ok(()) => done(said),
         Err(e) => fail(e),
     }
     refresh();
@@ -521,11 +598,12 @@ fn load_personal() {
 }
 
 pub(crate) fn save_personal(s: GlobalSettings) {
-    in_background(
+    in_background_as(
+        Work::SavePersonal,
         move || data::save_personal(&s),
         |r| match r {
             Ok(()) => {
-                set_notice(Some(Notice::Done("Personal settings saved.".into())));
+                done("Personal settings saved.");
                 load_personal();
             }
             // Reloading would rebuild the form from the file and lose what the user typed.
@@ -535,11 +613,12 @@ pub(crate) fn save_personal(s: GlobalSettings) {
 }
 
 pub(crate) fn save_sync(s: SyncSettings) {
-    in_background(
+    in_background_as(
+        Work::SaveSync,
         move || data::save_sync(&s),
         |r| match r {
             Ok(()) => {
-                set_notice(Some(Notice::Done("Sync settings saved.".into())));
+                done("Sync settings saved.");
                 load_personal();
             }
             // Reloading would rebuild the form from the file and lose what the user typed.
@@ -554,11 +633,12 @@ pub(crate) fn connect_sync(
     passphrase: String,
     repeat: String,
 ) {
-    in_background(
+    in_background_as(
+        Work::ConnectSync,
         move || data::connect_sync(access_key_id, secret, passphrase, repeat),
         |r| match r {
             Ok(msg) => {
-                set_notice(Some(Notice::Done(msg)));
+                done(msg);
                 load_personal();
             }
             Err(e) => fail(e),
@@ -567,10 +647,9 @@ pub(crate) fn connect_sync(
 }
 
 pub(crate) fn sync_now() {
-    set_notice(Some(Notice::Done("Syncing…".into())));
-    in_background(data::sync_now, |r| {
+    in_background_as(Work::Sync, data::sync_now, |r| {
         match r {
-            Ok(msg) => set_notice(Some(Notice::Done(format!("Synced: {msg}")))),
+            Ok(msg) => done(format!("Synced: {msg}")),
             Err(e) => fail(e),
         }
         load_personal();
@@ -586,7 +665,7 @@ pub(crate) fn show_review() {
 }
 
 pub(crate) fn load_review() {
-    in_background(data::review, |r| {
+    in_background_as(Work::LoadReview, data::review, |r| {
         global::<ReviewState>().set(ReviewState(match r {
             Ok(groups) => Load::Ready(groups),
             Err(e) => Load::Failed(e),
@@ -596,38 +675,60 @@ pub(crate) fn load_review() {
 
 /// Runs a review action, reports its message, and reads the review list (and the shown project,
 /// whose counts it changed) again.
-fn review_action(work: impl FnOnce() -> Result<String, String> + Send + 'static) {
-    in_background(work, |r| {
-        set_notice(Some(match r {
-            Ok(msg) => Notice::Done(msg),
-            Err(e) => Notice::Error(e),
-        }));
+fn review_action(what: Work, work: impl FnOnce() -> Result<String, String> + Send + 'static) {
+    in_background_as(what, work, |r| {
+        match r {
+            Ok(msg) => done(msg),
+            Err(e) => fail(e),
+        }
         load_review();
         refresh();
     });
 }
 
-pub(crate) fn approve(root: PathBuf, scope: Scope, rel: String) {
-    review_action(move || data::approve(&root, scope, &rel));
+/// The labels of a review item's buttons, which name its decisions in [`Work::Review`].
+pub(crate) const APPROVE: &str = "Approve";
+pub(crate) const VERIFY: &str = "Verify note";
+
+/// The label of the button that resolves a finding with `verdict`.
+pub(crate) fn verdict_label(verdict: Verdict) -> &'static str {
+    match verdict {
+        Verdict::Fixed => "Fixed",
+        Verdict::Accepted => "Accept",
+        Verdict::Rejected => "Reject",
+        Verdict::Open => "Reopen",
+    }
 }
 
-pub(crate) fn resolve(root: PathBuf, scope: Scope, rel: String, verdict: Verdict) {
-    review_action(move || data::resolve(&root, scope, &rel, verdict));
+/// Approves the draft the review item `item` is.
+pub(crate) fn approve(item: String, root: PathBuf, scope: Scope, rel: String) {
+    review_action(Work::Review(item, APPROVE), move || {
+        data::approve(&root, scope, &rel)
+    });
+}
+
+pub(crate) fn resolve(item: String, root: PathBuf, scope: Scope, rel: String, verdict: Verdict) {
+    review_action(Work::Review(item, verdict_label(verdict)), move || {
+        data::resolve(&root, scope, &rel, verdict)
+    });
 }
 
 /// Verifies a note in `scope`'s vault: for a finding, the vault the finding is in.
-pub(crate) fn verify(root: PathBuf, scope: Scope, rel: String) {
-    review_action(move || data::verify(&root, scope, &rel));
+pub(crate) fn verify(item: String, root: PathBuf, scope: Scope, rel: String) {
+    review_action(Work::Review(item, VERIFY), move || {
+        data::verify(&root, scope, &rel)
+    });
 }
 
 pub(crate) fn run_audit(root: PathBuf) {
-    in_background(
+    in_background_as(
+        Work::Audit(root.clone()),
         move || data::run_audit(&root),
         |r| {
-            set_notice(Some(match r {
-                Ok(done) => Notice::Audit(done),
-                Err(e) => Notice::Error(e),
-            }));
+            match r {
+                Ok(done) => set_notice(Some(Notice::Audit(done))),
+                Err(e) => fail(e),
+            }
             load_review();
             refresh();
         },

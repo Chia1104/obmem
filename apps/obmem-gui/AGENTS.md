@@ -5,9 +5,11 @@ obmem's desktop control panel for macOS and Windows, built with Native Shell (NS
 ## Layout
 
 - `data.rs`: everything the window reads or changes, through obmem-core and obmem-agents. All of it blocks.
-- `state.rs`: the window's signals and the actions that change them. Views call actions; actions run `data` on a blocking thread and write the result back.
+- `state.rs`: the window's signals and the actions that change them. Views call actions; actions run `data` on a blocking thread and write the result back. An action that a control waits for runs through `in_background_as` with a `Work` value, and `state::running(work)` says whether it is still running.
+- `form.rs`: `Problems`, the rules a form's values break, by field. The rules themselves are obmem-core's (`ProjectSettings::problems`, `allowlist::problem`), or `data::connect_problems` for the one form that has no file behind it.
+- `toasts.rs`: `done` and `failed`, and the `toaster` the root component places once. Built on nsh-base's `ToastManager`, `toast_stack` and `toast`.
 - `sidebar.rs`: the project list. It is resized by dragging its edge (`nsh_base::resize_handle`, as NSH's own dock does) and collapses to a rail of initials by its button or by dragging it narrower than `SNAP`; width and collapsed state are kept with `nsh_core::storage::Storage`. Below `widgets::NARROW` it stays a rail and the full list opens over the page as a drawer.
-- `widgets.rs`: the shared pieces and the responsive rules: `page` (scrolls, caps the column width), `page_header` (actions wrap under the title), `tabs`, `choice`, `switch_control`, `checkbox_control`, `callout` (a card with an inset color bar, which notices use), `field` (label above the control when the page is narrow). Layout follows `window()`, which is a signal: a `style_when(move || …window()…)` restyles as the window resizes.
+- `widgets.rs`: the shared pieces and the responsive rules: `page` (scrolls, caps the column width), `page_header` (actions wrap under the title), `tabs`, `choice`, `switch_control`, `checkbox_control`, `callout` (a card with an inset color bar, which notices use), `field` (label above the control when the page is narrow), `checked_field` and `Marked` (a field that shows the rule its value breaks), `action` and `primary` (buttons, with `.busy(..)` and `.blocked(..)`), `spinner` and `loading`. Layout follows `window()`, which is a signal: a `style_when(move || …window()…)` restyles as the window resizes.
 - `theme.json` (applied with `set_tokens` in `App`): the palette over NSH's shadcn default, plus the app's own tokens `ok`, `warn` and `highlight`, read with `widgets::tone`. `icons.rs`: inline SVG icons in `currentColor`.
 - `project_page.rs` (header, tabs, Overview with the Claude Code import), `agent_tab.rs`, `sessions_tab.rs`, `settings_tab.rs`, `secrets_tab.rs`, `review_page.rs`, `personal_page.rs`: views only.
 - `personal_page.rs` has the Sync card: `[sync]` settings (through `settings::save_sync`), connecting the device (the secret and passphrase fields are `masked`), the last sync status and Sync now, all through obmem-sync.
@@ -15,6 +17,15 @@ obmem's desktop control panel for macOS and Windows, built with Native Shell (NS
 - `login_env.rs`: on macOS, the PATH from a login shell (see below).
 
 Logic another front end could use belongs in obmem-core or obmem-agents, not here.
+
+## How an action reports
+
+Each outcome has one place, and a new action picks by this list:
+
+- **A rule a field's value breaks** shows at the field: a red border and the reason under it. Nothing is sent. Build the form's `Problems` from a closure that reads its signals, pass `problems.at(field)` to `checked_field` and `problems.marks(field)` to the text box's `.marked(..)`, and send only when `problems.none()`. Problems show from the first try to send, then follow what is typed.
+- **An outcome that is one line, and any failure no field is to blame for,** is a toast: `toasts::done` goes by itself, `toasts::failed` stays until it is dismissed.
+- **An outcome with more to read** (what `setup` changed, an audit's report, what an import did) is a `Notice`, shown on the page by `widgets::notice_area` until it is dismissed.
+- **While the work runs,** the button that started it is busy: `.busy(state::running(Work::..))`. It spins, keeps its size and takes no presses. `.blocked(..)` is for a button that must wait for another one's work (a review item's other decisions).
 
 ## NSH rules that bit
 
@@ -24,7 +35,9 @@ Logic another front end could use belongs in obmem-core or obmem-agents, not her
 - A task started with `spawn` ends with its owner, and the button that starts one is usually re-rendered away when the task updates the page. Start tasks through `state::run_task` / `in_background`, which run them under the window's owner.
 - `nsh_core::blocking` moves work off the engine thread. Every `data` call goes through it.
 - Background loads must not change the screen. `state::select` picks a project quietly; only `state::open`, which the user triggers, switches to the project screen. Otherwise the project list, which loads after startup, pulls the user off Review or Personal settings.
-- `ButtonElement` has no `test_id`. Wrap the button in a `view().test_id(..)` and select it with `id:… >> role:button`.
+- `ButtonElement` has no `test_id`, and neither has `ToastElement`. Wrap the button in a `view().test_id(..)` and select it with `id:… >> role:button`; a toast is found by its text.
+- A border with a different color on one side is drawn with a square inner edge, `rounded_full` or not. A ring with a gap is an SVG (`icons::LOADER`), not a border.
+- A timer started by a press ends with the button's owner, like a task. `toasts` runs its timer under the window's owner, and only while a toast is up.
 - Folder dialogs, revealing a path and opening URLs are NSH services (`pick_paths`, `reveal_path`, `open_url`); no extra crate is needed.
 - `#[native_module] fn native` runs in the runner's `main` before the engine starts any thread. It is the only safe place for process setup such as changing the environment, and `main.rs` calls the same `prepare_process` first.
 - Apps opened from Finder get launchd's short PATH, without `~/.cargo/bin` or `/usr/local/bin`, so they would not find `obmem` or the Obsidian CLI. `login_env` adopts a login shell's PATH on macOS.
@@ -32,6 +45,15 @@ Logic another front end could use belongs in obmem-core or obmem-agents, not her
 - `ButtonElement` has no `tooltip` either (only views do, through `Interactive`): `widgets::WithHint` wraps an element in a view with an `nsh_base::tooltip()`.
 - The window has no system title bar (`current_window().set(..)` with a `TitleBarStyle::Hidden` title bar, in `App`). Every column that reaches the top edge starts with `widgets::title_strip()`, which drags the window and leaves room for the window controls; the rail is at least as wide as `title_bar().left` so macOS's traffic lights fit over it.
 - Headless tests default to a phone-sized viewport. Set `config.viewport` to a desktop size, or the page column collapses to zero width and its text vanishes from `screen()`.
+
+## Looking at the real window
+
+The headless tests see text and roles, not pixels. To look at a change, run the built app against a throwaway config and capture only its window, without taking the keyboard or the pointer from whoever is at the machine:
+
+- Start it with `OBMEM_CONFIG=<temp>/config/config.toml target/debug/obmem-gui`. The project list (`projects.toml`) is read from next to that file, so the real one is not touched.
+- Press a control through System Events by its `description`, which holds the label (`name` is empty): `tell process "obmem-gui" to click (first button of window 1 whose description is "Save")`. A tab is a `radio button` of the `tab group`.
+- Typing needs the focus, so do not type: put the values a form should start with in the files it reads.
+- Capture with `screencapture -x -o -l <window id>`. The id comes from `CGWindowListCopyWindowInfo`, filtered by the process id.
 
 ## Commands
 

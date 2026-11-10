@@ -4,6 +4,7 @@ use crate::sidebar;
 use nsh_base::{button, input, theme};
 use nsh_core::element::desktop::title_bar;
 use nsh_core::prelude::*;
+use std::rc::Rc;
 
 /// Below this window width the sidebar stops taking room and opens over the page instead.
 pub(crate) const NARROW: f32 = 760.0;
@@ -109,45 +110,133 @@ pub(crate) fn path_text(label: impl IntoReactive<SharedString>) -> Text {
         .text_color(move || theme().muted_foreground)
 }
 
+/// A button for an action: bordered for a secondary one ([`action`]), filled for the main one of
+/// a block ([`primary`]). While its own work runs it spins and takes no presses.
+pub(crate) struct Press {
+    label: SharedString,
+    main: bool,
+    on_press: Box<dyn Fn()>,
+    busy: Rc<dyn Fn() -> bool>,
+    blocked: Rc<dyn Fn() -> bool>,
+}
+
+fn press(label: impl Into<SharedString>, main: bool, on_press: impl Fn() + 'static) -> Press {
+    Press {
+        label: label.into(),
+        main,
+        on_press: Box::new(on_press),
+        busy: Rc::new(|| false),
+        blocked: Rc::new(|| false),
+    }
+}
+
 /// A bordered button for secondary actions.
-pub(crate) fn action(
-    label: impl Into<SharedString>,
-    on_press: impl Fn() + 'static,
-) -> impl IntoElement {
-    button()
-        .px_3()
-        .py_1()
-        .border_1()
-        .border_color(move || theme().input)
-        .rounded(move || theme().radius)
-        .bg(move || theme().card)
-        .hover(|s| s.bg(move || theme().muted))
-        .active(|s| s.opacity(0.7))
-        .on_press(on_press)
-        .child(text(label.into()).text_sm())
+pub(crate) fn action(label: impl Into<SharedString>, on_press: impl Fn() + 'static) -> Press {
+    press(label, false, on_press)
 }
 
 /// The button for the main action of a block.
-pub(crate) fn primary(
-    label: impl Into<SharedString>,
-    on_press: impl Fn() + 'static,
-) -> impl IntoElement {
-    button()
-        .px_3()
-        .py_1()
-        .border_1()
-        .border_color(move || theme().primary)
-        .rounded(move || theme().radius)
-        .bg(move || theme().primary)
-        .hover(|s| s.opacity(0.88))
-        .active(|s| s.opacity(0.7))
-        .on_press(on_press)
-        .child(
-            text(label.into())
-                .text_sm()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(move || theme().primary_foreground),
-        )
+pub(crate) fn primary(label: impl Into<SharedString>, on_press: impl Fn() + 'static) -> Press {
+    press(label, true, on_press)
+}
+
+impl Press {
+    /// Whether the work it starts is running: it then spins and takes no presses, so the work
+    /// cannot be started twice (`state::running`).
+    pub(crate) fn busy(mut self, busy: impl Fn() -> bool + 'static) -> Self {
+        self.busy = Rc::new(busy);
+        self
+    }
+
+    /// Whether other work that rules this one out is running: it then takes no presses.
+    pub(crate) fn blocked(mut self, blocked: impl Fn() -> bool + 'static) -> Self {
+        self.blocked = Rc::new(blocked);
+        self
+    }
+}
+
+impl IntoElement for Press {
+    fn into_element(self) -> AnyElement {
+        let Press {
+            label,
+            main,
+            on_press,
+            busy,
+            blocked,
+        } = self;
+        let off = {
+            let busy = busy.clone();
+            move || busy() || blocked()
+        };
+        let ink = move || {
+            if main {
+                theme().primary_foreground
+            } else {
+                theme().foreground
+            }
+        };
+        let label = text(label).text_sm().text_color(ink);
+        let label = if main {
+            label.font_weight(FontWeight::MEDIUM)
+        } else {
+            label
+        };
+        let spins = busy.clone();
+        button()
+            .relative()
+            .items_center()
+            .justify_center()
+            .px_3()
+            .py_1()
+            .border_1()
+            .border_color(move || if main { theme().primary } else { theme().input })
+            .rounded(move || theme().radius)
+            .bg(move || if main { theme().primary } else { theme().card })
+            .hover(|s| {
+                if main {
+                    s.opacity(0.88)
+                } else {
+                    s.bg(move || theme().muted)
+                }
+            })
+            .active(|s| s.opacity(0.7))
+            .disabled(off)
+            .disabled_style(|s| s.opacity(0.6))
+            .on_press(on_press)
+            // The spinner takes the label's place, so the button keeps its size and nothing
+            // beside it moves; the label stays there for screen readers.
+            .child(label.opacity(move || if busy() { 0.0_f32 } else { 1.0 }))
+            .child(dynamic(move || {
+                spins().then(|| {
+                    view()
+                        .absolute()
+                        .inset_0()
+                        .items_center()
+                        .justify_center()
+                        .child(spinner(ink))
+                })
+            }))
+            .into_element()
+    }
+}
+
+/// An open ring that turns while work runs, in `color`.
+pub(crate) fn spinner(color: impl Fn() -> AdaptiveColor + Copy + 'static) -> View {
+    view()
+        .flex_shrink_0()
+        .text_color(color)
+        .animate_spin()
+        .child(crate::icons::icon(crate::icons::LOADER, 14.0))
+}
+
+/// What shows while something is read: a spinner and what is being read.
+pub(crate) fn loading(label: impl Into<SharedString>) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .child(spinner(move || theme().muted_foreground))
+        .child(muted(label))
 }
 
 /// A square button holding an icon, for chrome such as the sidebar's.
@@ -201,6 +290,43 @@ pub(crate) enum Level {
     Error,
 }
 
+impl Level {
+    /// The theme token of its color.
+    pub(crate) fn token(self) -> &'static str {
+        match self {
+            Level::Ok => "ok",
+            Level::Warn => "warn",
+            Level::Error => "destructive",
+        }
+    }
+}
+
+/// The round mark of an outcome.
+pub(crate) fn mark(level: Level) -> View {
+    let sign = match level {
+        Level::Ok => "✓",
+        Level::Warn => "!",
+        Level::Error => "✕",
+    };
+    let color = tone(level.token());
+    view()
+        .w(px(18.0))
+        .h(px(18.0))
+        .mt(px(1.0))
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .border_1()
+        .border_color(color)
+        .child(
+            text(sign)
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(color),
+        )
+}
+
 /// A check: its outcome, what it is, and what it found. Buttons added to it sit at its right,
 /// level with the title.
 pub(crate) fn check(
@@ -208,35 +334,12 @@ pub(crate) fn check(
     title: impl Into<SharedString>,
     detail: impl Into<SharedString>,
 ) -> View {
-    let (mark, color) = match level {
-        Level::Ok => ("✓", "ok"),
-        Level::Warn => ("!", "warn"),
-        Level::Error => ("✕", "destructive"),
-    };
-    let color = tone(color);
     view()
         .flex_row()
         .items_start()
         .gap_3()
         .py_2()
-        .child(
-            view()
-                .w(px(18.0))
-                .h(px(18.0))
-                .mt(px(1.0))
-                .flex_shrink_0()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .border_1()
-                .border_color(color)
-                .child(
-                    text(mark)
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(color),
-                ),
-        )
+        .child(mark(level))
         .child({
             let detail: SharedString = detail.into();
             let body = view()
@@ -397,6 +500,17 @@ pub(crate) fn checkbox_control(
 /// A labelled form row: what it is, what it does, and its control. In a narrow page the label
 /// goes above the control.
 pub(crate) fn field(label: &str, help: &str, control: impl IntoElement) -> View {
+    checked_field(label, help, control, || None)
+}
+
+/// A [`field`] whose value has rules: the one it breaks (`form::Problems::at`) shows under the
+/// control, which marks itself too ([`Marked`]).
+pub(crate) fn checked_field(
+    label: &str,
+    help: &str,
+    control: impl IntoElement,
+    problem: impl Fn() -> Option<String> + 'static,
+) -> View {
     let stacked = move || page_width() < STACK_FIELDS;
     view()
         .flex_row()
@@ -423,8 +537,17 @@ pub(crate) fn field(label: &str, help: &str, control: impl IntoElement) -> View 
                 .flex_1()
                 .min_w(px(0.0))
                 .justify_center()
-                .child(control),
+                .gap_1()
+                .child(control)
+                .child(dynamic(move || problem().map(problem_text))),
         )
+}
+
+/// A rule a value breaks, said under its control.
+pub(crate) fn problem_text(message: String) -> Text {
+    text(message)
+        .text_xs()
+        .text_color(move || theme().destructive)
 }
 
 /// A one-line text box bound to `value`.
@@ -441,6 +564,32 @@ pub(crate) fn text_box(value: Signal<String>, placeholder: &str) -> Input {
         .rounded(move || theme().radius)
         .text_color(move || theme().foreground)
         .focus(|s| s.border_color(move || theme().ring))
+}
+
+/// A text box whose value has rules: while it breaks one its border says so, in focus too.
+pub(crate) trait Marked {
+    fn marked(self, bad: impl Fn() -> bool + Copy + 'static) -> Self;
+}
+
+impl Marked for Input {
+    fn marked(self, bad: impl Fn() -> bool + Copy + 'static) -> Self {
+        self.border_color(move || {
+            if bad() {
+                theme().destructive
+            } else {
+                theme().input
+            }
+        })
+        .focus(move |s| {
+            s.border_color(move || {
+                if bad() {
+                    theme().destructive
+                } else {
+                    theme().ring
+                }
+            })
+        })
+    }
 }
 
 /// A card with a slim bar of `color` along the inside of its left edge, for what stands out from
@@ -463,34 +612,29 @@ pub(crate) fn callout(
         .child(view().flex_1().min_w(px(0.0)).gap_1().child(body))
 }
 
-/// What the last action reported, with a way to dismiss it.
+/// What the last action reported, when that is more than a line: with a way to dismiss it.
+/// One-line outcomes and failures are toasts (`crate::toasts`).
 pub(crate) fn notice_area() -> AnyElement {
     use crate::state::{self, Notice};
     dynamic(move || {
         state::notice().map(|n| {
             let mut lines: Vec<String> = Vec::new();
-            let (level, title, detail) = match n {
-                Notice::Error(e) => (Level::Error, "That did not work".to_string(), e),
-                Notice::Done(msg) => (Level::Ok, msg, String::new()),
+            let title = match n {
                 Notice::Lines(title, l) => {
                     lines = l;
-                    (Level::Ok, title, String::new())
+                    title
                 }
                 Notice::Audit(done) => {
                     lines = done.notes;
-                    (Level::Ok, done.summary, String::new())
+                    done.summary
                 }
                 Notice::SetUp(done) => {
                     lines.extend(done.changed.iter().map(|f| format!("Updated {f}")));
                     lines.extend(done.manual.iter().map(|m| format!("Next: {m}")));
-                    (
-                        Level::Ok,
-                        format!("{} is set up", done.agent.label()),
-                        String::new(),
-                    )
+                    format!("{} is set up", done.agent.label())
                 }
             };
-            let mut body = view().child(check(level, title, detail).py_0());
+            let mut body = view().child(check(Level::Ok, title, "").py_0());
             for l in lines {
                 body = body.child(muted(l).pl(px(30.0)));
             }
@@ -501,12 +645,7 @@ pub(crate) fn notice_area() -> AnyElement {
                     .pl(px(30.0))
                     .child(action("Dismiss", state::dismiss_notice)),
             );
-            let color = tone(match level {
-                Level::Ok => "ok",
-                Level::Warn => "warn",
-                Level::Error => "destructive",
-            });
-            callout(color, body).test_id("notice")
+            callout(tone(Level::Ok.token()), body).test_id("notice")
         })
     })
 }

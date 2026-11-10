@@ -2,10 +2,10 @@
 
 use crate::data::ClaudeMemory;
 use crate::data::{AgentState, Detail};
-use crate::state::{self, Load, Tab};
+use crate::state::{self, Load, Tab, Work};
 use crate::widgets::{
-    Level, action, card, check, checkbox_control, heading, muted, notice_area, page, page_header,
-    path_text, primary, tabs,
+    Level, action, card, check, checkbox_control, heading, loading, muted, notice_area, page,
+    page_header, path_text, primary, tabs,
 };
 use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
 use nsh_base::theme;
@@ -38,14 +38,14 @@ fn header() -> Vec<AnyElement> {
         Load::Loading if state::selected().is_none() => {
             vec![muted("Add a project to see its memory setup.").into_element()]
         }
-        Load::Loading => vec![muted("Loading…").into_element()],
+        Load::Loading => vec![loading("Loading…").into_element()],
         Load::Failed(e) => vec![
             check(Level::Error, "Could not read this project", e).into_element(),
             view()
                 .flex_row()
                 .gap_2()
-                .child(action("Try again", state::refresh))
-                .child(action("Remove from list", state::remove_selected))
+                .child(action("Try again", state::refresh).busy(state::running(Work::Refresh)))
+                .child(remove_button())
                 .into_element(),
         ],
         Load::Ready(d) => {
@@ -56,15 +56,21 @@ fn header() -> Vec<AnyElement> {
                     d.status.project_name.clone(),
                     path_text(shown),
                     vec![
-                        action("Refresh", state::refresh).into_element(),
+                        action("Refresh", state::refresh)
+                            .busy(state::running(Work::Refresh))
+                            .into_element(),
                         action(REVEAL, move || drop(reveal_path(root.clone()))).into_element(),
-                        action("Remove from list", state::remove_selected).into_element(),
+                        remove_button().into_element(),
                     ],
                 )
                 .into_element(),
             ]
         }
     }
+}
+
+fn remove_button() -> impl IntoElement {
+    action("Remove from list", state::remove_selected).busy(state::running(Work::RemoveProject))
 }
 
 fn tab_bar() -> AnyElement {
@@ -93,7 +99,7 @@ fn content() -> Vec<AnyElement> {
             card()
                 .child(text("obmem is not set up in this folder"))
                 .child(muted("Setting it up creates the project vault and .obmem.toml. Until then, hooks do nothing here."))
-                .child(view().flex_row().pt_2().child(primary("Set up obmem here", state::initialize)))
+                .child(view().flex_row().pt_2().child(primary("Set up obmem here", state::initialize).busy(state::running(Work::Initialize))))
                 .into_element(),
         ];
     }
@@ -219,7 +225,10 @@ fn agents(list: Vec<AgentState>) -> View {
                     "Not set up: {} file(s) to update",
                     files.len()
                 ))))
-                .child(primary("Set up", move || state::set_up(agent))),
+                .child(
+                    primary("Set up", move || state::set_up(agent))
+                        .busy(state::running(Work::SetUp(agent))),
+                ),
             Err(e) => row.child(
                 view()
                     .flex_1()
@@ -308,12 +317,12 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
     }
     Some(
         c.child(
-            view()
-                .flex_row()
-                .pt_2()
-                .child(primary("Import selected", move || {
+            view().flex_row().pt_2().child(
+                primary("Import selected", move || {
                     state::import_claude(chosen.get_untracked())
-                })),
+                })
+                .busy(state::running(Work::ImportClaude)),
+            ),
         ),
     )
 }

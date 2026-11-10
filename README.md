@@ -40,6 +40,18 @@ obmem status
 
 Install it globally: the MCP config and the hooks that `setup` writes run `obmem` from `PATH`, in every agent turn. `npx @chia1104/obmem <command>` works for a command you run once.
 
+Without Node, the install script of a release puts the same binary in `~/.obmem/bin`, after checking it against the release's `SHA256SUMS`:
+
+```sh
+curl -fsSL https://github.com/Chia1104/obmem/releases/latest/download/install.sh | sh
+```
+
+```powershell
+irm https://github.com/Chia1104/obmem/releases/latest/download/install.ps1 | iex
+```
+
+Set `OBMEM_VERSION` (such as `0.1.0`) for another release than the latest, and `OBMEM_INSTALL_DIR` for another folder. The script changes nothing else: when the folder is not on `PATH`, it says what to add.
+
 Other ways to get the binary:
 - Download it from the [releases](https://github.com/Chia1104/obmem/releases): macOS (Apple silicon and Intel), Linux (x64 and arm64, static) and Windows (x64).
 - Build it from a clone: `cargo install --path crates/obmem`.

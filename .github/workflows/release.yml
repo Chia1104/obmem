@@ -2,7 +2,9 @@ name: Release
 
 # A `v*` tag builds the `obmem` binary for every platform, publishes it to npm and attaches the
 # binaries to a GitHub release. npm gets one package per platform plus `@chia1104/obmem`, which
-# runs the one that fits the machine (see npm/build.mjs).
+# runs the one that fits the machine (see npm/build.mjs). The release also gets SHA256SUMS and
+# the install scripts (scripts/install.sh, scripts/install.ps1), which `verify` then runs on
+# every platform.
 # Run it by hand to check that every platform still builds: without a tag nothing is published.
 on:
   push:
@@ -96,7 +98,7 @@ jobs:
             # `./`: npm takes a bare `dist/<name>` for a GitHub repository, `<user>/<repo>`.
             npm publish "./$folder" --access public --provenance
           done < packages.txt
-      - name: Attach the binaries to a GitHub release
+      - name: Attach the binaries, their checksums and the install scripts to a GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -109,9 +111,39 @@ jobs:
               *) tar -C "$folder" -czf "assets/obmem-$target.tar.gz" obmem ;;
             esac
           done
-          # A release made on GitHub, which is what created the tag, only gets the binaries.
+          (cd assets && sha256sum obmem-* > SHA256SUMS)
+          cp scripts/install.sh scripts/install.ps1 assets/
+          # A release made on GitHub, which is what created the tag, only gets the files.
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" assets/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" assets/* --generate-notes --verify-tag
           fi
+
+  # The release as a user gets it: the install script of this tag, on a machine of each kind.
+  verify:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      OBMEM_VERSION: ${{ github.ref_name }}
+    steps:
+      - name: Install with install.sh
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/install.sh" | sh
+          echo "$HOME/.obmem/bin" >> "$GITHUB_PATH"
+      - name: Install with install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/install.ps1" | iex
+          Join-Path $env:USERPROFILE '.obmem\bin' >> $env:GITHUB_PATH
+      - name: Run the installed binary
+        shell: bash
+        run: |
+          test "$(obmem --version)" = "obmem ${GITHUB_REF_NAME#v}"
+          obmem status

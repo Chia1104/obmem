@@ -80,7 +80,7 @@ Other ways to get the binary:
 | Amp (`amp`) | `.amp/settings.json`, `.amp/plugins/obmem.ts`, `AGENTS.md`; approve the MCP server with `amp mcp approve obmem` |
 
 Once set up:
-- At session start, the agent gets the vault index, where the last session left off, your feedback and preferences, open findings, and unreviewed drafts.
+- At session start, the agent gets the vault index, where the last session left off, the feedback and preferences you approved, open findings, and unreviewed drafts.
 - When a session ends after real work that has not been logged, the agent is asked once to log it.
 - Before the context is compacted, obmem writes a session-log entry.
 
@@ -144,7 +144,9 @@ Every write is scanned for secrets in three ways:
 - format rules for known token prefixes ([gitleaks format](crates/obmem-core/src/secret_rules.toml); add your own in `_system/secret-rules.toml`)
 - `password = …`-style assignments whose value looks random
 
-By default a write that contains a secret is refused. Set `mode = "redact"` to write `[REDACTED:rule]` instead. To allow a false positive, add the fingerprint from the error to `_system/secret-allowlist.toml`. Config and rules in a cloned repo can only make scanning stricter.
+By default a write that contains a secret is refused. Set `mode = "redact"` to write `[REDACTED:rule]` instead. To allow a false positive, add the fingerprint from the error to `_system/secret-allowlist.toml`. A fingerprint allows that one value: for a private key it covers the whole key. Config and rules in a cloned repo can only make scanning stricter.
+
+A value in an `.env*` file that starts with `./`, `../` or `~/` is taken for a path and left out. Any other value there counts, absolute paths included, because obmem never looks a value from those files up on disk.
 
 For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks the staged files in the project vault.
 

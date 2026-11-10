@@ -25,6 +25,18 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  # Linux is where remote agents run obmem: without the GUI, which does not build there.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
   # macOS, because --workspace includes the GUI and Native Shell builds only on macOS and Windows.
   clippy-test:
     runs-on: macos-latest

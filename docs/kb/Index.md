@@ -9,13 +9,28 @@ author: human
 > Map of content. Loaded into every agent session — keep it short and current.
 
 ## Architecture
-- 
+- [[split-obmem-into-a-cargo-workspace-so-a-gui-can-reuse-the-core]]: which crate owns what, and why the GUI is a workspace member.
+- [[use-the-obsidian-cli-for-search-and-link-checks-instead-of-an-own-index]]: search and link checks come from Obsidian. There is no index.
+- [[a-headless-backend-answers-for-obsidian-where-the-app-is-not-installed]]: the built-in search for machines without Obsidian.
 
 ## Key decisions
-- 
+- [[detect-unlogged-work-from-git-for-agents-other-than-claude-code]]: how the stop hook decides that a session did work.
+- [[obmem-gui-scope-control-panel-for-macos-and-windows-notes-stay-in-obsidian]]: what the desktop app does and does not do.
+- [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]]: encrypted sync of the personal vault.
+- [[sync-retention-keeps-a-week-then-dailies-then-weeklies-blobs-are-collected-after]]: what prune keeps and deletes.
+- [[remote-machines-sync-with-credentials-from-the-environment-and-an-ephemeral-sett]]: sync on servers and in cloud sandboxes.
+- [[obmem-update-replaces-only-standalone-installs-by-running-the-release-s-install-]]: `obmem update` and the install channels.
+- [[npm-packages-are-published-under-the-chia1104-scope]]: why the npm name has a scope.
 
 ## Conventions & gotchas
-- 
+- [[obsidian-cli-behaviour]]: read before changing how obmem calls the Obsidian CLI.
+- [[obmem-in-a-git-worktree-cannot-reach-obsidian]]: memory search fails in a worktree on a machine with Obsidian.
+- [[t3-code-s-cursor-driver-starts-mcp-servers-in-the-home-directory]]: why tools take a `project` argument.
+- [[cursor-hook-payloads-and-agent-transcript-format-seen-2026-11-09]]: what Cursor sends to hooks.
+- [[token-shaped-test-fixtures-must-be-split-with-concat]]: GitHub rejects a push with a token-shaped literal.
+- [[rustfmt-check-exits-0-on-stdin-even-when-it-prints-a-diff]]: why the pre-commit hook compares hashes.
+- [[target-grows-because-p-obmem-gui-and-workspace-build-native-shell-with-different]]: prefer `--workspace` to `-p obmem-gui`.
+- [[a-new-npm-package-name-answers-404-for-minutes-after-its-first-publish]]: wait before calling a first publish failed.
 
 ## Runbooks
-- 
+- [[releasing-a-version-bump-last-then-tag-the-merged-commit]]: the order of merge, bump and tag.

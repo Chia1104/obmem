@@ -5,8 +5,8 @@ status: active
 author: agent
 confidence: high
 created: 2026-11-09
-updated: 2026-11-09
-verified_commit: 89275cd
+updated: 2026-11-10
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-core/src/projects.rs
 - crates/obmem-core/src/status.rs#status
@@ -15,13 +15,14 @@ code_refs:
 - crates/obmem-core/src/store.rs#NoteRef
 - crates/obmem-agents/src/setup.rs#Writer
 - apps/obmem-gui/src/state.rs
+- apps/obmem-gui/tests/gui/main.rs
 tags:
 - gui
 - nsh
 - windows
 - tray
-approved_at: 2026-11-09
-approved_by: human (gui)
+approved_at: 2026-11-10
+approved_by: auto-approve
 ---
 Decided with the user on 2026-11-09. This builds on [[split-obmem-into-a-cargo-workspace-so-a-gui-can-reuse-the-core]].
 
@@ -41,10 +42,12 @@ Decided with the user on 2026-11-09. This builds on [[split-obmem-into-a-cargo-w
 3. A cross-project review screen: approve, resolve, verify the target note, open in Obsidian, run the audit.
 4. Agent view (session-start context and `memory_context` for a task, shown as plain text exactly as an agent gets it), session logs, and importing Claude Code memory with a per-item choice.
 
-Each layer has a headless flow test (`apps/obmem-gui/tests/*.rs`, one test per file, since each file sets its own environment).
+Added to the Personal settings page afterwards: the auto-approve switch, and the Sync card for [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]].
+
+**Tests.** The headless flow tests are one binary, `apps/obmem-gui/tests/gui/main.rs`, with one module per screen. Each test sets its own environment, so `common::sandbox` reruns it alone in a child process. Why one binary: [[target-grows-because-p-obmem-gui-and-workspace-build-native-shell-with-different]].
 
 **Security lessons from these layers.** A cloned project may plant symlinks or notes. Setup writes go through `atomic_write`. Review actions name notes with `NoteRef::At`, an exact path in a given vault, never with a key taken from a note's content.
 
-**Tray.** NSH 0.4.0 has none. NSH `main` has `Tray` (TSX only); the engine's `DesktopCommand::SetTray` exists. Add it once a release exposes it in Rust, or upstream a `set_tray()`.
+**Tray.** NSH 0.4.0 has none, and 0.4.0 was still the newest release on 2026-11-10. NSH `main` has `Tray` (TSX only); the engine's `DesktopCommand::SetTray` exists. Add it once a release exposes it in Rust, or upstream a `set_tray()` (CHI-68).
 
-**Windows.** Unverified on a Windows machine: the Obsidian CLI's name and install, the GUI build, and `nsh package --target windows`.
+**Windows.** The `obmem` binary builds for Windows in the release workflow and its install was checked there. The GUI is unverified on a Windows machine: the Obsidian CLI's name and install, the GUI build, and `nsh package --target windows` (CHI-67).

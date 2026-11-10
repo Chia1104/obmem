@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-10
 updated: 2026-11-10
-verified_commit: 5b82134
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-sync/src/keychain.rs#from_env
 - crates/obmem-sync/src/run.rs#create_new_vault
@@ -18,6 +18,8 @@ tags:
 - architecture
 approved_at: 2026-11-10
 approved_by: auto-approve
+verified_at: 2026-11-10
+verified_by: agent
 ---
 # Remote machines sync with credentials from the environment and an ephemeral setting
 

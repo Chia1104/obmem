@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-10
 updated: 2026-11-10
-verified_commit: 7c251b0
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-update/src/lib.rs#Install
 - crates/obmem-update/src/lib.rs#latest
@@ -44,4 +44,8 @@ obmem reaches a machine in several ways: npm (`@chia1104/obmem`), the install sc
 - A new install channel adds a variant to `Install` and one row of path detection.
 - Every release must keep `install.sh` and `install.ps1` and the two variables, or old binaries can no longer update.
 - With several installs on one machine the first on `PATH` runs. `obmem status` prints the binary and how it was installed, and says when `obmem` on `PATH` is another one.
-- Checked on 2026-11-10 on macOS: a binary built as 0.0.9 updated itself to the real v0.1.0 release as a standalone install, and only printed the command when placed in a `node_modules` or `target` folder. The Windows path (`powershell -File`) has never run.
+
+## What has run
+- macOS, 2026-11-10: a binary built as 0.0.9 updated itself to the real v0.1.0 release as a standalone install, and only printed the command when placed in a `node_modules` or `target` folder.
+- The v0.1.1 release's `verify` job (run 42752144635) installed the release with `install.sh` on Linux x64, Linux arm64 and macOS and with `install.ps1` on Windows, then ran `obmem update --check` on each.
+- Never run: a real replacement on Windows, where `obmem update` starts the script with `powershell -File`. `--check` does not reach that code.

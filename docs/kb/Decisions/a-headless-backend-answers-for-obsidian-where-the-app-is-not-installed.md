@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-10
 updated: 2026-11-10
-verified_commit: b499127
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-core/src/obsidian.rs#Backend
 - crates/obmem-core/src/headless.rs#Headless
@@ -19,6 +19,8 @@ tags:
 - remote
 approved_at: 2026-11-10
 approved_by: auto-approve
+verified_at: 2026-11-10
+verified_by: agent
 ---
 # A headless backend answers for Obsidian where the app is not installed
 

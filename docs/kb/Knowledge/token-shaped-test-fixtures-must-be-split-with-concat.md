@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: cfe8218
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-core/src/secrets.rs#ALLOWLIST_PROBES
 tags:
@@ -16,6 +16,8 @@ tags:
 - tests
 approved_at: 2026-11-09
 approved_by: human (gui)
+verified_at: 2026-11-10
+verified_by: agent
 ---
 # Token-shaped test fixtures must be split with concat!
 

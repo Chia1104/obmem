@@ -6,7 +6,7 @@ author: agent
 confidence: medium
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: 8b260e5
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-agents/src/hooks.rs#HookInput
 - crates/obmem-agents/src/hooks.rs#scan_transcript
@@ -17,6 +17,8 @@ tags:
 - multi-agent
 approved_at: 2026-11-09
 approved_by: human (gui)
+verified_at: 2026-11-10
+verified_by: agent
 ---
 # Cursor hook payloads and agent transcript format (seen 2026-11-09)
 

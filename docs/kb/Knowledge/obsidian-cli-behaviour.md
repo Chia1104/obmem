@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: e9961bd
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-core/src/obsidian.rs#vault_id
 - crates/obmem-core/src/obsidian.rs#is_empty_result
@@ -17,7 +17,7 @@ tags:
 - gotcha
 approved_at: 2026-11-09
 approved_by: human (gui)
-verified_at: 2026-11-09
+verified_at: 2026-11-10
 verified_by: agent
 ---
 Non-obvious behaviour of the official Obsidian CLI (verified on Obsidian 1.14.5) that `crates/obmem-core/src/obsidian.rs` depends on:

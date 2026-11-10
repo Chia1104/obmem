@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-10
 updated: 2026-11-10
-verified_commit: e5a6be2
+verified_commit: 38a6b4e
 code_refs:
 - .githooks/pre-commit
 tags:
@@ -15,6 +15,8 @@ tags:
 - git-hooks
 approved_at: 2026-11-10
 approved_by: auto-approve
+verified_at: 2026-11-10
+verified_by: agent
 ---
 # rustfmt --check exits 0 on stdin even when it prints a diff
 

@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: e9961bd
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-agents/src/hooks.rs#changed_since
 - crates/obmem-agents/src/hooks.rs#Agent
@@ -16,7 +16,7 @@ tags:
 - agents
 approved_at: 2026-11-09
 approved_by: human (gui)
-verified_at: 2026-11-09
+verified_at: 2026-11-10
 verified_by: agent
 ---
 # Detect unlogged work from git for agents other than Claude Code

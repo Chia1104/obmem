@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-09
-verified_commit: 84661a3
+verified_commit: 38a6b4e
 code_refs:
 - crates/obmem-sync/src/prune.rs#prune
 - crates/obmem-sync/src/remote.rs#Remote::put
@@ -15,6 +15,8 @@ tags:
 - backup
 approved_at: 2026-11-09
 approved_by: auto-approve
+verified_at: 2026-11-10
+verified_by: agent
 ---
 # Sync retention keeps a week, then dailies, then weeklies; blobs are collected after a 24 h grace
 

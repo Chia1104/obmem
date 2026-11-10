@@ -82,8 +82,15 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # A version that is already there is skipped, so a release that failed halfway can be
+        # run again: npm never takes the same version twice.
         run: |
           while read -r folder; do
+            name=$(basename "$folder")
+            if npm view "$name@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
+              echo "$name@${GITHUB_REF_NAME#v} is already published"
+              continue
+            fi
             npm publish "$folder" --access public --provenance
           done < packages.txt
       - name: Attach the binaries to a GitHub release

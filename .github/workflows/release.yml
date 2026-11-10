@@ -38,16 +38,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # What this job builds is what gets published, so it runs as little outside code as it
+      # can: the runner's own rustup, no build cache, and the one third-party action pinned to
+      # a commit.
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }} && rustup default stable
       - if: matrix.cross
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cross
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
       - name: Build
         env:
           # The Windows runner has no NASM: aws-lc-sys then uses the assembly it ships prebuilt.

@@ -27,7 +27,7 @@ fn a_new_project_is_initialized_then_an_agent_set_up() {
     app.wait_for_gone("id:agent-claude >> role:button[Set up]", SLOW)
         .unwrap();
     assert!(
-        app.screen().shows("Not set up: 2 file(s) to update"),
+        app.screen().shows("Not set up: 4 file(s) to update"),
         "{:?}",
         app.screen().texts()
     );

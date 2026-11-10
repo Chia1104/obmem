@@ -2,7 +2,7 @@
 
 The stdio MCP server (`obmem serve`): tool definitions and finding the project. The logic behind each tool belongs in obmem-core; this is the only crate that depends on rmcp.
 
-- The server instructions are `obmem_core::guide::GUIDE`, the same text that the session-start context and the AGENTS.md block carry. Edit the guide there.
+- The server instructions are `obmem_core::guide::GUIDE`, the same text that the session-start context carries. It is in every session's context, so it stays short: what an agent needs only sometimes goes in a skill (`crates/obmem-agents/skills/`).
 - Agents have fewer powers than the CLI. Through MCP they cannot reject findings, approve drafts or verify human-authored notes.
 
 ## Finding the project

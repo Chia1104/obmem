@@ -14,6 +14,7 @@ author: human
 - [[a-headless-backend-answers-for-obsidian-where-the-app-is-not-installed]]: the built-in search for machines without Obsidian.
 
 ## Key decisions
+- [[agent-guidance-is-a-short-always-loaded-guide-plus-skills-that-setup-installs]]: what agents are always told, and what is in the skills.
 - [[detect-unlogged-work-from-git-for-agents-other-than-claude-code]]: how the stop hook decides that a session did work.
 - [[obmem-gui-scope-control-panel-for-macos-and-windows-notes-stay-in-obsidian]]: what the desktop app does and does not do.
 - [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]]: encrypted sync of the personal vault.

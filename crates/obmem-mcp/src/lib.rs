@@ -562,7 +562,7 @@ impl MemoryServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for MemoryServer {
     // Written out (instead of the macro's `instructions = "..."`) so the guide is shared with
-    // the SessionStart context and `obmem guide`.
+    // the SessionStart context.
     fn get_info(&self) -> rmcp::model::ServerConfig {
         rmcp::model::ServerConfig::new(
             rmcp::model::ServerCapabilities::builder()

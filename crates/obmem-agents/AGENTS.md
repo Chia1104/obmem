@@ -1,6 +1,6 @@
 # obmem-agents
 
-How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`) and `obmem setup`, which writes each agent's config (`setup.rs`).
+How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`), `obmem setup`, which writes each agent's config (`setup.rs`), and the skills it installs (`skills/`).
 
 ## Hooks
 
@@ -33,12 +33,28 @@ How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`) and `ob
 - Generated commands call `obmem` from `PATH`, so the files can be committed. `setup cursor` writes `serve --project ${workspaceFolder}`.
 - `setup amp` writes the MCP server to the workspace settings (`amp.mcpServers` in `.amp/settings.json`), never to the user's. An orb, Amp's remote machine, has the repository and nothing from the user's own settings file. Amp runs a workspace server only after the user approves it.
 - The Amp plugin is written only when `.amp/plugins/obmem.ts` is missing, because people edit it. After changing `AMP_PLUGIN`, delete the file and run `setup amp` again.
-- In `AGENTS.md`, only the block between `<!-- obmem:guide -->` and `<!-- /obmem:guide -->` is rewritten.
 - `setup codex` leaves Codex asking before each obmem tool call. `set_codex_auto_approve` turns on `default_tools_approval_mode = "approve"` per project (the GUI's switch); `codex exec` needs it.
+
+## Skills
+
+What an agent is told about obmem is in two layers:
+
+- `obmem_core::guide::GUIDE` is in every session's context (the MCP server instructions and the session-start context). It holds what every task needs: the call that opens a task, the call that closes it, and one line that says when to load each skill.
+- `skills/<name>/SKILL.md` holds the rest. An agent loads a skill when its `description` fits, so the description names the cases that should load it. `obmem` is how to search and what to record. `obmem-refresh` is the procedure that brings stale notes back in line with the code.
+
+Rules for changing them:
+
+- `setup` installs every skill in `SKILLS` (`setup.rs`): into `.claude/skills/` for Claude Code, which reads only that folder, and into `.agents/skills/` for Codex, Cursor, Copilot CLI and Amp.
+- The installed files are obmem's. `setup` rewrites one that differs from this build's copy, and `check` reports it as a file to update. That is how a project gets a new version of a skill.
+- A skill's `name` is its folder's name, or agents do not load it. A test checks it.
+- A new skill needs a line in `GUIDE` only when an agent must reach it without being asked. Every word there is paid for in every session.
+- Tool names and behaviour that a skill describes are in obmem-mcp and obmem-core. When one changes, change the skill in the same commit.
+
+Where each agent reads skills was taken from its docs on 2026-11-10. Only Claude Code was checked: a new session lists both skills. No agent has run a task with them yet.
 
 ## Tested in the real apps
 
 These were tested on 2026-11-09, both standalone and as T3 Code children: Codex 0.167 and cursor-agent 2026.11.05. The Copilot hooks follow that agent's docs but have not been run. For Amp (CLI of 2026-11-08), `amp plugins list` loads the plugin with both events and `amp mcp doctor` finds the server in `.amp/settings.json`, awaiting approval. No Amp thread has run with them, and nothing was tried in an orb. Known limits:
 - Codex loads project config and hooks only after the project and each hook are trusted. `codex exec` can call obmem's tools only with `mcp_servers.obmem.default_tools_approval_mode = "approve"`.
 - `cursor-agent -p` needs `--force` for tool calls, and in that mode the stop hook did not fire.
-- T3 Code's Cursor driver drops the `sessionStart` context. The guide block in `AGENTS.md` covers that case.
+- T3 Code's Cursor driver drops the `sessionStart` context. The MCP server instructions carry the same guide, so the agent still gets it.

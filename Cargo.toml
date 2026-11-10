@@ -28,13 +28,14 @@ obmem-sync = { path = "crates/obmem-sync" }
 obmem-update = { path = "crates/obmem-update" }
 
 # Native Shell (apps/obmem-gui). The nsh CLI builds against its own version of these crates, so
-# upgrade the CLI and these together.
-nsh-core = "0.4.0"
-nsh-base = "0.4.0"
-nsh-engine = "0.4.0"
-nsh-testing = "0.4.0"
-nsh-platform-macos = { version = "0.4.0", default-features = false }
-nsh-platform-windows = { version = "0.4.0", default-features = false }
+# upgrade the CLI and these together. Pinned to upstream `main` at the commit the nightly CLI of
+# 2026-11-10 was built from, to try the fixes made since 0.4.0.
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+nsh-testing = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+nsh-platform-macos = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702", default-features = false }
+nsh-platform-windows = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702", default-features = false }
 
 aho-corasick = "1.1.5"
 anyhow = "1.0.104"

@@ -64,17 +64,24 @@ pub fn read(vault: &Path) -> Result<Allowlist> {
     Ok(toml::from_str::<File>(&read_doc(vault)?.to_string())?.allowlist)
 }
 
-/// Adds an entry, checked as the scanner checks it. Returns whether it was new.
-pub fn add(vault: &Path, kind: Kind, entry: &str) -> Result<bool> {
+/// Why the scanner would ignore this entry, if it would: the rules the scanner applies when it
+/// reads the list. A settings screen shows it at the entry; [`add`] refuses the entry with it.
+pub fn problem(kind: Kind, entry: &str) -> Option<String> {
     let entry = entry.trim();
-    let problem = match kind {
-        Kind::Fingerprint if entry.is_empty() => Some("it is empty".to_string()),
+    let why = match kind {
+        _ if entry.is_empty() => Some("it is empty".to_string()),
         Kind::Fingerprint => None,
         Kind::Regex => regex_problem(entry),
         Kind::Stopword => stopword_problem(entry),
-    };
-    if let Some(why) = problem {
-        bail!("the scanner would ignore \"{entry}\": {why}");
+    }?;
+    Some(format!("The scanner would ignore \"{entry}\": {why}."))
+}
+
+/// Adds an entry, checked as the scanner checks it. Returns whether it was new.
+pub fn add(vault: &Path, kind: Kind, entry: &str) -> Result<bool> {
+    let entry = entry.trim();
+    if let Some(why) = problem(kind, entry) {
+        bail!("{why}");
     }
     let entry = if kind == Kind::Stopword {
         entry.to_lowercase()

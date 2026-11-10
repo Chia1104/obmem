@@ -53,6 +53,127 @@ pub struct SyncSettings {
     pub community_plugins: bool,
 }
 
+/// A rule a setting breaks: which setting, and why, as a sentence for the person who typed it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Problem<F> {
+    pub field: F,
+    pub message: String,
+}
+
+impl<F> Problem<F> {
+    fn new(field: F, message: impl Into<String>) -> Self {
+        Problem {
+            field,
+            message: message.into(),
+        }
+    }
+}
+
+/// The settings of [`ProjectSettings`] that have rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectField {
+    Vault,
+    EnvFiles,
+    StaleDays,
+    DuplicateThreshold,
+}
+
+/// The settings of [`GlobalSettings`] that have rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlobalField {
+    Vault,
+}
+
+/// The settings of [`SyncSettings`] that have rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncField {
+    Endpoint,
+    Bucket,
+}
+
+impl ProjectSettings {
+    /// Every rule these settings break, by setting: the rules `Config::load` applies to the
+    /// file. A settings screen shows them at the settings; a save refuses the first.
+    pub fn problems(&self) -> Vec<Problem<ProjectField>> {
+        let mut out = Vec::new();
+        if !is_plain_relative(self.vault.trim()) {
+            out.push(Problem::new(
+                ProjectField::Vault,
+                "The vault must be a relative path inside the project, without `..` or `~`.",
+            ));
+        }
+        if let Some(f) = self
+            .extra_env_files
+            .iter()
+            .find(|f| !is_plain_relative(f.trim()))
+        {
+            out.push(Problem::new(
+                ProjectField::EnvFiles,
+                format!("The env file \"{f}\" must be a relative path inside the project."),
+            ));
+        }
+        if self.stale_days < 1 {
+            out.push(Problem::new(
+                ProjectField::StaleDays,
+                "Stale days must be at least 1.",
+            ));
+        }
+        if !(self.duplicate_threshold > 0.0 && self.duplicate_threshold <= 1.0) {
+            out.push(Problem::new(
+                ProjectField::DuplicateThreshold,
+                "The duplicate threshold must be above 0 and at most 1.",
+            ));
+        }
+        out
+    }
+}
+
+impl GlobalSettings {
+    /// Every rule these settings break, by setting.
+    pub fn problems(&self) -> Vec<Problem<GlobalField>> {
+        let vault = self.vault.trim();
+        if !vault.is_empty() && !expand_tilde(vault).is_absolute() {
+            return vec![Problem::new(
+                GlobalField::Vault,
+                "The personal vault must be an absolute path or start with ~/.",
+            )];
+        }
+        Vec::new()
+    }
+}
+
+impl SyncSettings {
+    /// Every rule these settings break, by setting.
+    pub fn problems(&self) -> Vec<Problem<SyncField>> {
+        let mut out = Vec::new();
+        let endpoint = self.endpoint.trim();
+        if !endpoint.is_empty()
+            && !(endpoint.starts_with("https://") || endpoint.starts_with("http://"))
+        {
+            out.push(Problem::new(
+                SyncField::Endpoint,
+                "The endpoint must be a URL starting with https://.",
+            ));
+        }
+        let bucket = self.bucket.trim();
+        if bucket.contains('/') || bucket.contains(char::is_whitespace) {
+            out.push(Problem::new(
+                SyncField::Bucket,
+                "The bucket is a name, without slashes or spaces.",
+            ));
+        }
+        out
+    }
+}
+
+/// Refuses settings that break a rule, with the first one's reason.
+fn refuse<F>(problems: Vec<Problem<F>>) -> Result<()> {
+    match problems.into_iter().next() {
+        Some(p) => bail!("{}", p.message),
+        None => Ok(()),
+    }
+}
+
 /// The env files obmem always scans for known secrets.
 pub fn default_env_files() -> Vec<String> {
     SecretsConfig::default().env_files
@@ -107,22 +228,11 @@ pub fn read_project(root: &Path) -> Result<ProjectSettings> {
     })
 }
 
-/// Checks the settings with the rules `Config::load` applies, then writes them.
+/// Checks the settings ([`ProjectSettings::problems`]), then writes them.
 pub fn save_project(root: &Path, s: &ProjectSettings) -> Result<()> {
+    refuse(s.problems())?;
+    // Also that the vault does not leave the project through a symlink.
     project_vault_path(root, s.vault.trim())?;
-    if let Some(f) = s
-        .extra_env_files
-        .iter()
-        .find(|f| !is_plain_relative(f.trim()))
-    {
-        bail!("env file \"{f}\" must be a relative path inside the project");
-    }
-    if s.stale_days < 1 {
-        bail!("stale days must be at least 1");
-    }
-    if !(s.duplicate_threshold > 0.0 && s.duplicate_threshold <= 1.0) {
-        bail!("the duplicate threshold must be above 0 and at most 1");
-    }
     let path = root.join(PROJECT_CONFIG_FILE);
     let mut doc = read_doc(&path)?;
     let name = s.name.trim();
@@ -187,16 +297,8 @@ fn read_sync_at(path: &Path) -> Result<SyncSettings> {
 }
 
 fn save_sync_at(path: &Path, s: &SyncSettings) -> Result<()> {
-    let endpoint = s.endpoint.trim();
-    if !endpoint.is_empty()
-        && !(endpoint.starts_with("https://") || endpoint.starts_with("http://"))
-    {
-        bail!("the endpoint must be a URL starting with https://");
-    }
-    let bucket = s.bucket.trim();
-    if bucket.contains('/') || bucket.contains(char::is_whitespace) {
-        bail!("the bucket is a name, without slashes or spaces");
-    }
+    refuse(s.problems())?;
+    let (endpoint, bucket) = (s.endpoint.trim(), s.bucket.trim());
     let mut doc = read_doc(path)?;
     let table = doc.entry("sync").or_insert(toml_edit::table());
     let Some(table) = table.as_table_like_mut() else {
@@ -243,10 +345,8 @@ fn read_global_at(path: &Path) -> Result<GlobalSettings> {
 }
 
 fn save_global_at(path: &Path, s: &GlobalSettings) -> Result<()> {
+    refuse(s.problems())?;
     let vault = s.vault.trim();
-    if !vault.is_empty() && !expand_tilde(vault).is_absolute() {
-        bail!("the personal vault must be an absolute path or start with ~/");
-    }
     let mut doc = read_doc(path)?;
     assign_or_remove(&mut doc, "vault", (!vault.is_empty()).then_some(vault));
     assign(&mut doc["secrets"]["scan_process_env"], s.scan_process_env);
@@ -440,6 +540,64 @@ mod tests {
             .is_err()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn problems_name_every_setting_that_breaks_a_rule() {
+        let project = ProjectSettings {
+            name: String::new(),
+            vault: "../outside".into(),
+            secret_mode: SecretMode::Block,
+            extra_env_files: vec!["ok/.env".into(), "/etc/passwd".into()],
+            stale_days: 0,
+            duplicate_threshold: 1.5,
+        };
+        let fields: Vec<ProjectField> = project.problems().iter().map(|p| p.field).collect();
+        assert_eq!(
+            fields,
+            [
+                ProjectField::Vault,
+                ProjectField::EnvFiles,
+                ProjectField::StaleDays,
+                ProjectField::DuplicateThreshold
+            ]
+        );
+        assert!(
+            ProjectSettings {
+                vault: "docs/kb".into(),
+                extra_env_files: vec![],
+                stale_days: 1,
+                duplicate_threshold: 1.0,
+                ..project
+            }
+            .problems()
+            .is_empty()
+        );
+
+        let sync = SyncSettings {
+            endpoint: "acct.r2.dev".into(),
+            bucket: "a b".into(),
+            ..SyncSettings::default()
+        };
+        let fields: Vec<SyncField> = sync.problems().iter().map(|p| p.field).collect();
+        assert_eq!(fields, [SyncField::Endpoint, SyncField::Bucket]);
+        // Empty means unset, which every setting allows.
+        assert!(SyncSettings::default().problems().is_empty());
+
+        let global = GlobalSettings {
+            vault: "relative/path".into(),
+            scan_process_env: true,
+            auto_approve: false,
+        };
+        assert_eq!(global.problems()[0].field, GlobalField::Vault);
+        assert!(
+            GlobalSettings {
+                vault: String::new(),
+                ..global
+            }
+            .problems()
+            .is_empty()
+        );
     }
 
     #[test]

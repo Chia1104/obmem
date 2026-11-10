@@ -1,5 +1,5 @@
 use obmem_agents::{hooks, setup};
-use obmem_core::{audit, config, context, guide, import, init, note, projects, status, store};
+use obmem_core::{audit, config, context, import, init, note, projects, status, store};
 use obmem_mcp as server;
 
 use anyhow::Result;
@@ -116,8 +116,6 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<ProjectsCmd>,
     },
-    /// Print the agent usage guide (paste into AGENTS.md / CLAUDE.md for agents without hooks).
-    Guide,
     /// Show resolved paths and counts.
     Status,
     /// Update obmem to the newest release. A binary from the install script is replaced; for
@@ -522,9 +520,6 @@ fn main() -> Result<()> {
                     println!("  next: {m}");
                 }
             }
-        }
-        Cmd::Guide => {
-            println!("## Project memory (obmem)\n\n{}", guide::GUIDE);
         }
         Cmd::Approve { id } => {
             let mut store = store::Store::open(cfg)?;

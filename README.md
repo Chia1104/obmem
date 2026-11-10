@@ -69,15 +69,24 @@ Other ways to get the binary:
 
 ## Agents
 
-`obmem setup <agent>...` writes the agent's project config. It merges into existing files, so running it again is safe. The hooks do nothing in a project without `.obmem.toml`.
+`obmem setup <agent>...` writes the agent's project config and installs obmem's skills. It merges into existing config files, so running it again is safe. The hooks do nothing in a project without `.obmem.toml`.
 
-| Agent | Files `setup` writes |
+| Agent | Config `setup` writes | Skills go to |
+|---|---|---|
+| Claude Code (`claude`) | `.mcp.json`, `.claude/settings.json` | `.claude/skills/` |
+| Codex (`codex`) | `.codex/config.toml`, `.codex/hooks.json` | `.agents/skills/` |
+| Cursor (`cursor`) | `.cursor/mcp.json`, `.cursor/hooks.json` | `.agents/skills/` |
+| GitHub Copilot CLI (`copilot`) | `.github/hooks/obmem.json`; add the MCP server to `~/.copilot/mcp-config.json` yourself | `.agents/skills/` |
+| Amp (`amp`) | `.amp/settings.json`, `.amp/plugins/obmem.ts`; approve the MCP server with `amp mcp approve obmem` | `.agents/skills/` |
+
+The skills tell the agent how to use the memory, and it loads one when it needs it:
+
+| Skill | For |
 |---|---|
-| Claude Code (`claude`) | `.mcp.json`, `.claude/settings.json` |
-| Codex (`codex`) | `.codex/config.toml`, `.codex/hooks.json` |
-| Cursor (`cursor`) | `.cursor/mcp.json`, `.cursor/hooks.json`, `AGENTS.md` |
-| GitHub Copilot CLI (`copilot`) | `.github/hooks/obmem.json`, `AGENTS.md`; add the MCP server to `~/.copilot/mcp-config.json` yourself |
-| Amp (`amp`) | `.amp/settings.json`, `.amp/plugins/obmem.ts`, `AGENTS.md`; approve the MCP server with `amp mcp approve obmem` |
+| `obmem` | searching memory, and what to record as a note |
+| `obmem-refresh` | bringing notes back in line with the code after it changed |
+
+The skill files are obmem's. `setup` rewrites them when a new version of obmem brings a new text, so put a project's own guidance in a skill of its own. Commit them with the rest of the config.
 
 Once set up:
 - At session start, the agent gets the vault index, where the last session left off, the feedback and preferences you approved, open findings, and unreviewed drafts.

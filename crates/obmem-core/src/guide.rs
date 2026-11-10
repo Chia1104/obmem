@@ -1,24 +1,17 @@
-//! How agents should use the memory. One text, three channels: the MCP server instructions
-//! (every MCP client sees them), the SessionStart context (Claude Code), and `obmem guide`
-//! (paste into AGENTS.md / CLAUDE.md for other agents).
+//! What every agent session is told about the memory. This text is always in context, through
+//! two channels: the MCP server instructions (every MCP client sees them) and the session-start
+//! context (the agents with a hook). So it holds only what every task needs: what obmem is, the
+//! call that opens a task and the call that closes it. Everything else is in the skills that
+//! `obmem setup` installs (`crates/obmem-agents/skills/`), which an agent loads when it needs them.
 
 pub const GUIDE: &str = "\
 obmem is long-term memory for this project (repo vault) and this user (personal vault), stored as \
 Obsidian notes that humans review.
 
-Before a non-trivial task: memory_context with the task description. For precise lookups: memory_search when the task touches something a past session may have decided, learned \
-or been told (Obsidian search syntax: words are ANDed, use OR for alternatives, \"phrases\", tag:, path:). \
-Prefer what memory says over re-deriving it, but treat `draft` notes as unreviewed.
+Before a non-trivial task: memory_context with the task description. Prefer what memory says over \
+re-deriving it, but treat `draft` notes as unreviewed.
+Before finishing: memory_log, 1-3 lines (what was done, what is left, what the next session must know).
 
-Record with memory_write, one idea per note, linking related notes with [[note-id]]:
-- decision: what was chosen and why, alternatives considered, consequences
-- fact / architecture: non-obvious behaviour of the system, with code_refs (path#symbol)
-- procedure: steps that took effort to figure out
-- feedback / preference: how the user wants agents to work (goes to the personal vault)
-Do not record what the code or git history already says, one-off task details, or secrets.
-
-Before finishing: memory_log 1-3 lines (what was done, what is left, what the next session must know).
-After reading the code a note describes and finding it still true: memory_verify.
-Human-authored notes are read-only: write a finding instead. Findings: memory_resolve (fixed/accepted).
-If a tool says \"no obmem project here\", repeat the call with `project` set to the absolute path of your \
-workspace root; the server remembers it for the rest of the session.";
+Skills hold the rest. `obmem`: load it to search memory, or to record a decision, a non-obvious \
+fact, a procedure or the user's feedback. `obmem-refresh`: load it when a note disagrees with the \
+code, or memory_audit reports problems.";

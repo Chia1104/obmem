@@ -247,12 +247,12 @@ pub fn setup_snippets(bin: &str, cfg: &Config) -> String {
 1) Connect your agents (MCP server + lifecycle hooks, merged into the project's config files):
      {bin} setup claude            # .mcp.json, .claude/settings.json
      {bin} setup codex             # .codex/config.toml, .codex/hooks.json (trust the project in Codex)
-     {bin} setup cursor            # .cursor/mcp.json, .cursor/hooks.json, AGENTS.md
-     {bin} setup copilot           # .github/hooks/obmem.json, AGENTS.md (+ MCP in ~/.copilot)
-     {bin} setup amp               # .amp/settings.json, .amp/plugins/obmem.ts, AGENTS.md
+     {bin} setup cursor            # .cursor/mcp.json, .cursor/hooks.json
+     {bin} setup copilot           # .github/hooks/obmem.json (+ MCP in ~/.copilot)
+     {bin} setup amp               # .amp/settings.json, .amp/plugins/obmem.ts
+   Each one also installs obmem's skills: .claude/skills for Claude Code, .agents/skills for the others.
    Any other MCP client: {{ "mcpServers": {{ "obmem": {{ "command": "obmem", "args": ["serve"] }} }} }}
-2) Agents without hooks still get the usage guide as MCP server instructions; for agents
-   that ignore those:  {bin} guide >> AGENTS.md
+2) Agents without hooks still get the short usage guide as MCP server instructions.
 
 3) On a machine with Obsidian: obmem uses Obsidian itself (1.12+) for search, backlinks and
    link checks.

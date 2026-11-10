@@ -60,6 +60,9 @@ obmem keeps no index of its own. Search, backlinks, unresolved links and orphans
 The project vault and `.obmem.toml` may come from an untrusted clone. Input the repo controls can only make obmem stricter:
 - Vault rule files add rules but cannot override built-in rule ids. Allowlist files cannot add rules.
 - Project-vault allowlists contribute exact fingerprints only. `regexes` and `stopwords` count only in the personal global vault, and even there, stopwords shorter than 4 characters and regexes that match almost anything are ignored.
+- A fingerprint allows one exact secret. A private key's fingerprint is taken over the key through its END line (`secrets::secret_end`), never over the BEGIN line alone: that line is the same for every key, so its fingerprint is public.
+- A value from an env file is only compared as text. The scanner never looks one up on disk: on Windows, looking up `//host/share` sends the user's credentials to that host. Only values from the process environment are checked for being an existing path.
+- The session-start context lists only `active` feedback and preferences as the user's guidance. A draft one is listed with the unreviewed drafts.
 - `[review] auto_approve` is on only when the user's config turns it on. The repo's `.obmem.toml` can turn it off for that project, never on.
 - In `.obmem.toml`, `vault` must be a relative path inside the repo. `secrets.env_files` entries are added to the defaults, never replace them, and must be relative paths inside the repo; symlinks that leave the repo are skipped. `scan_process_env = false` from the repo is ignored.
 - Files are written to an exclusively created, randomly named temp file, then renamed into place. The real (symlink-resolved) folder must stay inside its vault, and obmem never writes through a symlinked file. `init` does not write through any symlink, dangling ones included. A global-vault `name` is reduced to one path component.

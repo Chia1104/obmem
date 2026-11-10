@@ -73,7 +73,8 @@ pub struct SecretHit {
     pub line: usize,
     /// Masked preview, never the full value.
     pub preview: String,
-    /// Stable id to put in the allowlist if this is a false positive.
+    /// Stable id to put in the allowlist if this is a false positive. It is taken over the
+    /// whole secret (see [`secret_end`]), so it allows that one secret and no other.
     pub fingerprint: String,
     #[serde(skip)]
     pub start: usize,
@@ -379,7 +380,7 @@ impl Scanner {
         desc: &str,
     ) {
         let value = &text[start..end];
-        let fingerprint = fingerprint(value);
+        let fingerprint = fingerprint(&text[start..secret_end(text, start, end)]);
         if self.allow_fingerprints.contains(&fingerprint) {
             return;
         }
@@ -402,11 +403,11 @@ impl Scanner {
     }
 
     /// Replace every hit with `[REDACTED:<rule>]`. A private key is redacted through its END
-    /// line (see [`redaction_end`]). Spans that overlap become one, named after the first hit.
+    /// line (see [`secret_end`]). Spans that overlap become one, named after the first hit.
     pub fn redact(text: &str, hits: &[SecretHit]) -> String {
         let mut spans: Vec<(usize, usize, &str)> = hits
             .iter()
-            .map(|h| (h.start, redaction_end(text, h), h.rule.as_str()))
+            .map(|h| (h.start, secret_end(text, h.start, h.end), h.rule.as_str()))
             .collect();
         spans.sort_by_key(|&(start, end, _)| (start, std::cmp::Reverse(end)));
         let mut out = String::with_capacity(text.len());
@@ -431,16 +432,21 @@ static KEY_BEGIN: LazyLock<Regex> = LazyLock::new(|| {
 static KEY_END: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"-----END[ A-Z0-9_-]{0,100}PRIVATE KEY(?: BLOCK)?-----").unwrap());
 
-/// Where the redaction of a hit ends. A hit that holds a private key's BEGIN line (the
-/// `private-key` rule, or a known value that is that line) is followed by the key material,
-/// laid out however the text lays it out. So the redaction runs through the next END line, or
-/// to the end of the text when there is none: whatever the layout, no part of the key is kept.
-fn redaction_end(text: &str, h: &SecretHit) -> usize {
-    match KEY_BEGIN.find_iter(&text[h.start..h.end]).last() {
+/// Where the secret that the hit `start..end` found ends. For most hits that is `end`. A hit
+/// that holds a private key's BEGIN line (the `private-key` rule, or a known value that is that
+/// line) is followed by the key material, laid out however the text lays it out. So the secret
+/// runs through the next END line, or to the end of the text when there is none.
+///
+/// Redaction removes this whole span: whatever the layout, no part of the key is kept. The
+/// fingerprint is taken over it too. A BEGIN line is the same for every key of its type, so a
+/// fingerprint of that line alone would be public, and one allowlist entry in a cloned project
+/// vault would hide every private key.
+fn secret_end(text: &str, start: usize, end: usize) -> usize {
+    match KEY_BEGIN.find_iter(&text[start..end]).last() {
         Some(b) => KEY_END
-            .find_at(text, h.start + b.end())
-            .map_or(text.len(), |e| e.end().max(h.end)),
-        None => h.end,
+            .find_at(text, start + b.end())
+            .map_or(text.len(), |e| e.end().max(end)),
+        None => end,
     }
 }
 
@@ -522,18 +528,34 @@ fn is_sensitive_name(name: &str) -> bool {
     !NOT_SENSITIVE.contains(&u.as_str()) && SENSITIVE_NAME.iter().any(|s| u.contains(s))
 }
 
-/// A path to a key file is not the secret (the file's content is), and paths are everywhere in notes.
+/// A path to a key file is not the secret (the file's content is), and paths are everywhere in
+/// notes. A value that starts with `./`, `../` or `~/` is a path by its shape: no token format
+/// starts that way.
+fn is_relative_path(v: &str) -> bool {
+    ["./", "../", "~/", ".\\", "..\\", "~\\"]
+        .iter()
+        .any(|prefix| v.starts_with(prefix))
+}
+
+/// An absolute path that exists. Shape cannot tell `/etc/ssl/key.pem` from a base64 secret
+/// that starts with `/`, so this asks the filesystem. Only for values from the process
+/// environment, which the user controls. Never for a value from an env file: a cloned repo
+/// writes those, and on Windows merely looking up `//host/share` sends the user's credentials
+/// to that host.
 fn is_existing_path(v: &str) -> bool {
-    v.starts_with(['/', '~', '.']) && std::path::Path::new(v).exists()
+    v.starts_with('/') && std::path::Path::new(v).exists()
 }
 
 fn usable_value(v: &str) -> bool {
-    v.len() >= 8 && !is_placeholder(v) && !matches!(v, "true" | "false") && !is_existing_path(v)
+    v.len() >= 8 && !is_placeholder(v) && !matches!(v, "true" | "false") && !is_relative_path(v)
 }
 
 /// Collect real secret values. Every value from `.env*` files counts (they exist to hold
 /// config, and a non-secret false positive there is harmless); from the process environment
 /// only variables whose *name* looks sensitive, to avoid flagging PATH and friends.
+///
+/// Values from env files are only ever compared as text. An absolute path there counts as a
+/// value like any other, because the one way to know it is a path is to look it up.
 fn collect_known_values(env_files: &[std::path::PathBuf], scan_process_env: bool) -> Vec<String> {
     let mut vals: HashSet<String> = HashSet::new();
     for f in env_files {
@@ -556,7 +578,7 @@ fn collect_known_values(env_files: &[std::path::PathBuf], scan_process_env: bool
     }
     if scan_process_env {
         for (k, v) in std::env::vars() {
-            if is_sensitive_name(&k) && usable_value(&v) {
+            if is_sensitive_name(&k) && usable_value(&v) && !is_existing_path(&v) {
                 vals.insert(v);
             }
         }
@@ -672,7 +694,7 @@ mod tests {
             let t = format!("before the key\n{key}\nafter the key");
             let hits = s.scan(&t);
             assert_eq!(hits.len(), 1, "{t}");
-            // Allowlists and fingerprints still see only the BEGIN line.
+            // The hit itself is the BEGIN line: that is what stopwords and allowlist regexes see.
             assert_eq!(&t[hits[0].start..hits[0].end], KEY_HEAD);
             let red = Scanner::redact(&t, &hits);
             assert_no_key(&red);
@@ -733,6 +755,45 @@ mod tests {
     }
 
     #[test]
+    fn a_private_key_fingerprint_allows_one_key_never_every_key() {
+        let [b1, b2] = KEY_BODY;
+        let key = |body: &str| format!("{KEY_HEAD}\n{body}\n{KEY_TAIL}");
+        let hits = scanner_with_env("").scan(&format!("a\n{}\nz", key(b1)));
+        assert_eq!(hits[0].fingerprint, fingerprint(&key(b1)));
+
+        // A cloned project vault allowlists the BEGIN line, whose fingerprint anyone can compute,
+        // and one real key.
+        let dir = std::env::temp_dir().join(format!("obmem-test-pem-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let allow = dir.join("project-allow.toml");
+        std::fs::write(
+            &allow,
+            format!(
+                "[allowlist]\nfingerprints = ['{}', '{}']\n",
+                fingerprint(KEY_HEAD),
+                fingerprint(&key(b1))
+            ),
+        )
+        .unwrap();
+        let sc = Scanner::new(ScannerSources {
+            extra_rule_files: vec![],
+            allowlist_files: vec![&allow],
+            trusted_files: vec![],
+            env_files: vec![],
+            scan_process_env: false,
+        })
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let rules =
+            |t: String| -> Vec<String> { sc.scan(&t).into_iter().map(|h| h.rule).collect() };
+        assert!(rules(format!("a\n{}\nz", key(b1))).is_empty());
+        assert_eq!(rules(format!("a\n{}\nz", key(b2))), ["private-key"]);
+        // A key with no END line is still a key.
+        assert_eq!(rules(format!("a\n{KEY_HEAD}\n{b1}")), ["private-key"]);
+    }
+
+    #[test]
     fn vault_files_cannot_weaken_the_scanner() {
         let dir = std::env::temp_dir().join(format!("obmem-test-harden-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -778,8 +839,40 @@ mod tests {
                 && !is_sensitive_name("SSH_AUTH_SOCK")
         );
         assert!(is_sensitive_name("DB_PWD") && is_sensitive_name("GITHUB_TOKEN"));
-        let here = std::env::temp_dir();
-        assert!(!usable_value(&here.to_string_lossy()));
+        for path in [
+            "./config/dev.json",
+            "../shared/key.pem",
+            "~/.ssh/id_ed25519",
+            ".\\config\\dev.json",
+        ] {
+            assert!(!usable_value(path), "{path}");
+        }
         assert!(usable_value("/not/an/existing/path/but/a/secret-ish/value"));
+        assert!(usable_value(".dotted-but-secret-ish-value"));
+    }
+
+    #[test]
+    fn env_file_values_are_compared_as_text_and_never_looked_up() {
+        let dir = std::env::temp_dir().join(format!("obmem-test-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let existing = dir.to_string_lossy().into_owned();
+        // A cloned repo's .env. Leaving out the path that exists would take a lookup, and the
+        // same lookup of the UNC path would send Windows credentials to that host. So both are
+        // values like any other.
+        let unc = "//evil-host.invalid/share/x";
+        let s = scanner_with_env(&format!(
+            "A={existing}\nB={unc}\nC=./relative/path\nD=~/.ssh/id_ed25519\n"
+        ));
+        assert_eq!(s.known_value_count(), 2);
+        let hits = s.scan(&format!("see {existing}, {unc} and ./relative/path"));
+        assert_eq!(hits.len(), 2, "{hits:?}");
+
+        // The lookup stays for the process environment, which the user controls.
+        assert!(!cfg!(unix) || is_existing_path(&existing));
+        assert!(!is_existing_path(
+            "/not/an/existing/path/but/a/secret-ish/value"
+        ));
+        assert!(!is_existing_path("./relative/path") && !is_existing_path("~/.ssh"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

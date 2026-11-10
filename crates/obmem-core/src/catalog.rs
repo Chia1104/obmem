@@ -157,15 +157,17 @@ impl Catalog {
             .count()
     }
 
-    /// Feedback and preference notes from the global vault (always relevant): (id, title, status).
-    pub fn global_guidance(&self) -> Result<Vec<(String, String, String)>> {
+    /// The user's guidance for every project: `active` feedback and preference notes from the
+    /// global vault, as (id, title). A draft is not guidance yet: an agent wrote it and nobody
+    /// approved it.
+    pub fn global_guidance(&self) -> Result<Vec<(String, String)>> {
         let mut v = Vec::new();
         for ty in ["feedback", "preference"] {
             v.extend(
                 self.notes
                     .iter()
-                    .filter(|m| m.note_type == ty && m.scope == "global")
-                    .map(|m| (m.id.clone(), m.title.clone(), m.status.clone())),
+                    .filter(|m| m.note_type == ty && m.scope == "global" && m.status == "active")
+                    .map(|m| (m.id.clone(), m.title.clone())),
             );
         }
         Ok(v)

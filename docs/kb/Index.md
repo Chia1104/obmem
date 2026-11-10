@@ -21,6 +21,8 @@ author: human
 - [[remote-machines-sync-with-credentials-from-the-environment-and-an-ephemeral-sett]]: sync on servers and in cloud sandboxes.
 - [[obmem-update-replaces-only-standalone-installs-by-running-the-release-s-install-]]: `obmem update` and the install channels.
 - [[npm-packages-are-published-under-the-chia1104-scope]]: why the npm name has a scope.
+- [[the-secret-scanner-never-looks-up-a-value-from-an-env-file-on-disk]]: how the scanner tells a path from a secret.
+- [[a-private-key-s-allowlist-fingerprint-covers-the-whole-key-not-its-begin-line]]: what an allowlist fingerprint of a private key allows.
 
 ## Conventions & gotchas
 - [[obsidian-cli-behaviour]]: read before changing how obmem calls the Obsidian CLI.

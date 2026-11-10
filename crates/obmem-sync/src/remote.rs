@@ -43,7 +43,10 @@ impl Remote {
             .with_access_key_id(&creds.access_key_id)
             .with_secret_access_key(&creds.secret_access_key);
         if let Some(endpoint) = &cfg.endpoint {
-            b = b.with_endpoint(endpoint);
+            // The settings accept `http://` for a server on the user's own network (MinIO).
+            b = b
+                .with_endpoint(endpoint)
+                .with_allow_http(endpoint.starts_with("http://"));
         }
         let s3 = b.build().context("configuring the S3 client")?;
         Self::with_store(Arc::new(PrefixStore::new(s3, prefix(cfg))))

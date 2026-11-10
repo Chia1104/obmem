@@ -52,6 +52,17 @@ irm https://github.com/Chia1104/obmem/releases/latest/download/install.ps1 | iex
 
 Set `OBMEM_VERSION` (such as `0.1.0`) for another release than the latest, and `OBMEM_INSTALL_DIR` for another folder. The script changes nothing else: when the folder is not on `PATH`, it says what to add.
 
+### Updating
+
+```sh
+obmem update            # update to the newest release
+obmem update --check    # only say whether there is one
+```
+
+`obmem update` replaces a binary that the install script put there, using the new release's install script and its `SHA256SUMS`. A binary that npm or cargo installed is theirs to update, so there it prints the command to run, such as `npm install -g @chia1104/obmem@latest`. obmem never checks for updates on its own.
+
+With more than one install on a machine, the first `obmem` on `PATH` is the one that runs. `obmem status` shows which binary that is and how it was installed.
+
 Other ways to get the binary:
 - Download it from the [releases](https://github.com/Chia1104/obmem/releases): macOS (Apple silicon and Intel), Linux (x64 and arm64, static) and Windows (x64).
 - Build it from a clone: `cargo install --path crates/obmem`.

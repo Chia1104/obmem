@@ -60,7 +60,7 @@ impl Backend {
     /// running or knows the vaults: on a machine with Obsidian, a problem with it is reported,
     /// not hidden behind the other backend.
     pub fn detect() -> Self {
-        if installed(&cli_bin()) {
+        if crate::config::find_program(&cli_bin()).is_some() {
             Backend::App
         } else {
             Backend::Headless
@@ -78,18 +78,6 @@ impl Backend {
 /// The Obsidian CLI command: `OBMEM_OBSIDIAN_BIN`, else `obsidian`.
 fn cli_bin() -> String {
     std::env::var("OBMEM_OBSIDIAN_BIN").unwrap_or_else(|_| "obsidian".into())
-}
-
-/// Whether running `bin` would find a program: a path that is a file, or a name in a `PATH`
-/// folder, with the platform's `.exe` added when it is missing, as `Command` does.
-fn installed(bin: &str) -> bool {
-    let with_suffix = format!("{bin}{}", std::env::consts::EXE_SUFFIX);
-    let is_program = |dir: &Path| dir.join(bin).is_file() || dir.join(&with_suffix).is_file();
-    if Path::new(bin).components().count() > 1 {
-        return is_program(Path::new(""));
-    }
-    std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|d| is_program(&d)))
 }
 
 pub struct Cli {
@@ -461,10 +449,11 @@ mod tests {
 
     #[test]
     fn finds_an_installed_command() {
+        use crate::config::find_program;
         let exe = std::env::current_exe().unwrap();
-        assert!(installed(&exe.to_string_lossy()));
-        assert!(!installed(&exe.with_extension("missing").to_string_lossy()));
-        assert!(!installed("obmem-no-such-command"));
+        assert_eq!(find_program(&exe.to_string_lossy()), Some(exe.clone()));
+        assert!(find_program(&exe.with_extension("missing").to_string_lossy()).is_none());
+        assert!(find_program("obmem-no-such-command").is_none());
     }
 
     #[test]

@@ -1,0 +1,17 @@
+[package]
+name = "obmem-update"
+description = "Finds out how obmem was installed, and updates a standalone install"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+obmem-core.workspace = true
+anyhow.workspace = true
+# The features object_store already builds it with: no second TLS stack.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+semver = "1"
+serde_json.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["rt"] }

@@ -11,6 +11,7 @@ obmem-core = { workspace = true, features = ["clap"] }
 obmem-mcp.workspace = true
 obmem-agents = { workspace = true, features = ["clap"] }
 obmem-sync.workspace = true
+obmem-update.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true

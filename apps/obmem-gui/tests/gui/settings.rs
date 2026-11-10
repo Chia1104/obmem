@@ -147,8 +147,9 @@ fn sync_settings_are_saved_and_ask_to_connect() {
     assert!(!cfg.auto_sync());
 
     // This test bucket is in no keychain: the page asks to connect (unless the keychain itself
-    // cannot be read here, which it then says).
-    app.wait_for_within("id:personal-sync", SLOW).unwrap();
+    // cannot be read here, which it then says). The card is already on screen and takes the
+    // saved settings a moment after the notice, so wait for its old status to go.
+    app.wait_for_gone("text:Off: no bucket yet.", SLOW).unwrap();
     let screen = app.screen();
     assert!(
         screen.shows("This device is not connected") || screen.shows("Could not read the keychain"),

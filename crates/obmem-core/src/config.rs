@@ -60,7 +60,7 @@ pub struct GlobalFile {
 
 /// `[sync]`: where the personal vault is backed up, an S3-compatible bucket (AWS S3, Cloudflare R2,
 /// MinIO). Only the user's config has it. Credentials and the vault key live in the OS keychain,
-/// never in this file.
+/// or in the environment on a machine without one, never in this file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(default)]
 pub struct SyncConfig {
@@ -78,12 +78,20 @@ pub struct SyncConfig {
     pub community_plugins: Option<bool>,
     /// Sync in the background when an agent session starts and stops. Unset: on.
     pub auto: Option<bool>,
+    /// This machine does not outlive an agent session (a cloud sandbox). Agent hooks then wait
+    /// for the sync instead of leaving it in the background, the first sync creates the vault
+    /// folder, and the machine never prunes. Unset: off.
+    pub ephemeral: Option<bool>,
 }
 
 impl SyncConfig {
     /// A bucket is configured and automatic sync is not turned off.
     pub fn auto_sync(&self) -> bool {
         self.bucket.is_some() && self.auto.unwrap_or(true)
+    }
+
+    pub fn is_ephemeral(&self) -> bool {
+        self.ephemeral.unwrap_or(false)
     }
 }
 

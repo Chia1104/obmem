@@ -1,15 +1,15 @@
-//! A sync as the front ends run it: the configured bucket, the keychain's credentials, the
+//! A sync as the front ends run it: the configured bucket, this machine's credentials, the
 //! personal vault, and the outcome kept for the status line (`obmem status`, the desktop app).
 
-use crate::sync::{Queued, SyncOptions, SyncReport, state_path, sync};
+use crate::sync::{MIN_INTERVAL, Queued, SyncOptions, SyncReport, state_path, sync};
 use crate::{Remote, keychain};
 use anyhow::Result;
 use obmem_core::config::{self, SyncConfig};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// How a sync started by an agent hook waits for one already running.
-pub const BACKGROUND_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
+/// How long a sync started by an agent hook waits for one already running.
+pub const HOOK_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// The last sync's outcome on this machine.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,7 +22,8 @@ pub struct Status {
 }
 
 /// Sync the personal vault now. `Ok(None)`: another sync is already queued and will take these
-/// changes too.
+/// changes too. A sync that waits (`wait` above zero) keeps `MIN_INTERVAL` from the last one,
+/// except on an ephemeral machine, where a hook waits for it to finish.
 pub fn run(
     cfg: &SyncConfig,
     allow_mass_delete: bool,
@@ -33,15 +34,29 @@ pub fn run(
     let result = (|| {
         let (creds, key) = keychain::load(cfg)?;
         let remote = Remote::s3(cfg, &creds)?;
+        if cfg.is_ephemeral() {
+            create_new_vault(&vault, &state)?;
+        }
         let device = config::device_name(cfg);
         let opts = SyncOptions {
             device: &device,
             community_plugins: cfg.community_plugins.unwrap_or(false),
             allow_mass_delete,
             wait,
+            spacing: if cfg.is_ephemeral() {
+                std::time::Duration::ZERO
+            } else {
+                MIN_INTERVAL
+            },
         };
         let report = sync(&remote, &key, &vault, &state, &opts)?;
-        Ok::<_, anyhow::Error>((report, prune_if_due(&remote, &key, &state)))
+        // An ephemeral machine has no record of its last prune, so it would prune every session.
+        let cleanup = if cfg.is_ephemeral() {
+            String::new()
+        } else {
+            prune_if_due(&remote, &key, &state)
+        };
+        Ok::<_, anyhow::Error>((report, cleanup))
     })();
     match result {
         Err(e) if e.downcast_ref::<Queued>().is_some() => Ok(None),
@@ -64,6 +79,16 @@ pub fn run(
             result.map(|(r, _)| Some(r))
         }
     }
+}
+
+/// On an ephemeral machine the personal vault does not exist until the first sync fills it.
+/// Only a machine that has never synced gets the folder: with a sync state, a missing vault is a
+/// lost one, and a sync into a new, empty folder would delete everything in the bucket.
+fn create_new_vault(vault: &Path, state: &Path) -> Result<()> {
+    if !vault.exists() && !state.exists() {
+        std::fs::create_dir_all(vault)?;
+    }
+    Ok(())
 }
 
 /// How often a device prunes after a sync.
@@ -176,6 +201,22 @@ fn write_status(path: &Path, status: &Status) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_machine_that_never_synced_gets_a_new_vault() {
+        let dir = std::env::temp_dir().join(format!("obmem-run-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (vault, state) = (dir.join("vault"), dir.join("state.json"));
+        create_new_vault(&vault, &state).unwrap();
+        assert!(vault.is_dir());
+        // it has synced before and the vault is gone: left for the sync to refuse
+        std::fs::remove_dir(&vault).unwrap();
+        std::fs::write(&state, "{}").unwrap();
+        create_new_vault(&vault, &state).unwrap();
+        assert!(!vault.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn summaries() {

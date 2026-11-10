@@ -140,6 +140,11 @@ enum SyncCmd {
     /// Save the bucket's access key on this device, and choose the backup passphrase (first
     /// device) or unlock the backup with it (every other device).
     Setup,
+    /// Print this device's backup key, for a machine without a keychain such as a server or a
+    /// cloud sandbox. Set it there as OBMEM_SYNC_VAULT_KEY, next to the bucket's access key in
+    /// OBMEM_SYNC_ACCESS_KEY_ID and OBMEM_SYNC_SECRET_ACCESS_KEY. Whoever has the key and can
+    /// read the bucket can read the whole backup.
+    Key,
     /// List the snapshots in the bucket.
     List,
     /// Remove old snapshots and the content only they needed. Kept: everything from the last 7
@@ -211,6 +216,9 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
     let dir = project
         .map(PathBuf::from)
         .or_else(|| input.project_dir().map(PathBuf::from));
+    // Automatic sync, when it is on; and the same when this machine does not outlive the session.
+    let sync = config::sync_config().ok().filter(|c| c.auto_sync());
+    let ephemeral = sync.as_ref().filter(|c| c.is_ephemeral());
     // The hook's answer, and whether to sync the personal vault after it.
     let out = (|| -> Result<(String, bool)> {
         let cfg = config::Config::load(dir.as_deref())?;
@@ -224,10 +232,15 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
                 if let Err(e) = projects::record(&cfg.project_root) {
                     eprintln!("obmem: could not record the project: {e:#}");
                 }
+                // An ephemeral machine starts without the vault: fetch it before reading the
+                // context from it. Nothing is left to send afterwards.
+                if let Some(sync) = ephemeral {
+                    sync_and_wait(sync);
+                }
                 let mut store = store::Store::open(cfg)?;
                 (
                     hooks::session_start(&mut store, &input, agent, *max_chars, now)?,
-                    true,
+                    ephemeral.is_none(),
                 )
             }
             HookCmd::Stop { .. } => {
@@ -253,8 +266,11 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
             }
         }
     }
-    if sync_after {
-        spawn_background_sync();
+    if sync_after && sync.is_some() {
+        match ephemeral {
+            Some(sync) => sync_and_wait(sync),
+            None => spawn_background_sync(),
+        }
     }
 }
 
@@ -291,7 +307,7 @@ fn main() -> Result<()> {
         // Only the personal vault and the user's config are involved: no project to load.
         if *background {
             if let Ok(cfg) = config::sync_config() {
-                let _ = obmem_sync::run(&cfg, false, obmem_sync::BACKGROUND_WAIT);
+                let _ = obmem_sync::run(&cfg, false, obmem_sync::HOOK_WAIT);
             }
             return Ok(());
         }
@@ -617,6 +633,13 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
                 cfg.bucket.as_deref().unwrap_or_default()
             );
         }
+        SyncCmd::Key => {
+            let key = sync::keychain::vault_key_text(&cfg)?;
+            eprintln!(
+                "This key reads your whole backup. Keep it in a secret store, never in a file in a repository."
+            );
+            println!("{key}");
+        }
         SyncCmd::List => {
             let (creds, key) = sync::keychain::load(&cfg)?;
             let remote = sync::Remote::s3(&cfg, &creds)?;
@@ -711,10 +734,12 @@ fn sync_status_line() -> String {
         Ok(_) => return "not set up (add [sync] to your config, then `obmem sync setup`)".into(),
         Err(e) => return format!("config unreadable: {e:#}"),
     };
-    let auto = if cfg.auto_sync() {
-        ""
-    } else {
+    let auto = if !cfg.auto_sync() {
         " (automatic sync off)"
+    } else if cfg.is_ephemeral() {
+        " (ephemeral machine: agent hooks wait for the sync)"
+    } else {
+        ""
     };
     match obmem_sync::last_status(&cfg) {
         None => format!("not run on this device yet{auto}"),
@@ -723,15 +748,18 @@ fn sync_status_line() -> String {
     }
 }
 
+/// On a machine that does not outlive the session, the hook itself syncs and waits: the machine
+/// could be gone before a background sync ends. A failure never fails the hook: it goes to
+/// stderr and to the sync status.
+fn sync_and_wait(cfg: &config::SyncConfig) {
+    if let Err(e) = obmem_sync::run(cfg, false, obmem_sync::HOOK_WAIT) {
+        eprintln!("obmem: the sync failed: {e:#}");
+    }
+}
+
 /// After a session starts or a turn ends, sync the personal vault in a process of its own, so the
 /// agent never waits on the network. Errors go to the sync status, never to the agent.
 fn spawn_background_sync() {
-    let Ok(cfg) = config::sync_config() else {
-        return;
-    };
-    if !cfg.auto_sync() {
-        return;
-    }
     let Ok(exe) = std::env::current_exe() else {
         return;
     };

@@ -30,8 +30,8 @@ use std::path::{Path, PathBuf};
 /// How often a sync starts over when other devices keep taking the next snapshot number, or
 /// files keep changing under it.
 const ATTEMPTS: usize = 5;
-/// The least time between the starts of two syncs that wait (those agent hooks start).
-const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+/// The least time between the starts of two syncs that agent hooks leave in the background.
+pub(crate) const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct SyncOptions<'a> {
     pub device: &'a str,
@@ -42,6 +42,9 @@ pub struct SyncOptions<'a> {
     /// waiting, at most one sync queues behind the running one; another that comes along
     /// returns [`Queued`], because the queued sync will see its changes too.
     pub wait: std::time::Duration,
+    /// A sync that waits starts no sooner than this after the last sync started, so a burst of
+    /// agent turns makes one sync, not one each. Zero: as soon as the running sync ends.
+    pub spacing: std::time::Duration,
 }
 
 /// The error of a sync that did not run because another one is already queued.
@@ -112,7 +115,7 @@ pub fn sync(
     if !vault.is_dir() {
         bail!("{} is not a folder", vault.display());
     }
-    let _lock = Lock::acquire(state_file, opts.wait)?;
+    let _lock = Lock::acquire(state_file, opts.wait, opts.spacing)?;
     let state = read_state(state_file)?;
     for _ in 0..ATTEMPTS {
         if let Some(report) = attempt(remote, key, vault, state_file, &state, opts)? {
@@ -480,9 +483,13 @@ struct Lock(#[allow(dead_code)] std::fs::File);
 
 impl Lock {
     /// With a zero `wait`, fail at once if a sync is running. Otherwise queue behind it: at most
-    /// one sync waits (a second lock, `.queued`), and it starts no sooner than `MIN_INTERVAL`
-    /// after the last sync started, so a burst of agent turns makes one sync, not one each.
-    fn acquire(state_file: &Path, wait: std::time::Duration) -> Result<Self> {
+    /// one sync waits (a second lock, `.queued`), and it starts no sooner than `spacing` after
+    /// the last sync started.
+    fn acquire(
+        state_file: &Path,
+        wait: std::time::Duration,
+        spacing: std::time::Duration,
+    ) -> Result<Self> {
         let path = state_file.with_extension("lock");
         if wait.is_zero() {
             let lock = Self::try_take(&path)?.ok_or_else(|| {
@@ -497,7 +504,7 @@ impl Lock {
         let deadline = std::time::Instant::now() + wait;
         loop {
             let since_last = Self::last_start(&path).and_then(|t| t.elapsed().ok());
-            if since_last.is_none_or(|e| e >= MIN_INTERVAL)
+            if since_last.is_none_or(|e| e >= spacing)
                 && let Some(lock) = Self::try_take(&path)?
             {
                 lock.mark_start();
@@ -505,7 +512,7 @@ impl Lock {
             }
             if std::time::Instant::now() >= deadline {
                 bail!(
-                    "gave up after {}s: another obmem sync is running or started under a minute ago (lock {})",
+                    "gave up after {}s: another obmem sync is running or started too recently (lock {})",
                     wait.as_secs(),
                     path.display()
                 );
@@ -579,6 +586,7 @@ pub(crate) mod tests {
                 community_plugins: self.plugins,
                 allow_mass_delete: false,
                 wait: Default::default(),
+                spacing: Default::default(),
             };
             sync(self.remote, &self.key, &self.vault, &self.state, &opts)
         }
@@ -820,6 +828,7 @@ pub(crate) mod tests {
             community_plugins: false,
             allow_mass_delete: true,
             wait: Default::default(),
+            spacing: Default::default(),
         };
         let r = sync(&remote, &mac.key, &mac.vault, &mac.state, &opts).unwrap();
         assert_eq!(r.deleted_remote.len(), 20);
@@ -840,6 +849,7 @@ pub(crate) mod tests {
             community_plugins: false,
             allow_mass_delete: false,
             wait: Default::default(),
+            spacing: Default::default(),
         };
         let r = sync(&fresh, &key, &mac.vault, &mac.state, &opts).unwrap();
         assert_eq!(r.uploaded, ["Global/a.md"]);
@@ -850,7 +860,7 @@ pub(crate) mod tests {
     fn a_second_sync_at_the_same_time_is_refused() {
         let remote = remote::in_memory();
         let mac = device(&remote, "mac");
-        let held = Lock::acquire(&mac.state, Default::default()).unwrap();
+        let held = Lock::acquire(&mac.state, Default::default(), Default::default()).unwrap();
         let err = mac.sync().unwrap_err();
         assert!(
             err.to_string().contains("another obmem sync is running"),
@@ -863,6 +873,7 @@ pub(crate) mod tests {
             community_plugins: false,
             allow_mass_delete: false,
             wait,
+            spacing: MIN_INTERVAL,
         };
         let (remote2, key, vault, state) =
             (&remote, &mac.key, mac.vault.clone(), mac.state.clone());
@@ -910,9 +921,16 @@ pub(crate) mod tests {
             community_plugins: false,
             allow_mass_delete: false,
             wait: std::time::Duration::from_secs(1),
+            spacing: MIN_INTERVAL,
         };
         let err = sync(&remote, &mac.key, &mac.vault, &mac.state, &opts).unwrap_err();
         assert!(err.to_string().contains("gave up"), "{err}");
+        // Without spacing, a waiting sync runs as soon as no other does.
+        let at_once = SyncOptions {
+            spacing: std::time::Duration::ZERO,
+            ..opts
+        };
+        assert!(sync(&remote, &mac.key, &mac.vault, &mac.state, &at_once).is_ok());
     }
 
     #[test]

@@ -3733,7 +3733,7 @@ dependencies = [
 
 [[package]]
 name = "obmem"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3752,7 +3752,7 @@ dependencies = [
 
 [[package]]
 name = "obmem-agents"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3764,7 +3764,7 @@ dependencies = [
 
 [[package]]
 name = "obmem-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3788,7 +3788,7 @@ dependencies = [
 
 [[package]]
 name = "obmem-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3806,7 +3806,7 @@ dependencies = [
 
 [[package]]
 name = "obmem-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3819,7 +3819,7 @@ dependencies = [
 
 [[package]]
 name = "obmem-sync"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "age",
  "anyhow",
@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "obmem-update"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "obmem-core",

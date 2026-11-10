@@ -20,9 +20,16 @@ Under `[sync] prefix` (default `obmem`):
 
 ## Running a sync (`run.rs`)
 
-- `run` is what front ends call. It loads the credentials from the keychain, syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. `connect` stores a device's credentials and unlocks the key, or creates it.
-- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `BACKGROUND_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records. At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
+- `run` is what front ends call. It loads the credentials (`keychain::load`), syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. `connect` stores a device's credentials and unlocks the key, or creates it.
+- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `HOOK_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records (`SyncOptions::spacing`). At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
 - `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
+
+## Ephemeral machines (`[sync] ephemeral = true`)
+
+A cloud sandbox starts without the vault and may be gone as soon as the session ends. With `ephemeral`, `run` changes in three ways, and the CLI's hooks call it themselves and wait instead of starting a background sync:
+- A machine that has never synced (no state file) gets the missing vault folder, so the first sync downloads the vault. With a state file, a missing vault stays an error: syncing into a new, empty folder would delete everything in the bucket.
+- A waiting sync has no `MIN_INTERVAL` (`spacing` is zero): the hook is waiting for it.
+- It never prunes. Without a `.pruned` marker that lasts, it would prune in every session.
 
 ## Prune (`prune.rs`)
 
@@ -39,7 +46,8 @@ Under `[sync] prefix` (default `obmem`):
 - Downloaded content is checked against its HMAC and written through `obmem_core::store::atomic_write_bytes`. Restore writes only into a missing or empty folder.
 - `files::scan` never follows symlinks and leaves out dot-entries, except the settings part of `.obsidian/` (top-level `*.json` other than `workspace*`, `themes/`, `snippets/`; `plugins/` and `community-plugins.json` only with `[sync] community_plugins = true`).
 - Secrets live in the OS keychain (`keychain.rs`, the `keyring` crate): one entry per `<endpoint>/<bucket>/<prefix>`, holding the access key pair and the unlocked vault key. `[sync]` in the user's config holds only locations. It is read from the user's config only, never from a repo's `.obmem.toml`.
+- A machine without a keychain takes the same three secrets from the environment (`keychain::ENV_VARS`). When any of the three is set, all must be, and the keychain is not asked. An error about them names the variable and never prints its value.
 
 ## Tests
 
-Tests run against `object_store::memory::InMemory` (`remote::in_memory`), with no network and no keychain. `sync::tests::device` gives each simulated machine its own vault and state file on one bucket. The S3 client and the keychain are thin wrappers; check them by hand with `obmem sync setup` / `obmem sync` / `obmem sync restore` against a real bucket.
+Tests run against `object_store::memory::InMemory` (`remote::in_memory`), with no network and no keychain. For an end-to-end run without a real bucket, start a local S3 server (`uvx --from 'moto[server]' moto_server -p 5055`), point `[sync] endpoint` at `http://127.0.0.1:5055` with `OBMEM_CONFIG`, and pass the credentials in the environment. `sync::tests::device` gives each simulated machine its own vault and state file on one bucket. The S3 client and the keychain are thin wrappers; check them by hand with `obmem sync setup` / `obmem sync` / `obmem sync restore` against a real bucket.

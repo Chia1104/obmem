@@ -133,6 +133,7 @@ bucket = "my-obmem-vault"
 # device = "work-mac"    # this machine's name; `setup` sets it to the host name plus 4 random hex digits
 # community_plugins = false
 # auto = true            # sync in the background as agent sessions start and turns end
+# ephemeral = false      # true on a machine thrown away after a session (see below)
 ```
 
 ```sh
@@ -148,6 +149,37 @@ Once a device is set up, obmem syncs on its own: when an agent session starts in
 `setup` keeps the access key and the unlocked vault key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the bucket cannot be read.**
 
 On a new machine, run `obmem sync setup` and then `obmem sync`. What the machine already has is merged in, not replaced.
+
+### On a server or in a cloud sandbox
+
+A machine without a keychain takes its credentials from the environment instead of `obmem sync setup`:
+
+| Variable | Value |
+|---|---|
+| `OBMEM_SYNC_ACCESS_KEY_ID` | the bucket's access key id |
+| `OBMEM_SYNC_SECRET_ACCESS_KEY` | the bucket's secret access key |
+| `OBMEM_SYNC_VAULT_KEY` | the backup key. `obmem sync key` prints it on a machine that is already set up |
+
+Set all three: when any of them is set, obmem does not ask the keychain. Keep them in the platform's secret store. The backup key reads your whole personal vault, and what an agent writes on that machine syncs to all your machines.
+
+For a machine that is thrown away after a session, such as a cloud agent's sandbox, write a config with `ephemeral = true` in its setup script:
+
+```toml
+# ~/.config/obmem/config.toml
+vault = "~/AgentMemory"
+
+[sync]
+endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+bucket = "my-obmem-vault"
+ephemeral = true
+```
+
+On an ephemeral machine:
+- The session-start hook syncs before it reads the memory context, and waits for it. The first sync creates the vault folder and downloads the vault.
+- The hook that ends a turn waits for its sync too, because the machine may be gone before a background sync finishes.
+- The machine never removes old snapshots.
+
+Leave `device` unset on sandboxes that can run at the same time. Each one then writes its own session log. With one shared name, two sandboxes write the same log, and the sync turns one of them into a conflict copy.
 
 How a sync decides:
 - A file changed on one side only: that version wins. Deletions travel the same way.

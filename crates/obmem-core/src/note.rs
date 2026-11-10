@@ -179,6 +179,40 @@ pub fn wikilinks(text: &str) -> Vec<String> {
     out
 }
 
+static INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`[^`\n]*`").unwrap());
+
+/// Drop fenced and inline code so `[[examples]]` in code are not treated as links.
+pub fn strip_code(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut fence: Option<&str> = None;
+    for line in body.lines() {
+        let t = line.trim_start();
+        if let Some(f) = fence {
+            if t.starts_with(f) {
+                fence = None;
+            }
+            continue;
+        }
+        if t.starts_with("```") {
+            fence = Some("```");
+            continue;
+        }
+        if t.starts_with("~~~") {
+            fence = Some("~~~");
+            continue;
+        }
+        out.push_str(&INLINE_CODE.replace_all(line, ""));
+        out.push('\n');
+    }
+    out
+}
+
+/// The link targets Obsidian counts in a note: `[[wikilinks]]` in its frontmatter block
+/// (`fm_text`) and in its body outside code.
+pub fn links_in(fm_text: &str, body: &str) -> Vec<String> {
+    wikilinks(&format!("{fm_text}{}", strip_code(body)))
+}
+
 /// Filename-safe slug that keeps CJK and other letters (Obsidian links by filename).
 pub fn slugify(title: &str) -> String {
     let mut out = String::new();

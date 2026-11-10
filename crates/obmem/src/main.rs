@@ -534,8 +534,21 @@ fn main() -> Result<()> {
             if !st.initialized {
                 println!("not initialized: run `obmem init` here");
             }
+            let headless = st.backend == obmem_core::obsidian::Backend::Headless;
+            println!(
+                "search:         {}",
+                if headless {
+                    "built in (no Obsidian CLI on PATH)"
+                } else {
+                    "Obsidian CLI"
+                }
+            );
             for (name, v) in [("project", &st.project_vault), ("global", &st.global_vault)] {
                 println!("{:<16}{}", format!("{name} vault:"), v.path.display());
+                // Without Obsidian nothing needs the vault to be registered.
+                if headless {
+                    continue;
+                }
                 let state = match &v.obsidian {
                     status::Registration::Registered { id } => format!("registered (id {id})"),
                     status::Registration::NotRegistered => {

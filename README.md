@@ -4,7 +4,7 @@
 
 Long-term memory for coding agents, stored as Obsidian notes that people review.
 
-obmem is one Rust binary that works as an MCP server, a set of agent hooks and a CLI. Agents read and write plain Markdown notes, and people browse and review them in Obsidian. Search, backlinks and link checks come from Obsidian itself through its [official CLI](https://obsidian.md/help/cli), so agents see the same results as the app.
+obmem is one Rust binary that works as an MCP server, a set of agent hooks and a CLI. Agents read and write plain Markdown notes, and people browse and review them in Obsidian. Search, backlinks and link checks come from Obsidian itself through its [official CLI](https://obsidian.md/help/cli), so agents see the same results as the app. On a machine without Obsidian, such as a server or a cloud sandbox, obmem reads the vault files itself.
 
 ## Two vaults
 
@@ -18,7 +18,15 @@ obmem is one Rust binary that works as an MCP server, a set of agent hooks and a
 - Obsidian 1.12 or later, with Settings → General → **Command line interface** turned on.
 - Open each vault folder once with "Open folder as vault". Obsidian cannot register a vault from the CLI. `obmem status` shows which vaults are registered.
 
-If Obsidian is closed, obmem starts it in the background. If the CLI or a vault is unavailable, obmem skips search, backlinks and link checks for that vault, says so in its output, and everything else keeps working.
+If Obsidian is closed, obmem starts it in the background. If the app or a vault is unavailable, obmem skips search, backlinks and link checks for that vault, says so in its output, and everything else keeps working.
+
+### Without Obsidian
+
+When no `obsidian` command is on `PATH`, obmem needs nothing from the list above. It reads the vault files itself for search, backlinks and link checks, and `obmem status` shows `search: built in`. The choice is made when obmem starts: on a machine that has the CLI, obmem never falls back to its own search.
+
+The built-in search differs from Obsidian in these ways:
+- It supports words, `"phrases"`, `OR`, `-exclusion`, `( )`, `file:`, `path:`, `content:`, `tag:`, `line:( )`, `[property]` and `[property:value]`. It refuses regular expressions and `block:`, `section:`, `task:`, `match-case:` and `ignore-case:` with an error.
+- Only `[[wikilinks]]` count as links. A note linked only with a Markdown link (`[text](note.md)`) is reported as an orphan.
 
 ## Install
 

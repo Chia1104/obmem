@@ -1,5 +1,6 @@
 //! The memory store: the write policy (dedupe, human-ownership, secrets) on top of the
-//! vault files. Search and backlinks come from Obsidian itself (`obsidian.rs`).
+//! vault files. Search and backlinks come from Obsidian itself (`obsidian.rs`), or from
+//! `headless.rs` on a machine without it.
 
 use crate::audit::{self, Audit, AuditOptions, Severity, WriteStats};
 use crate::catalog::{Catalog, Hit, VaultRoot};
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 pub struct Store {
     pub cfg: Config,
     index: Catalog,
+    backend: obsidian::Backend,
     obs: Box<dyn obsidian::Api>,
     scanner: Scanner,
 }
@@ -122,6 +124,11 @@ pub enum WriteOutcome {
 
 impl Store {
     pub fn open(cfg: Config) -> Result<Self> {
+        Self::open_with(cfg, obsidian::Backend::detect())
+    }
+
+    /// Open with a given backend for search, backlinks and link checks.
+    pub fn open_with(cfg: Config, backend: obsidian::Backend) -> Result<Self> {
         let index = Catalog::default();
         let rule_files = [
             cfg.project_vault.join("_system/secret-rules.toml"),
@@ -151,7 +158,8 @@ impl Store {
         let mut s = Self {
             cfg,
             index,
-            obs: Box::new(obsidian::Cli::default()),
+            backend,
+            obs: backend.api(),
             scanner,
         };
         s.sync()?;
@@ -164,6 +172,11 @@ impl Store {
 
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    /// Where this store's search, backlinks and link checks come from.
+    pub fn backend(&self) -> obsidian::Backend {
+        self.backend
     }
 
     /// Every note in both vaults, as of the last sync.
@@ -204,8 +217,9 @@ impl Store {
         }
     }
 
-    /// Search with Obsidian's own search (same syntax and results as in the app). Returns the
-    /// hits plus notes about vaults that could not be searched.
+    /// Search with Obsidian's search syntax: Obsidian's own search (the same results as in the
+    /// app), or `headless.rs` where there is no Obsidian. Returns the hits plus notes about vaults
+    /// that could not be searched.
     pub fn search(
         &mut self,
         q: &str,
@@ -279,7 +293,7 @@ impl Store {
         Ok((hits, problems))
     }
 
-    /// Full note text plus backlinks from Obsidian (`Err` text if Obsidian could not be asked;
+    /// Full note text plus backlinks from the backend (`Err` text if Obsidian could not be asked;
     /// reading the note itself never depends on Obsidian).
     #[allow(clippy::type_complexity)]
     pub fn get(
@@ -1107,6 +1121,109 @@ mod tests {
         std::os::unix::fs::symlink(dir.join("elsewhere.md"), v.join("link.md")).unwrap();
         assert!(atomic_write(&v, &v.join("link.md"), "x").is_err());
         assert!(!dir.join("elsewhere.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn works_without_obsidian() {
+        let dir = std::env::temp_dir().join(format!("obmem-headless-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        let cfg = Config {
+            project_root: dir.clone(),
+            project_name: "t".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: false,
+            device: "test".into(),
+        };
+        let mut store = Store::open_with(cfg, obsidian::Backend::Headless).unwrap();
+        let mut write = |ty, scope, title: &str, body: &str| {
+            let outcome = store.write(WriteRequest {
+                note_type: ty,
+                title: title.into(),
+                body: body.into(),
+                ..req(scope)
+            });
+            assert!(matches!(outcome, Ok(WriteOutcome::Written { .. })));
+        };
+        write(
+            NoteType::Decision,
+            Scope::Project,
+            "JWT rotation",
+            "Rotate the signing key every 30 days. See [[refresh-tokens]] and [[missing-note]].",
+        );
+        write(
+            NoteType::Fact,
+            Scope::Project,
+            "Refresh tokens",
+            "Refresh tokens are rotated on use.",
+        );
+        write(
+            NoteType::Feedback,
+            Scope::Global,
+            "Ask before rotating keys",
+            "Never rotate a production key without asking.",
+        );
+
+        // memory_search: both vaults, with the type filter and obmem's own exclusions
+        let (hits, problems) = store.search("rotate", None, None, 10).unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["jwt-rotation", "refresh-tokens", "ask-before-rotating-keys"]
+        );
+        assert!(
+            hits[0].snippet.contains("signing key"),
+            "{}",
+            hits[0].snippet
+        );
+        let (hits, _) = store
+            .search("rotate", Some(NoteType::Fact), None, 10)
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "refresh-tokens");
+        // an operator the built-in search does not have is refused, not searched for as a word
+        let err = store
+            .search("section:(rotate)", None, None, 10)
+            .unwrap_err();
+        assert!(err.to_string().contains("not supported without Obsidian"));
+
+        // memory_context ranks what the search found
+        let context =
+            crate::context::context(&mut store, "rotate the signing key", 8, 4000).unwrap();
+        let first = context.find("[[jwt-rotation]]").expect("found");
+        assert!(
+            context
+                .find("[[refresh-tokens]]")
+                .is_none_or(|at| at > first)
+        );
+
+        // memory_get backlinks
+        let (_, _, backlinks) = store.get("refresh-tokens").unwrap();
+        assert_eq!(backlinks.unwrap(), ["jwt-rotation"]);
+
+        // the link rules of the audit
+        let opts = AuditOptions {
+            scope: Some(Scope::Project),
+            rules: vec!["broken-link".into(), "orphan".into()],
+            today: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        };
+        let (report, _) = store.audit(&opts, None).unwrap();
+        assert!(report.notices.is_empty(), "{:?}", report.notices);
+        let found: Vec<(&str, &str)> = report
+            .issues
+            .iter()
+            .map(|i| (i.rule, i.note_id.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [("broken-link", "jwt-rotation"), ("orphan", "jwt-rotation")]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

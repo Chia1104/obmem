@@ -287,8 +287,8 @@ impl MemoryServer {
     }
 
     #[tool(
-        description = "Search project + personal memory with Obsidian's own search (same syntax \
-        and results as the search box in Obsidian). Call this before re-deriving facts, making a decision, \
+        description = "Search project + personal memory with Obsidian's search syntax (Obsidian's \
+        own search, the same results as its search box, where Obsidian is installed). Call this before re-deriving facts, making a decision, \
         or asking the user something they may have told you before. Archived/superseded notes and \
         templates are excluded. Results are not relevance-ranked: prefer specific words and operators. \
         Returns ids, types and matching lines; use memory_get for full text."
@@ -355,7 +355,7 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "Read one memory note in full, with its backlinks (from Obsidian).")]
+    #[tool(description = "Read one memory note in full, with its backlinks.")]
     async fn memory_get(
         &self,
         peer: Peer<RoleServer>,

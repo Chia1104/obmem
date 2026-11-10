@@ -9,17 +9,16 @@
 //!   and never reported again, even if the finding note is later deleted.
 
 use crate::config::Config;
-use crate::note::{Frontmatter, Note, jaccard, slugify, title_grams, wikilinks};
+use crate::links::Names;
+use crate::note::{Frontmatter, Note, jaccard, links_in, slugify, title_grams, wikilinks};
 use crate::obsidian::{self, Unresolved};
 use crate::store::atomic_write;
 use anyhow::{Context, Result, bail};
 use chrono::NaiveDate;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
 use walkdir::WalkDir;
 
 pub const AUDIT_AUTHOR: &str = "agent:obmem-audit";
@@ -188,12 +187,8 @@ struct Vault {
     scope: &'static str,
     root: PathBuf,
     docs: Vec<Doc>,
-    /// Lowercased filename stems of every note.
-    stems: HashSet<String>,
-    /// Lowercased vault-relative note paths without `.md`.
-    paths: HashSet<String>,
-    /// Lowercased filenames / relative paths of non-note files (attachments, .base, …).
-    files: HashSet<String>,
+    /// Every file, notes and others (attachments, .base, …), by the names a link can use.
+    names: Names,
     supp: Suppressions,
     /// Whether this vault is audited in this run (the other one is loaded only to resolve links).
     checked: bool,
@@ -208,34 +203,6 @@ pub struct Audit {
     pub checked_notes: usize,
     /// Rules that could not run (e.g. Obsidian not reachable), shown with the report.
     pub notices: Vec<String>,
-}
-
-static INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`[^`\n]*`").unwrap());
-
-/// Drop fenced and inline code so `[[examples]]` in code are not treated as links.
-fn strip_code(body: &str) -> String {
-    let mut out = String::with_capacity(body.len());
-    let mut fence: Option<&str> = None;
-    for line in body.lines() {
-        let t = line.trim_start();
-        if let Some(f) = fence {
-            if t.starts_with(f) {
-                fence = None;
-            }
-            continue;
-        }
-        if t.starts_with("```") {
-            fence = Some("```");
-            continue;
-        }
-        if t.starts_with("~~~") {
-            fence = Some("~~~");
-            continue;
-        }
-        out.push_str(&INLINE_CODE.replace_all(line, ""));
-        out.push('\n');
-    }
-    out
 }
 
 fn yaml_to_string(v: &yaml_serde::Value) -> Option<String> {
@@ -290,9 +257,7 @@ impl Vault {
             scope,
             root: root.to_path_buf(),
             docs: vec![],
-            stems: HashSet::new(),
-            paths: HashSet::new(),
-            files: HashSet::new(),
+            names: Names::default(),
             supp,
             checked,
         };
@@ -312,16 +277,11 @@ impl Vault {
                 .unwrap_or(p)
                 .to_string_lossy()
                 .replace('\\', "/");
-            let name = entry.file_name().to_string_lossy().to_lowercase();
+            v.names.add(&rel);
             if p.extension().is_none_or(|e| e != "md") {
-                v.files.insert(name);
-                v.files.insert(rel.to_lowercase());
                 continue;
             }
             let id = p.file_stem().unwrap().to_string_lossy().into_owned();
-            v.stems.insert(id.to_lowercase());
-            v.paths
-                .insert(rel.to_lowercase().trim_end_matches(".md").to_string());
             let Ok(src) = std::fs::read_to_string(p) else {
                 continue;
             };
@@ -330,7 +290,7 @@ impl Vault {
                 Ok(n) => src.split_at(src.len() - n.body.len()),
                 Err(_) => ("", src.as_str()),
             };
-            let links = wikilinks(&format!("{fm_text}{}", strip_code(body)));
+            let links = links_in(fm_text, body);
             v.docs.push(Doc {
                 // A conflict copy is reported once, by `sync-conflict`, not as a duplicate or orphan too.
                 ignored: ignore.iter().any(|i| rel.starts_with(i.as_str()))
@@ -347,18 +307,7 @@ impl Vault {
     }
 
     fn resolves(&self, target: &str) -> bool {
-        let t = target.trim().trim_start_matches('/').to_lowercase();
-        let note_t = t.strip_suffix(".md").unwrap_or(&t);
-        if t.contains('/') {
-            let suffix = format!("/{note_t}");
-            let fsuffix = format!("/{t}");
-            self.paths
-                .iter()
-                .any(|p| p == note_t || p.ends_with(&suffix))
-                || self.files.iter().any(|f| *f == t || f.ends_with(&fsuffix))
-        } else {
-            self.stems.contains(note_t) || self.files.contains(&t)
-        }
+        self.names.resolve(target).is_some()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -385,7 +334,7 @@ impl Vault {
         }
     }
 
-    /// Unresolved links as Obsidian reports them (it already ignores code and resolves
+    /// Unresolved links as the backend reports them (Obsidian already ignores code and resolves
     /// attachments, aliases and paths exactly like the app). obmem only adds the fix hints.
     fn check_broken_links(
         &self,
@@ -898,7 +847,7 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
             .filter(|r| !v.supp.disabled_rules.iter().any(|d| d == *r))
         {
             match *rule {
-                // Link graph rules ask Obsidian; if it can't answer, skip them and say so.
+                // Link graph rules ask the backend; if it can't answer, skip them and say so.
                 "broken-link" | "orphan" if v.docs.is_empty() => {}
                 "broken-link" => match obs.unresolved(&v.root) {
                     Ok(u) => v.check_broken_links(other, &u, &mut found),

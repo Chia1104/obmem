@@ -27,11 +27,21 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 
 ## Obsidian (`obsidian.rs`)
 
-obmem keeps no index of its own. Search, backlinks, unresolved links and orphans all come from the Obsidian CLI.
+obmem keeps no index of its own. Search, backlinks, unresolved links and orphans all come from the Obsidian CLI, or from `headless.rs` on a machine without it (see below).
 - Every call passes `vault=<id>`. The id is looked up by path in Obsidian's `obsidian.json`, because from a folder that is not a registered vault the CLI silently uses whichever vault is active.
 - When the app, the CLI or a vault is unavailable, skip the affected part and say what was skipped. Writes, the session-start context and the file-based audit rules read files directly and keep working.
 - Before changing how obmem calls the CLI, run memory_search `obsidian cli` for the quirks found so far.
 - `open_uri` builds the `obsidian://open?vault=<id>&file=<path>` link that front ends use to open a note.
+
+## Without Obsidian (`headless.rs`, `query.rs`, `links.rs`)
+
+`obsidian::Api` has two implementations. `Backend::detect` picks one when a store opens: `Cli` when the Obsidian CLI command (`OBMEM_OBSIDIAN_BIN`, else `obsidian`) is on `PATH`, else `Headless`.
+- The choice holds for the life of the store. A failed CLI call never falls back to `Headless`: the two differ in details, and on a machine with Obsidian a problem with it must be reported.
+- `Headless` reads the vault on every call, like the catalog. Do not add an index.
+- `query.rs` is the part of Obsidian's search syntax that `Headless` supports. An operator it lacks is an error, never a word to search for. `Store::search` and `context` build queries from this syntax, so what they send must stay inside it.
+- `links.rs` (`Names`) decides which file a `[[link]]` opens. `Headless` and the audit's cross-vault hint share it.
+- A test that needs one backend opens the store with `Store::open_with`, because `Store::open` depends on the machine.
+- A new `Api` method needs both implementations.
 
 ## Writes (`store.rs`)
 

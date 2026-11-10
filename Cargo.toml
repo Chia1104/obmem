@@ -15,6 +15,11 @@ repository = "https://github.com/Chia1104/obmem"
 [profile.dev.package."*"]
 debug = false
 
+# The binaries a release publishes (`.github/workflows/release.yml`).
+[profile.dist]
+inherits = "release"
+strip = true
+
 [workspace.dependencies]
 obmem-core = { path = "crates/obmem-core" }
 obmem-mcp = { path = "crates/obmem-mcp" }

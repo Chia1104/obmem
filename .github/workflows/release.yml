@@ -1,0 +1,111 @@
+name: Release
+
+# A `v*` tag builds the `obmem` binary for every platform, publishes it to npm and attaches the
+# binaries to a GitHub release. npm gets one package per platform plus `obmem`, which runs the
+# one that fits the machine (see npm/build.mjs).
+# Run it by hand to check that every platform still builds: without a tag nothing is published.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          # Static musl binaries run on any Linux, whatever its libc. They are built with `cross`:
+          # aws-lc-sys needs the kernel headers, which Ubuntu's `musl-gcc` does not have.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      # What this job builds is what gets published, so it runs as little outside code as it
+      # can: the runner's own rustup, no build cache, and the one third-party action pinned to
+      # a commit.
+      - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }} && rustup default stable
+      - if: matrix.cross
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cross
+      - name: Build
+        env:
+          # The Windows runner has no NASM: aws-lc-sys then uses the assembly it ships prebuilt.
+          AWS_LC_SYS_PREBUILT_NASM: "1"
+          # No Visual C++ runtime to install next to the Windows binary.
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C target-feature=+crt-static' || '' }}
+        run: ${{ matrix.cross && 'cross' || 'cargo' }} build --profile dist --locked -p obmem --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: obmem-${{ matrix.target }}
+          path: target/${{ matrix.target }}/dist/obmem${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    # Holds the NPM_TOKEN secret, and whatever approval the environment asks for.
+    environment: release
+    permissions:
+      # the GitHub release
+      contents: write
+      # npm provenance
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: binaries
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+      - name: Assemble the npm packages
+        run: node npm/build.mjs "${GITHUB_REF_NAME#v}" binaries dist > packages.txt
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # A version that is already there is skipped, so a release that failed halfway can be
+        # run again: npm never takes the same version twice.
+        run: |
+          while read -r folder; do
+            name=$(basename "$folder")
+            if npm view "$name@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
+              echo "$name@${GITHUB_REF_NAME#v} is already published"
+              continue
+            fi
+            npm publish "$folder" --access public --provenance
+          done < packages.txt
+      - name: Attach the binaries to a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets
+          for folder in binaries/obmem-*; do
+            target=${folder#binaries/obmem-}
+            chmod +x "$folder"/obmem*
+            case "$target" in
+              *windows*) (cd "$folder" && zip -q "$GITHUB_WORKSPACE/assets/obmem-$target.zip" obmem.exe) ;;
+              *) tar -C "$folder" -czf "assets/obmem-$target.tar.gz" obmem ;;
+            esac
+          done
+          gh release create "$GITHUB_REF_NAME" assets/* --generate-notes --verify-tag

@@ -31,12 +31,18 @@ The built-in search differs from Obsidian in these ways:
 ## Install
 
 ```sh
-cargo install --path crates/obmem
+npm install -g obmem        # a prebuilt binary for macOS, Linux or Windows
 cd your-repo
 obmem init                  # create both vaults and .obmem.toml
 obmem setup claude codex    # register the MCP server and hooks for your agents
 obmem status
 ```
+
+Install it globally: the MCP config and the hooks that `setup` writes run `obmem` from `PATH`, in every agent turn. `npx obmem <command>` works for a command you run once.
+
+Other ways to get the binary:
+- Download it from the [releases](https://github.com/Chia1104/obmem/releases): macOS (Apple silicon and Intel), Linux (x64 and arm64, static) and Windows (x64).
+- Build it from a clone: `cargo install --path crates/obmem`.
 
 ## Agents
 
@@ -162,7 +168,7 @@ A machine without a keychain takes its credentials from the environment instead 
 
 Set all three: when any of them is set, obmem does not ask the keychain. Keep them in the platform's secret store. The backup key reads your whole personal vault, and what an agent writes on that machine syncs to all your machines.
 
-For a machine that is thrown away after a session, such as a cloud agent's sandbox, write a config with `ephemeral = true` in its setup script:
+For a machine that is thrown away after a session, such as a cloud agent's sandbox, install obmem (`npm install -g obmem`) and write a config with `ephemeral = true` in its setup script:
 
 ```toml
 # ~/.config/obmem/config.toml

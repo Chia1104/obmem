@@ -93,7 +93,8 @@ jobs:
               echo "$name@${GITHUB_REF_NAME#v} is already published"
               continue
             fi
-            npm publish "$folder" --access public --provenance
+            # `./`: npm takes a bare `dist/<name>` for a GitHub repository, `<user>/<repo>`.
+            npm publish "./$folder" --access public --provenance
           done < packages.txt
       - name: Attach the binaries to a GitHub release
         env:
@@ -108,4 +109,9 @@ jobs:
               *) tar -C "$folder" -czf "assets/obmem-$target.tar.gz" obmem ;;
             esac
           done
-          gh release create "$GITHUB_REF_NAME" assets/* --generate-notes --verify-tag
+          # A release made on GitHub, which is what created the tag, only gets the binaries.
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" assets/* --generate-notes --verify-tag
+          fi

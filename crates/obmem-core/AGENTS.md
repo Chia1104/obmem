@@ -23,6 +23,8 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 ## Session logs and import (`sessions.rs`, `import.rs`)
 
 - `sessions::logs` reads a project's session logs, newest first, and `sessions::entries` splits a log into entries. The session-start context uses the same parser.
+- Claude Code's memory files are written by an agent, so their frontmatter is not always valid YAML. `import::quote_values` quotes a top-level value that holds `: ` or ` #` before the file is parsed. It is for imported files only: `Note::parse` reads obmem's own notes strictly.
+- `import::plan` fails on the first file it cannot read and names that file. Nothing has been written by then.
 - `import::target` is where an imported memory would go. A file already there means it is skipped, so a front end can show that before importing.
 
 ## Obsidian (`obsidian.rs`)

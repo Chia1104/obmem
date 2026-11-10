@@ -4,10 +4,15 @@
 //! Claude memory files carry `name`, `description` and `metadata.type` (user | feedback |
 //! project | reference) and link each other with `[[name]]`; the note keeps `name` as its
 //! filename so those links still resolve, and uses `description` as the title.
+//!
+//! An agent writes those files by hand, so a value is not always the YAML it looks like:
+//! `description: Moved to v2 (2026-10-15): see PR #169` is a parse error at the second colon,
+//! and without it the value would still end at ` #`, which starts a comment. `quote_values`
+//! quotes such values before the file is parsed.
 
 use crate::note::{Note, NoteType, Scope};
 use crate::store::{Store, WriteOutcome, WriteRequest};
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
 pub const IMPORT_AUTHOR: &str = "agent:import";
@@ -63,7 +68,10 @@ pub fn plan(dir: &Path) -> Result<Vec<Planned>> {
     files.sort();
     let mut out = Vec::new();
     for p in files {
-        let note = Note::parse(&std::fs::read_to_string(&p)?)?;
+        let src =
+            std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+        let note =
+            Note::parse(&quote_values(&src)).with_context(|| format!("parsing {}", p.display()))?;
         let extra = |k: &str| {
             note.fm
                 .extra
@@ -102,6 +110,54 @@ pub fn plan(dir: &Path) -> Result<Vec<Planned>> {
         });
     }
     Ok(out)
+}
+
+/// Quotes the frontmatter values that YAML would misread: a top-level `key: value` whose
+/// plain value holds `: ` or ` #`, or ends with `:`. Everything else is returned as it was,
+/// so a value that is already quoted, a list or a nested key stays YAML's to read.
+fn quote_values(src: &str) -> String {
+    let mut lines = src.split_inclusive('\n');
+    let fence = |l: &str| l.trim_end_matches(['\r', '\n']) == "---";
+    let Some(open) = lines
+        .next()
+        .filter(|l| fence(l.trim_start_matches('\u{feff}')))
+    else {
+        return src.to_string();
+    };
+    let mut out = String::from(open);
+    let mut inside = true;
+    for line in lines {
+        let text = line.trim_end_matches(['\r', '\n']);
+        if fence(line) {
+            inside = false;
+        }
+        match text.split_once(": ").filter(|_| inside) {
+            Some((key, value)) if is_key(key) && is_misread(value.trim()) => {
+                // A JSON string is a YAML double-quoted scalar.
+                let quoted = serde_json::to_string(value.trim()).expect("a string serializes");
+                out.push_str(&format!("{key}: {quoted}{}", &line[text.len()..]));
+            }
+            _ => out.push_str(line),
+        }
+    }
+    // Without a closing fence the file has no frontmatter, and all of it is the body.
+    if inside { src.to_string() } else { out }
+}
+
+/// A top-level key: no indentation, so not a line of a block scalar or a nested map.
+fn is_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// A plain (unquoted, unstructured) value that YAML would cut short or reject.
+fn is_misread(value: &str) -> bool {
+    let plain = !value.starts_with([
+        '"', '\'', '[', '{', '|', '>', '&', '*', '!', '#', '%', '@', '`',
+    ]);
+    plain && (value.contains(": ") || value.contains(" #") || value.ends_with(':'))
 }
 
 /// Where an import would write the note. An existing file there means it is skipped.
@@ -188,5 +244,60 @@ mod tests {
             default_dir(Path::new("/Users/me/Documents/GitHub/obmem")),
             crate::config::home().join(".claude/projects/-Users-me-Documents-GitHub-obmem/memory")
         );
+    }
+
+    fn memory_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("obmem-import-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn reads_values_an_agent_left_unquoted() {
+        let dir = memory_dir("unquoted");
+        std::fs::write(
+            dir.join("colon.md"),
+            "---\nname: colon\ndescription: Moved to v2 (2026-10-15): the stack #169 → #170\nmetadata:\n  type: project\n---\nBody.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("hash.md"),
+            "---\r\nname: hash\r\ndescription: Nightly until PR #101, said \"stable\" after\r\nmetadata:\r\n  type: reference\r\n---\r\nBody.\r\n",
+        )
+        .unwrap();
+        let p = plan(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            p[0].title,
+            "Moved to v2 (2026-10-15): the stack #169 → #170"
+        );
+        assert_eq!(p[0].note_type, NoteType::Fact);
+        assert_eq!(p[1].title, "Nightly until PR #101, said \"stable\" after");
+        assert!(p[1].tags.contains(&"reference".to_string()));
+    }
+
+    #[test]
+    fn quotes_only_the_values_yaml_would_misread() {
+        let kept = "---\nname: a\ndescription: \"quoted: already #1\"\ntags: [a, b]\nnote: |\n  block: text #2\nmetadata:\n  type: project\n---\nbody: text #3\n";
+        assert_eq!(quote_values(kept), kept);
+        assert_eq!(
+            quote_values("no frontmatter: here #4\n"),
+            "no frontmatter: here #4\n"
+        );
+        let unclosed = "---\ndescription: a rule, then text: not frontmatter #5\n";
+        assert_eq!(quote_values(unclosed), unclosed);
+        assert_eq!(
+            quote_values("---\ndescription: ends with a colon:\n---\n"),
+            "---\ndescription: \"ends with a colon:\"\n---\n"
+        );
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_is_named() {
+        let dir = memory_dir("broken");
+        std::fs::write(dir.join("broken.md"), "---\nname: [unclosed\n---\nBody.\n").unwrap();
+        let err = format!("{:#}", plan(&dir).unwrap_err());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(err.contains("broken.md"), "{err}");
     }
 }

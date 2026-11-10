@@ -1,0 +1,10 @@
+{
+  "amp.mcpServers": {
+    "obmem": {
+      "args": [
+        "serve"
+      ],
+      "command": "obmem"
+    }
+  }
+}

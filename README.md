@@ -77,7 +77,7 @@ Other ways to get the binary:
 | Codex (`codex`) | `.codex/config.toml`, `.codex/hooks.json` |
 | Cursor (`cursor`) | `.cursor/mcp.json`, `.cursor/hooks.json`, `AGENTS.md` |
 | GitHub Copilot CLI (`copilot`) | `.github/hooks/obmem.json`, `AGENTS.md`; add the MCP server to `~/.copilot/mcp-config.json` yourself |
-| Amp (`amp`) | `.amp/plugins/obmem.ts`, `AGENTS.md`; add the MCP server with `amp mcp add obmem --workspace -- obmem serve` |
+| Amp (`amp`) | `.amp/settings.json`, `.amp/plugins/obmem.ts`, `AGENTS.md`; approve the MCP server with `amp mcp approve obmem` |
 
 Once set up:
 - At session start, the agent gets the vault index, where the last session left off, your feedback and preferences, open findings, and unreviewed drafts.
@@ -221,6 +221,44 @@ Session logs carry the machine's name (`2026-11-09-work-mac.md`), so two machine
 A sync covers the notes, `_system/`, and Obsidian's settings, themes and snippets from `.obsidian/`. It leaves out the workspace layout, other dot-folders and symlinks, plus community plugins unless `community_plugins = true`. A file whose name Windows cannot hold (`:` or `?`, a name like `con`, a trailing dot) is skipped with a warning.
 
 Older snapshots stay in the bucket as restore points: every snapshot from the last 7 days, the newest of each day for 30 days, the newest of each week for a year, and always the latest. Once a day, after a sync, obmem removes the rest and the content only they needed. Run `obmem sync prune --dry-run` to see what would go.
+
+### In an Amp orb
+
+An [orb](https://ampcode.com/docs/orbs) is Amp's cloud sandbox. It has the repository and nothing from your own machine, so three things must reach it:
+
+- **The agent config.** Commit the files `obmem setup amp` writes. The first thread in an orb asks whether to run the `obmem` MCP server: choose **Always Allow for Me**.
+- **The credentials.** Add the three `OBMEM_SYNC_*` variables as secrets in your personal Amp settings, so that only your orbs get them.
+- **obmem and its config.** Two executable scripts in the repository do it:
+
+```bash
+#!/usr/bin/env bash
+# .agents/setup: runs when Amp prepares the orb
+set -euo pipefail
+command -v obmem >/dev/null 2>&1 || npm install -g @chia1104/obmem
+```
+
+```bash
+#!/usr/bin/env bash
+# .agents/resume: runs when the orb starts and each time it wakes
+set -euo pipefail
+[ -n "${OBMEM_SYNC_VAULT_KEY:-}" ] || exit 0 # no backup key: nothing to do
+mkdir -p ~/.config/obmem
+cat > ~/.config/obmem/config.toml <<'EOF'
+vault = "~/AgentMemory"
+
+[sync]
+endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+bucket = "my-obmem-vault"
+ephemeral = true
+EOF
+obmem sync
+```
+
+Never sync in `.agents/setup`. Amp saves what that script leaves behind as a snapshot, and the orbs of everyone in the project start from it. It also runs without your personal secrets. `.agents/resume` runs with them.
+
+Amp waits ten seconds for `.agents/resume` and then lets it finish in the background. When a large vault is still downloading at the first turn, the session-start hook waits for that sync, for up to two minutes.
+
+In a repository you share, the bucket is yours and not the team's: take `endpoint` and `bucket` from personal environment variables of your own instead of writing them in the script.
 
 ## Import Claude Code memory
 

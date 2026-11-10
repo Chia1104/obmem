@@ -1,8 +1,8 @@
 name: Release
 
 # A `v*` tag builds the `obmem` binary for every platform, publishes it to npm and attaches the
-# binaries to a GitHub release. npm gets one package per platform plus `obmem`, which runs the
-# one that fits the machine (see npm/build.mjs).
+# binaries to a GitHub release. npm gets one package per platform plus `@chia1104/obmem`, which
+# runs the one that fits the machine (see npm/build.mjs).
 # Run it by hand to check that every platform still builds: without a tag nothing is published.
 on:
   push:
@@ -88,7 +88,7 @@ jobs:
         # run again: npm never takes the same version twice.
         run: |
           while read -r folder; do
-            name=$(basename "$folder")
+            name=$(node -p "require('./$folder/package.json').name")
             if npm view "$name@${GITHUB_REF_NAME#v}" version > /dev/null 2>&1; then
               echo "$name@${GITHUB_REF_NAME#v} is already published"
               continue

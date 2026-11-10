@@ -6,7 +6,7 @@
 //! opens over the page as a drawer.
 
 use crate::data::ProjectRow;
-use crate::icons::{self, INBOX, PERSON, PLUS, SIDEBAR};
+use crate::icons::{self, INBOX, PALETTE, PERSON, PLUS, SIDEBAR};
 use crate::state::{self, Load, Screen};
 use crate::widgets::{self, WithHint, icon_button, loading, muted, path_text};
 use nsh_base::{HandleEdge, ResizeHandleState, button, resize_handle, theme};
@@ -260,7 +260,8 @@ fn panel(in_drawer: bool) -> View {
                 .border_t_1()
                 .border_t_color(move || theme().sidebar_border)
                 .child(screen_entry(INBOX, "Review", Screen::Review, state::show_review))
-                .child(screen_entry(PERSON, "Personal settings", Screen::Personal, state::show_personal)),
+                .child(screen_entry(PERSON, "Personal settings", Screen::Personal, state::show_personal))
+                .child(screen_entry(PALETTE, "Appearance", Screen::Appearance, state::show_appearance)),
         )
 }
 
@@ -415,6 +416,12 @@ fn rail() -> View {
                     "Personal settings",
                     Screen::Personal,
                     state::show_personal,
+                ))
+                .child(rail_screen(
+                    PALETTE,
+                    "Appearance",
+                    Screen::Appearance,
+                    state::show_appearance,
                 )),
         )
 }

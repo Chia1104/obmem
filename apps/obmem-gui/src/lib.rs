@@ -3,6 +3,8 @@
 //! `nsh.json` `"root"` names [`App`]. Notes themselves are read and edited in Obsidian.
 
 mod agent_tab;
+mod appearance;
+mod appearance_page;
 mod data;
 mod form;
 mod icons;
@@ -35,13 +37,9 @@ pub fn prepare_process() {
     ONCE.call_once(login_env::adopt_login_path);
 }
 
-/// The app's palette over NSH's default theme: blue-black ink on paper.
-const THEME: &str = include_str!("theme.json");
-
 /// The window: the project list beside the shown project.
 #[component]
 pub fn App() -> impl IntoElement {
-    set_tokens(nsh_base::Theme::from_json(THEME).expect("theme.json parses (see the test below)"));
     // The sidebar and the page run up to the window's top edge; each keeps a strip there that
     // drags the window (`widgets::title_strip`).
     let mut title_bar = nsh_core::desktop::TitleBarOptions::default();
@@ -51,6 +49,7 @@ pub fn App() -> impl IntoElement {
     attributes.title_bar = Some(title_bar);
     nsh_core::element::desktop::current_window().set(attributes);
     state::own_tasks();
+    state::start_appearance();
     state::load_projects(None);
     view()
         .flex_1()
@@ -63,18 +62,8 @@ pub fn App() -> impl IntoElement {
             state::Screen::Project => project_page::project_page().into_element(),
             state::Screen::Personal => personal_page::personal_page().into_element(),
             state::Screen::Review => review_page::review_page().into_element(),
+            state::Screen::Appearance => appearance_page::appearance_page().into_element(),
         }))
         .child(sidebar::drawer())
         .child(toasts::toaster())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_theme_parses_and_has_the_app_tokens() {
-        let t = nsh_base::Theme::from_json(super::THEME).unwrap();
-        for name in ["ok", "warn", "highlight"] {
-            assert!(t.color(name).is_some(), "{name}");
-        }
-    }
 }

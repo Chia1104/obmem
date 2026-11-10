@@ -5,6 +5,7 @@ mod common;
 
 mod agent;
 mod app;
+mod appearance;
 mod review;
 mod settings;
 mod sidebar;

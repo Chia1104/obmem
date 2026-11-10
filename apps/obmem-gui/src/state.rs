@@ -428,9 +428,18 @@ pub(crate) fn set_up(agent: Agent) {
 // --- Settings and secrets ----------------------------------------------------
 
 pub(crate) fn save_settings(s: ProjectSettings) {
-    change_project(
-        move |path| data::save_settings(&path, &s),
-        "Settings saved.",
+    let Some(path) = selected() else { return };
+    let again = path.clone();
+    in_background(
+        move || data::save_settings(&path, &s),
+        move |r| match r {
+            Ok(()) => {
+                set_notice(Some(Notice::Done("Settings saved.".into())));
+                reload(again);
+            }
+            // Reloading would rebuild the form from the file and lose what the user typed.
+            Err(e) => fail(e),
+        },
     );
 }
 
@@ -514,12 +523,13 @@ fn load_personal() {
 pub(crate) fn save_personal(s: GlobalSettings) {
     in_background(
         move || data::save_personal(&s),
-        |r| {
-            match r {
-                Ok(()) => set_notice(Some(Notice::Done("Personal settings saved.".into()))),
-                Err(e) => fail(e),
+        |r| match r {
+            Ok(()) => {
+                set_notice(Some(Notice::Done("Personal settings saved.".into())));
+                load_personal();
             }
-            load_personal();
+            // Reloading would rebuild the form from the file and lose what the user typed.
+            Err(e) => fail(e),
         },
     );
 }

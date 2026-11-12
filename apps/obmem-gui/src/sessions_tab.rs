@@ -2,17 +2,18 @@
 
 use crate::state::{self, Load};
 use crate::widgets::{Level, action, card, check, heading, loading, muted};
+use crate::words::tr;
 use nsh_core::prelude::*;
 use obmem_core::obsidian;
 
 pub(crate) fn sessions_tab() -> AnyElement {
     dynamic(move || match state::sessions() {
-        Load::Loading => vec![loading("Loading…").into_element()],
+        Load::Loading => vec![loading(tr!("common.loading")).into_element()],
         Load::Failed(e) => {
-            vec![check(Level::Error, "Could not read the session logs", e).into_element()]
+            vec![check(Level::Error, tr!("sessions.unreadable"), e).into_element()]
         }
         Load::Ready(s) if s.logs.is_empty() => {
-            vec![muted("No sessions logged yet. Agents log here with memory_log, and the hooks before compaction.").into_element()]
+            vec![muted(tr!("sessions.empty")).into_element()]
         }
         Load::Ready(s) => s
             .logs
@@ -25,7 +26,7 @@ pub(crate) fn sessions_tab() -> AnyElement {
                     .child(view().flex_1().child(heading(log.name.clone())));
                 if let Some(id) = &s.vault_id {
                     let url = obsidian::open_uri(id, &log.rel);
-                    head = head.child(action("Open in Obsidian", move || {
+                    head = head.child(action(tr!("common.open_in_obsidian"), move || {
                         drop(open_url(url.clone()))
                     }));
                 }

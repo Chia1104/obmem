@@ -20,7 +20,7 @@ Under `[sync] prefix` (default `obmem`):
 
 ## Running a sync (`run.rs`)
 
-- `run` is what front ends call. It loads the credentials (`keychain::load`), syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. `connect` stores a device's credentials and unlocks the key, or creates it.
+- `run` is what front ends call. It loads the credentials (`keychain::load`), syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. The file keeps the numbers (`Outcome`, `Summary`, `Cleanup`), not a sentence: `Display` writes the CLI's line, and the desktop app writes its own in its language. `connect` stores a device's credentials and unlocks the key, or creates it.
 - Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `HOOK_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records (`SyncOptions::spacing`). At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
 - `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
 

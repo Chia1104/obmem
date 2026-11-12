@@ -170,7 +170,25 @@ pub fn target(store: &Store, it: &Planned) -> PathBuf {
 
 pub enum ImportResult {
     Imported(String),
-    Skipped(String),
+    Skipped(Skip),
+}
+
+/// Why a memory was not imported.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Skip {
+    /// A note is already where it would go.
+    Exists(PathBuf),
+    /// Writing it failed: the error.
+    Failed(String),
+}
+
+impl std::fmt::Display for Skip {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Skip::Exists(target) => write!(f, "{} already exists", target.display()),
+            Skip::Failed(e) => f.write_str(e),
+        }
+    }
 }
 
 /// Write the planned notes. Existing notes with the same filename are left alone, so running
@@ -180,10 +198,7 @@ pub fn run(store: &mut Store, items: Vec<Planned>) -> Result<Vec<(PathBuf, Impor
     for it in items {
         let target = target(store, &it);
         if target.exists() {
-            out.push((
-                it.source,
-                ImportResult::Skipped(format!("{} already exists", target.display())),
-            ));
+            out.push((it.source, ImportResult::Skipped(Skip::Exists(target))));
             continue;
         }
         let req = WriteRequest {
@@ -204,7 +219,7 @@ pub fn run(store: &mut Store, items: Vec<Planned>) -> Result<Vec<(PathBuf, Impor
                 ImportResult::Imported(path.display().to_string())
             }
             Ok(WriteOutcome::Duplicate { .. }) => unreachable!("force_new"),
-            Err(e) => ImportResult::Skipped(format!("{e:#}")),
+            Err(e) => ImportResult::Skipped(Skip::Failed(format!("{e:#}"))),
         };
         out.push((it.source, r));
     }

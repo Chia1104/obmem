@@ -64,6 +64,58 @@ impl Verdict {
     }
 }
 
+/// What a decision on a note did. Written out (`Display`) it is the line the CLI and the MCP
+/// server answer with; a front end in another language says it in its own words.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Decided {
+    /// A draft is now active.
+    Approved { id: String },
+    /// A finding has a new status. Rejecting it also wrote a suppression, into this file.
+    Resolved {
+        id: String,
+        verdict: Verdict,
+        suppressed_in: Option<PathBuf>,
+    },
+    /// A note was checked against the code on `date`, at `commit` when it has code_refs.
+    Verified {
+        id: String,
+        date: String,
+        commit: Option<String>,
+    },
+}
+
+impl std::fmt::Display for Decided {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Decided::Approved { id } => write!(f, "[[{id}]] is now active."),
+            Decided::Resolved {
+                id,
+                verdict,
+                suppressed_in,
+            } => {
+                write!(f, "[[{id}]] is now {}", verdict.as_str())?;
+                match suppressed_in {
+                    Some(file) => write!(f, " and suppressed in {}", file.display()),
+                    None => Ok(()),
+                }
+            }
+            Decided::Verified {
+                id,
+                date,
+                commit: Some(commit),
+            } => write!(f, "[[{id}]] verified against {commit} on {date}."),
+            Decided::Verified {
+                id,
+                date,
+                commit: None,
+            } => write!(
+                f,
+                "[[{id}]] verified on {date} (no code_refs, so no commit recorded)."
+            ),
+        }
+    }
+}
+
 /// How a person's action names a note.
 #[derive(Debug, Clone, Copy)]
 pub enum NoteRef<'a> {
@@ -713,7 +765,7 @@ impl Store {
         comment: Option<&str>,
         by: &str,
         human: bool,
-    ) -> Result<String> {
+    ) -> Result<Decided> {
         self.sync()?;
         if verdict == Verdict::Rejected && !human {
             bail!(
@@ -756,11 +808,7 @@ impl Store {
             self.cfg.global_vault.clone()
         };
         atomic_write(&root, &path, &note.render()?)?;
-        let mut msg = format!(
-            "[[{}]] is now {}",
-            path.file_stem().unwrap().to_string_lossy(),
-            verdict.as_str()
-        );
+        let mut suppressed_in = None;
         if verdict == Verdict::Rejected {
             let rel = path
                 .strip_prefix(&root)
@@ -768,14 +816,15 @@ impl Store {
                 .to_string_lossy()
                 .into_owned();
             if audit::suppress_finding(&root, &rel, &note.fm, &date)? {
-                msg.push_str(&format!(
-                    " and suppressed in {}",
-                    root.join(audit::SUPPRESSIONS_FILE).display()
-                ));
+                suppressed_in = Some(root.join(audit::SUPPRESSIONS_FILE));
             }
         }
         self.sync()?;
-        Ok(msg)
+        Ok(Decided::Resolved {
+            id: path.file_stem().unwrap().to_string_lossy().into_owned(),
+            verdict,
+            suppressed_in,
+        })
     }
 
     /// Record that a note was checked against the current code: `verified_commit` = HEAD,
@@ -786,7 +835,7 @@ impl Store {
         note: impl Into<NoteRef<'a>>,
         by: &str,
         human: bool,
-    ) -> Result<String> {
+    ) -> Result<Decided> {
         self.sync()?;
         let note = note.into();
         let key = note.to_string();
@@ -833,16 +882,13 @@ impl Store {
         atomic_write(&root, &path, &note.render()?)?;
         self.sync()?;
         let id = path.file_stem().unwrap().to_string_lossy().into_owned();
-        Ok(match commit {
-            Some(c) => format!("[[{id}]] verified against {c} on {date}."),
-            None => format!("[[{id}]] verified on {date} (no code_refs, so no commit recorded)."),
-        })
+        Ok(Decided::Verified { id, date, commit })
     }
 
     /// A person accepts an agent's draft: `draft` → `active`. For people only (CLI, GUI); the MCP
     /// server does not offer it, because an agent must not promote its own notes. (A user who
     /// turns on `[review] auto_approve` in their own config has `write` do it instead.)
-    pub fn approve<'a>(&mut self, note: impl Into<NoteRef<'a>>, by: &str) -> Result<String> {
+    pub fn approve<'a>(&mut self, note: impl Into<NoteRef<'a>>, by: &str) -> Result<Decided> {
         self.sync()?;
         let note = note.into();
         let key = note.to_string();
@@ -867,10 +913,9 @@ impl Store {
         let path = PathBuf::from(path);
         atomic_write(&root, &path, &note.render()?)?;
         self.sync()?;
-        Ok(format!(
-            "[[{}]] is now active.",
-            path.file_stem().unwrap().to_string_lossy()
-        ))
+        Ok(Decided::Approved {
+            id: path.file_stem().unwrap().to_string_lossy().into_owned(),
+        })
     }
 
     /// The last `n` entries of the most recently modified session log of this project.

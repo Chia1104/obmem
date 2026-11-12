@@ -9,6 +9,7 @@ use crate::data::ProjectRow;
 use crate::icons::{self, INBOX, PALETTE, PERSON, PLUS, SIDEBAR};
 use crate::state::{self, Load, Screen};
 use crate::widgets::{self, WithHint, icon_button, loading, muted, path_text};
+use crate::words::{named, tr};
 use nsh_base::{HandleEdge, ResizeHandleState, button, resize_handle, theme};
 use nsh_core::element::desktop::title_bar;
 use nsh_core::geometry::Axis;
@@ -133,7 +134,7 @@ pub(crate) fn sidebar() -> impl IntoElement {
                 .axis(Axis::Horizontal)
                 .edge(HandleEdge::Trailing)
                 .disabled(widgets::narrow)
-                .accessibility_label("Sidebar width")
+                .accessibility_label(named("sidebar.resize"))
                 .on_state_change(move |s: &ResizeHandleState| edge.set(*s))
                 .on_drag_start(move || {
                     let from = docked_width();
@@ -208,7 +209,7 @@ pub(crate) fn drawer() -> AnyElement {
                         .flex_1()
                         .bg(move || theme().foreground.opacity(0.18))
                         .on_press(close_drawer)
-                        .accessibility_label("Close the project list"),
+                        .accessibility_label(named("sidebar.close")),
                 )
         })
     })
@@ -228,29 +229,48 @@ fn panel(in_drawer: bool) -> View {
                 .gap_1()
                 .pl_4()
                 .pr_2()
-                .child(text("Projects").text_sm().font_weight(FontWeight::SEMIBOLD).flex_1())
-                .child(icon_button(PLUS, "Add a project…", go(state::add_project)))
-                .child(icon_button(SIDEBAR, if in_drawer { "Close the project list" } else { "Collapse the sidebar" }, toggle)),
+                .child(
+                    text(tr!("sidebar.projects"))
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .flex_1(),
+                )
+                .child(icon_button(
+                    PLUS,
+                    tr!("sidebar.add"),
+                    go(state::add_project),
+                ))
+                .child(icon_button(
+                    SIDEBAR,
+                    move || {
+                        if in_drawer {
+                            t!("sidebar.close")
+                        } else {
+                            t!("sidebar.collapse")
+                        }
+                    },
+                    toggle,
+                )),
         )
         .child(
-            scroll()
-                .flex_1()
-                .child(
-                    view()
-                        .gap(px(2.0))
-                        .px_2()
-                        .child(dynamic(move || match state::projects() {
-                            Load::Loading => Some(loading("Loading…").px_2().into_element()),
-                            Load::Failed(e) => Some(muted(e).px_2().into_element()),
-                            Load::Ready(rows) if rows.is_empty() => Some(
-                                muted("No projects yet. A project shows up here once an agent session starts in it, or add one with +.")
-                                    .px_2()
-                                    .into_element(),
-                            ),
-                            Load::Ready(_) => None,
-                        }))
-                        .child(each(rows, |r: &ProjectRow| r.path.clone(), |row, _| project_row(row))),
-                ),
+            scroll().flex_1().child(
+                view()
+                    .gap(px(2.0))
+                    .px_2()
+                    .child(dynamic(move || match state::projects() {
+                        Load::Loading => Some(loading(tr!("common.loading")).px_2().into_element()),
+                        Load::Failed(e) => Some(muted(e).px_2().into_element()),
+                        Load::Ready(rows) if rows.is_empty() => {
+                            Some(muted(tr!("sidebar.empty")).px_2().into_element())
+                        }
+                        Load::Ready(_) => None,
+                    }))
+                    .child(each(
+                        rows,
+                        |r: &ProjectRow| r.path.clone(),
+                        |row, _| project_row(row),
+                    )),
+            ),
         )
         .child(
             view()
@@ -259,9 +279,13 @@ fn panel(in_drawer: bool) -> View {
                 .pt_2()
                 .border_t_1()
                 .border_t_color(move || theme().sidebar_border)
-                .child(screen_entry(INBOX, "Review", Screen::Review, state::show_review))
-                .child(screen_entry(PERSON, "Personal settings", Screen::Personal, state::show_personal))
-                .child(screen_entry(PALETTE, "Appearance", Screen::Appearance, state::show_appearance)),
+                .child(screen_entry(INBOX, Screen::Review, state::show_review))
+                .child(screen_entry(PERSON, Screen::Personal, state::show_personal))
+                .child(screen_entry(
+                    PALETTE,
+                    Screen::Appearance,
+                    state::show_appearance,
+                )),
         )
 }
 
@@ -277,19 +301,21 @@ fn entry_bg(chosen: impl Fn() -> bool + Copy + 'static) -> impl Fn() -> Adaptive
     }
 }
 
-fn screen_id(label: &str) -> String {
-    format!("screen-{}", label.to_lowercase().replace(' ', "-"))
+/// What tests find a screen's entry by, and the translation key of its name.
+fn screen_names(screen: Screen) -> (&'static str, &'static str) {
+    match screen {
+        Screen::Project => ("screen-project", "sidebar.projects"),
+        Screen::Review => ("screen-review", "review.title"),
+        Screen::Personal => ("screen-personal-settings", "personal.title"),
+        Screen::Appearance => ("screen-appearance", "appearance.title"),
+    }
 }
 
 /// An entry for a screen that is not a project.
-fn screen_entry(
-    paths: &'static str,
-    label: &'static str,
-    screen: Screen,
-    show: fn(),
-) -> impl IntoElement {
+fn screen_entry(paths: &'static str, screen: Screen, show: fn()) -> impl IntoElement {
     let chosen = move || state::screen() == screen;
-    view().test_id(&screen_id(label)).child(
+    let (id, name) = screen_names(screen);
+    view().test_id(id).child(
         button()
             .flex_row()
             .items_center()
@@ -310,7 +336,7 @@ fn screen_entry(
             .on_press(go(show))
             .child(icons::icon(paths, 16.0))
             .child(
-                text(label)
+                text(move || t!(name))
                     .text_sm()
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(move || theme().foreground),
@@ -364,7 +390,7 @@ fn project_row(row: ReadSignal<ProjectRow>) -> impl IntoElement {
                         row.with(|r| {
                             let p = tilde(&r.path);
                             if r.missing {
-                                format!("{p} (missing)")
+                                t!("sidebar.missing", path = p)
                             } else {
                                 p
                             }
@@ -383,7 +409,7 @@ fn rail() -> View {
         .gap_2()
         .pt_1()
         .pb_3()
-        .child(icon_button(SIDEBAR, "Show the project list", toggle))
+        .child(icon_button(SIDEBAR, tr!("sidebar.show"), toggle))
         .child(
             scroll().flex_1().w_full().child(
                 view()
@@ -395,7 +421,11 @@ fn rail() -> View {
                         |r: &ProjectRow| r.path.clone(),
                         |row, _| rail_project(row),
                     ))
-                    .child(icon_button(PLUS, "Add a project…", go(state::add_project))),
+                    .child(icon_button(
+                        PLUS,
+                        tr!("sidebar.add"),
+                        go(state::add_project),
+                    )),
             ),
         )
         .child(
@@ -405,21 +435,10 @@ fn rail() -> View {
                 .pt_2()
                 .border_t_1()
                 .border_t_color(move || theme().sidebar_border)
-                .child(rail_screen(
-                    INBOX,
-                    "Review",
-                    Screen::Review,
-                    state::show_review,
-                ))
-                .child(rail_screen(
-                    PERSON,
-                    "Personal settings",
-                    Screen::Personal,
-                    state::show_personal,
-                ))
+                .child(rail_screen(INBOX, Screen::Review, state::show_review))
+                .child(rail_screen(PERSON, Screen::Personal, state::show_personal))
                 .child(rail_screen(
                     PALETTE,
-                    "Appearance",
                     Screen::Appearance,
                     state::show_appearance,
                 )),
@@ -439,14 +458,10 @@ fn rail_project(row: ReadSignal<ProjectRow>) -> impl IntoElement {
         .with_hint(name)
 }
 
-fn rail_screen(
-    paths: &'static str,
-    label: &'static str,
-    screen: Screen,
-    show: fn(),
-) -> impl IntoElement {
+fn rail_screen(paths: &'static str, screen: Screen, show: fn()) -> impl IntoElement {
     let chosen = move || state::screen() == screen;
-    view().test_id(&format!("rail-{}", screen_id(label))).child(
+    let (id, name) = screen_names(screen);
+    view().test_id(&format!("rail-{id}")).child(
         button()
             .w(px(34.0))
             .h(px(34.0))
@@ -463,10 +478,10 @@ fn rail_screen(
                     theme().muted_foreground
                 }
             })
-            .accessibility_label(label)
+            .accessibility_label(named(name))
             .on_press(go(show))
             .child(icons::icon(paths, 18.0))
-            .with_hint(label),
+            .with_hint(move || t!(name)),
     )
 }
 

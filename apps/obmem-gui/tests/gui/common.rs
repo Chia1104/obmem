@@ -1,8 +1,9 @@
 //! A throwaway world for the window: obmem's config, personal vault and projects in a temp
 //! folder (OBMEM_CONFIG points obmem there), and the app in a desktop-sized window.
 
+use nsh_core::platform::{Languages, Locale};
 use nsh_core::prelude::{Points, Size};
-use nsh_engine::{EngineConfig, Root};
+use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -78,8 +79,18 @@ pub fn project(dir: &Path, name: &str) -> PathBuf {
 }
 
 pub fn start() -> Headless {
-    let mut config = EngineConfig::new(Root::of::<obmem_gui::App>());
+    start_in(None)
+}
+
+/// The app on a computer whose language is `language` (a BCP 47 tag); `None` is the test
+/// host's default, English.
+pub fn start_in(language: Option<&str>) -> Headless {
+    let mut config = EngineConfig::new(obmem_gui::root());
     // A desktop window, not the default phone-sized one.
     config.viewport = Size::new(Points(1100.0), Points(900.0));
+    if let Some(tag) = language {
+        config.pinned.locale = Locale::parse(tag);
+        config.pinned.languages = Languages::parse([tag]);
+    }
     Headless::start(config).unwrap()
 }

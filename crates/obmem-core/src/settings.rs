@@ -53,18 +53,54 @@ pub struct SyncSettings {
     pub community_plugins: bool,
 }
 
-/// A rule a setting breaks: which setting, and why, as a sentence for the person who typed it.
+/// A rule a setting breaks: which setting, and which rule.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem<F> {
     pub field: F,
-    pub message: String,
+    pub rule: Rule,
 }
 
 impl<F> Problem<F> {
-    fn new(field: F, message: impl Into<String>) -> Self {
-        Problem {
-            field,
-            message: message.into(),
+    fn new(field: F, rule: Rule) -> Self {
+        Problem { field, rule }
+    }
+}
+
+/// The rules settings have. Written out (`Display`), each is a sentence for the person who typed
+/// the value; a front end in another language says them in its own words.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Rule {
+    VaultInsideProject,
+    /// The env file that breaks it.
+    EnvFileInsideProject(String),
+    StaleDaysAtLeastOne,
+    DuplicateThresholdInRange,
+    PersonalVaultAbsolute,
+    EndpointIsUrl,
+    BucketIsName,
+}
+
+impl std::fmt::Display for Rule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Rule::VaultInsideProject => f.write_str(
+                "The vault must be a relative path inside the project, without `..` or `~`.",
+            ),
+            Rule::EnvFileInsideProject(file) => write!(
+                f,
+                "The env file \"{file}\" must be a relative path inside the project."
+            ),
+            Rule::StaleDaysAtLeastOne => f.write_str("Stale days must be at least 1."),
+            Rule::DuplicateThresholdInRange => {
+                f.write_str("The duplicate threshold must be above 0 and at most 1.")
+            }
+            Rule::PersonalVaultAbsolute => {
+                f.write_str("The personal vault must be an absolute path or start with ~/.")
+            }
+            Rule::EndpointIsUrl => {
+                f.write_str("The endpoint must be a URL starting with https://.")
+            }
+            Rule::BucketIsName => f.write_str("The bucket is a name, without slashes or spaces."),
         }
     }
 }
@@ -97,10 +133,7 @@ impl ProjectSettings {
     pub fn problems(&self) -> Vec<Problem<ProjectField>> {
         let mut out = Vec::new();
         if !is_plain_relative(self.vault.trim()) {
-            out.push(Problem::new(
-                ProjectField::Vault,
-                "The vault must be a relative path inside the project, without `..` or `~`.",
-            ));
+            out.push(Problem::new(ProjectField::Vault, Rule::VaultInsideProject));
         }
         if let Some(f) = self
             .extra_env_files
@@ -109,19 +142,19 @@ impl ProjectSettings {
         {
             out.push(Problem::new(
                 ProjectField::EnvFiles,
-                format!("The env file \"{f}\" must be a relative path inside the project."),
+                Rule::EnvFileInsideProject(f.clone()),
             ));
         }
         if self.stale_days < 1 {
             out.push(Problem::new(
                 ProjectField::StaleDays,
-                "Stale days must be at least 1.",
+                Rule::StaleDaysAtLeastOne,
             ));
         }
         if !(self.duplicate_threshold > 0.0 && self.duplicate_threshold <= 1.0) {
             out.push(Problem::new(
                 ProjectField::DuplicateThreshold,
-                "The duplicate threshold must be above 0 and at most 1.",
+                Rule::DuplicateThresholdInRange,
             ));
         }
         out
@@ -135,7 +168,7 @@ impl GlobalSettings {
         if !vault.is_empty() && !expand_tilde(vault).is_absolute() {
             return vec![Problem::new(
                 GlobalField::Vault,
-                "The personal vault must be an absolute path or start with ~/.",
+                Rule::PersonalVaultAbsolute,
             )];
         }
         Vec::new()
@@ -150,17 +183,11 @@ impl SyncSettings {
         if !endpoint.is_empty()
             && !(endpoint.starts_with("https://") || endpoint.starts_with("http://"))
         {
-            out.push(Problem::new(
-                SyncField::Endpoint,
-                "The endpoint must be a URL starting with https://.",
-            ));
+            out.push(Problem::new(SyncField::Endpoint, Rule::EndpointIsUrl));
         }
         let bucket = self.bucket.trim();
         if bucket.contains('/') || bucket.contains(char::is_whitespace) {
-            out.push(Problem::new(
-                SyncField::Bucket,
-                "The bucket is a name, without slashes or spaces.",
-            ));
+            out.push(Problem::new(SyncField::Bucket, Rule::BucketIsName));
         }
         out
     }
@@ -169,7 +196,7 @@ impl SyncSettings {
 /// Refuses settings that break a rule, with the first one's reason.
 fn refuse<F>(problems: Vec<Problem<F>>) -> Result<()> {
     match problems.into_iter().next() {
-        Some(p) => bail!("{}", p.message),
+        Some(p) => bail!("{}", p.rule),
         None => Ok(()),
     }
 }

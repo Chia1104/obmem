@@ -775,7 +775,7 @@ fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
             "CONFLICT: {n} is another device's version; merge it into the original, then delete it"
         );
     }
-    println!("{}", obmem_sync::summary(&r));
+    println!("{}", obmem_sync::Summary::from(&r));
     Ok(())
 }
 
@@ -794,8 +794,10 @@ fn sync_status_line() -> String {
     };
     match obmem_sync::last_status(&cfg) {
         None => format!("not run on this device yet{auto}"),
-        Some(s) if s.ok => format!("{} at {}{auto}", s.message, s.at),
-        Some(s) => format!("FAILED at {}: {}{auto}", s.at, s.message),
+        Some(s) => match s.outcome {
+            obmem_sync::Outcome::Failed(why) => format!("FAILED at {}: {why}{auto}", s.at),
+            done => format!("{done} at {}{auto}", s.at),
+        },
     }
 }
 

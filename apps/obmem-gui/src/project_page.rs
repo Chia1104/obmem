@@ -7,15 +7,17 @@ use crate::widgets::{
     Level, action, card, check, checkbox_control, heading, loading, muted, notice_area, page,
     page_header, path_text, primary, tabs,
 };
+use crate::words::tr;
 use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 use obmem_core::status::{Registration, VaultStatus};
 
-const REVEAL: &str = if cfg!(windows) {
-    "Show in Explorer"
+/// The translation key of "show this folder in the file manager", which each system names.
+pub(crate) const REVEAL: &str = if cfg!(windows) {
+    "common.show_in_explorer"
 } else {
-    "Show in Finder"
+    "common.show_in_finder"
 };
 
 pub(crate) fn project_page() -> impl IntoElement {
@@ -36,15 +38,18 @@ pub(crate) fn project_page() -> impl IntoElement {
 fn header() -> Vec<AnyElement> {
     match state::detail() {
         Load::Loading if state::selected().is_none() => {
-            vec![muted("Add a project to see its memory setup.").into_element()]
+            vec![muted(tr!("project.none")).into_element()]
         }
-        Load::Loading => vec![loading("Loading…").into_element()],
+        Load::Loading => vec![loading(tr!("common.loading")).into_element()],
         Load::Failed(e) => vec![
-            check(Level::Error, "Could not read this project", e).into_element(),
+            check(Level::Error, tr!("project.unreadable"), e).into_element(),
             view()
                 .flex_row()
                 .gap_2()
-                .child(action("Try again", state::refresh).busy(state::running(Work::Refresh)))
+                .child(
+                    action(tr!("common.try_again"), state::refresh)
+                        .busy(state::running(Work::Refresh)),
+                )
                 .child(remove_button())
                 .into_element(),
         ],
@@ -56,10 +61,10 @@ fn header() -> Vec<AnyElement> {
                     d.status.project_name.clone(),
                     path_text(shown),
                     vec![
-                        action("Refresh", state::refresh)
+                        action(tr!("common.refresh"), state::refresh)
                             .busy(state::running(Work::Refresh))
                             .into_element(),
-                        action(REVEAL, move || drop(reveal_path(root.clone()))).into_element(),
+                        action(tr!(REVEAL), move || drop(reveal_path(root.clone()))).into_element(),
                         remove_button().into_element(),
                     ],
                 )
@@ -70,17 +75,17 @@ fn header() -> Vec<AnyElement> {
 }
 
 fn remove_button() -> impl IntoElement {
-    action("Remove from list", state::remove_selected).busy(state::running(Work::RemoveProject))
+    action(tr!("project.remove"), state::remove_selected).busy(state::running(Work::RemoveProject))
 }
 
 fn tab_bar() -> AnyElement {
     tabs(
         &[
-            (Tab::Overview, "Overview"),
-            (Tab::Agent, "Agent view"),
-            (Tab::Sessions, "Sessions"),
-            (Tab::Settings, "Settings"),
-            (Tab::Secrets, "Secrets"),
+            (Tab::Overview, "project.tabs.overview"),
+            (Tab::Agent, "project.tabs.agent"),
+            (Tab::Sessions, "project.tabs.sessions"),
+            (Tab::Settings, "project.tabs.settings"),
+            (Tab::Secrets, "project.tabs.secrets"),
         ],
         state::tab,
         state::show_tab,
@@ -97,9 +102,14 @@ fn content() -> Vec<AnyElement> {
     if !d.status.initialized {
         return vec![
             card()
-                .child(text("obmem is not set up in this folder"))
-                .child(muted("Setting it up creates the project vault and .obmem.toml. Until then, hooks do nothing here."))
-                .child(view().flex_row().pt_2().child(primary("Set up obmem here", state::initialize).busy(state::running(Work::Initialize))))
+                .child(text(tr!("project.not_set_up")))
+                .child(muted(tr!("project.not_set_up_about")))
+                .child(
+                    view().flex_row().pt_2().child(
+                        primary(tr!("project.set_up_here"), state::initialize)
+                            .busy(state::running(Work::Initialize)),
+                    ),
+                )
                 .into_element(),
         ];
     }
@@ -118,85 +128,67 @@ fn content() -> Vec<AnyElement> {
 
 fn health(d: &Detail) -> View {
     let app = env!("CARGO_PKG_VERSION");
-    let cli = match &d.cli {
-        Some(v) if v == app => check(
-            Level::Ok,
-            "obmem command",
-            format!("obmem {v} is on PATH, where hooks and MCP configs run it."),
-        ),
+    let command = tr!("health.command");
+    let cli = match d.cli.clone() {
+        Some(v) if v == app => check(Level::Ok, command, tr!("health.command_ok", version = v)),
         Some(v) => check(
             Level::Warn,
-            "obmem command",
-            format!(
-                "obmem {v} is on PATH, but this app is {app}. Install the matching version so agents run the same obmem."
-            ),
+            command,
+            tr!("health.command_differs", version = v, app = app),
         ),
-        None => check(
-            Level::Error,
-            "obmem command",
-            "obmem is not on PATH. Every hook and MCP config runs it from there: install it first.",
-        ),
+        None => check(Level::Error, command, tr!("health.command_missing")),
     };
     let st = &d.status;
+    let (drafts, findings) = (st.drafts, st.open_findings);
     card()
-        .child(heading("Health"))
+        .child(heading(tr!("health.title")))
         .child(cli)
-        .child(vault("Project vault", &st.project_vault))
-        .child(vault("Personal vault", &st.global_vault))
+        .child(vault("common.project_vault", &st.project_vault))
+        .child(vault("common.personal_vault", &st.global_vault))
         .child(
             check(
-                if st.open_findings > 0 {
-                    Level::Warn
-                } else {
-                    Level::Ok
-                },
-                "Review",
-                format!(
-                    "{} drafts and {} open findings in the project vault.",
-                    st.drafts, st.open_findings
-                ),
+                if findings > 0 { Level::Warn } else { Level::Ok },
+                tr!("review.title"),
+                tr!("health.review", drafts = drafts, findings = findings),
             )
-            .child(action("Review", state::show_review)),
+            .child(action(tr!("review.title"), state::show_review)),
         )
 }
 
-fn vault(title: &str, v: &VaultStatus) -> View {
+/// A vault's row: `title` is the translation key of its name.
+fn vault(title: &'static str, v: &VaultStatus) -> View {
     let path = v.path.display().to_string();
+    let title = tr!(title);
     let row = match (&v.obsidian, v.exists) {
         (_, false) => check(
             Level::Error,
-            title.to_string(),
-            format!("{path} does not exist."),
+            title,
+            tr!("health.vault_missing", path = path),
         ),
-        (Registration::Registered { .. }, true) => check(
-            Level::Ok,
-            title.to_string(),
-            format!("{path} is open in Obsidian."),
-        ),
+        (Registration::Registered { .. }, true) => {
+            check(Level::Ok, title, tr!("health.vault_open", path = path))
+        }
         (Registration::NotRegistered, true) => check(
             Level::Warn,
-            title.to_string(),
-            format!(
-                "{path} is not open in Obsidian, so search and link checks skip it. In Obsidian, choose “Open folder as vault” and pick this folder."
-            ),
+            title,
+            tr!("health.vault_not_open", path = path),
         ),
-        (Registration::Unknown(e), true) => check(
-            Level::Warn,
-            title.to_string(),
-            format!("Could not read Obsidian's vault list: {e}"),
-        ),
+        (Registration::Unknown(e), true) => {
+            let why = e.clone();
+            check(Level::Warn, title, tr!("health.vault_unknown", why = why))
+        }
     };
     let folder = v.path.clone();
     match (&v.obsidian, v.exists) {
-        (Registration::NotRegistered, true) => {
-            row.child(action(REVEAL, move || drop(reveal_path(folder.clone()))))
-        }
+        (Registration::NotRegistered, true) => row.child(action(tr!(REVEAL), move || {
+            drop(reveal_path(folder.clone()))
+        })),
         _ => row,
     }
 }
 
 fn agents(list: Vec<AgentState>) -> View {
-    let mut c = card().child(heading("Agents"));
+    let mut c = card().child(heading(tr!("agents.title")));
     for a in list {
         let agent = a.agent;
         let mut row = view()
@@ -215,18 +207,20 @@ fn agents(list: Vec<AgentState>) -> View {
         row = match a.missing {
             Ok(files) if files.is_empty() => row.child(
                 view().flex_1().child(
-                    text("Set up")
+                    text(tr!("agents.is_set_up"))
                         .text_sm()
                         .text_color(crate::widgets::tone("ok")),
                 ),
             ),
             Ok(files) => row
-                .child(view().flex_1().min_w(px(160.0)).child(muted(format!(
-                    "Not set up: {} file(s) to update",
-                    files.len()
-                ))))
                 .child(
-                    primary("Set up", move || state::set_up(agent))
+                    view()
+                        .flex_1()
+                        .min_w(px(160.0))
+                        .child(muted(tr!("agents.not_set_up", files = files.len()))),
+                )
+                .child(
+                    primary(tr!("agents.set_up"), move || state::set_up(agent))
                         .busy(state::running(Work::SetUp(agent))),
                 ),
             Err(e) => row.child(
@@ -247,7 +241,7 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
         Err(e) => {
             return Some(card().child(check(
                 Level::Error,
-                "Could not read Claude Code's memory",
+                tr!("claude_memory.unreadable"),
                 e.clone(),
             )));
         }
@@ -261,12 +255,16 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
         .map(|i| i.source.clone())
         .collect();
     let chosen = signal(fresh.clone());
-    let mut c = card().test_id("claude-memory").child(heading("Claude Code memory")).child(muted(format!(
-        "{} of the {} memories in {} are not in the vaults yet. They come in as drafts for you to approve.",
-        fresh.len(),
-        m.items.len(),
-        m.dir.display()
-    )));
+    let (pending, all, dir) = (fresh.len(), m.items.len(), m.dir.display().to_string());
+    let mut c = card()
+        .test_id("claude-memory")
+        .child(heading(tr!("claude_memory.title")))
+        .child(muted(tr!(
+            "claude_memory.about",
+            pending = pending,
+            all = all,
+            dir = dir
+        )));
     for item in &m.items {
         let stem = item
             .source
@@ -290,7 +288,7 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
                         .min_w(px(200.0))
                         .child(text(item.title.clone()).text_sm()),
                 )
-                .child(muted("already imported"))
+                .child(muted(tr!("claude_memory.already")))
         } else {
             let source = item.source.clone();
             let on = {
@@ -318,7 +316,7 @@ fn claude_memory(m: &Result<ClaudeMemory, String>) -> Option<View> {
     Some(
         c.child(
             view().flex_row().pt_2().child(
-                primary("Import selected", move || {
+                primary(tr!("claude_memory.import"), move || {
                     state::import_claude(chosen.get_untracked())
                 })
                 .busy(state::running(Work::ImportClaude)),

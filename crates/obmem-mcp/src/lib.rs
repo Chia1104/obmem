@@ -532,7 +532,7 @@ impl MemoryServer {
         }
         let mut s = self.store.lock().unwrap();
         match s.verify(&a.id, &self.author, false) {
-            Ok(msg) => ok(msg),
+            Ok(done) => ok(done.to_string()),
             Err(e) => fail(e),
         }
     }
@@ -553,7 +553,7 @@ impl MemoryServer {
         }
         let mut s = self.store.lock().unwrap();
         match s.resolve_finding(&a.id, a.verdict, a.comment.as_deref(), &self.author, false) {
-            Ok(msg) => ok(msg),
+            Ok(done) => ok(done.to_string()),
             Err(e) => fail(e),
         }
     }

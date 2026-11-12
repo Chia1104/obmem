@@ -29,6 +29,7 @@ How obmem plugs into agent harnesses: the hook entry points (`hooks.rs`), `obmem
 
 - `setup` merges into existing files and skips entries that are already there, so running it again is safe.
 - `check` runs the same code without writing, and reports the files `setup` would change. Keep both behind the one `Writer` so they cannot disagree.
+- A step only the user can take (a trust prompt, an app setting) is a `ManualStep` in `Report::manual`. Its `Display` is the instruction the CLI prints; the desktop app translates it, so a new step needs a case in its `words::manual`.
 - Every write goes through `Writer::write` (`atomic_write`): the project may be an untrusted clone, and a config file planted as a symlink must not redirect a write outside it.
 - Generated commands call `obmem` from `PATH`, so the files can be committed. `setup cursor` writes `serve --project ${workspaceFolder}`.
 - `setup amp` writes the MCP server to the workspace settings (`amp.mcpServers` in `.amp/settings.json`), never to the user's. An orb, Amp's remote machine, has the repository and nothing from the user's own settings file. Amp runs a workspace server only after the user approves it.

@@ -13,7 +13,7 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 
 - These edit the config files and the vaults' `_system/secret-allowlist.toml` the way a person does, through `toml_edit`: the rest of the file stays, comments included.
 - A save is checked by the same functions `Config::load` and the scanner use (`project_vault_path`, `is_plain_relative`, `secrets::regex_problem` / `stopword_problem`). Put a new rule there, not in the editor, so that what can be saved is exactly what loads.
-- The rules are also there to ask: `ProjectSettings::problems`, `GlobalSettings::problems` and `SyncSettings::problems` give every rule the settings break, each with its field, and `allowlist::problem` gives why the scanner would ignore an entry. A settings screen shows these at the fields before it saves; a save refuses the first. A message is a sentence for the person who typed the value. A rule that needs the file system (the vault must not leave the project through a symlink) is checked only by the save.
+- The rules are also there to ask: `ProjectSettings::problems`, `GlobalSettings::problems` and `SyncSettings::problems` give every rule the settings break, each with its field, and `allowlist::problem` gives why the scanner would ignore an entry. A settings screen shows these at the fields before it saves; a save refuses the first. A rule is a value (`settings::Rule`, `secrets::Ignored`) whose `Display` is a sentence for the person who typed the value; the desktop app says it in its own language. A rule that needs the file system (the vault must not leave the project through a symlink) is checked only by the save.
 
 ## Review (`review.rs`)
 

@@ -9,14 +9,66 @@ use crate::hooks::Agent;
 use anyhow::{Context, Result};
 use obmem_core::config::Config;
 use serde_json::{Value, json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct Report {
     /// Files `setup` wrote; for `check`, the files it would write (missing or outdated entries).
     pub changed: Vec<String>,
     pub unchanged: Vec<String>,
     /// Steps only the user can do (trust prompts, app settings).
-    pub manual: Vec<String>,
+    pub manual: Vec<ManualStep>,
+}
+
+/// A step of an agent's setup that only the user can take. Written out (`Display`) it is the
+/// instruction the CLI prints; a front end in another language says it in its own words.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ManualStep {
+    /// Claude Code asks about a project's MCP servers when a session starts.
+    ApproveInClaude,
+    /// Codex reads a project's config and hooks only once the project is trusted.
+    TrustInCodex {
+        project: PathBuf,
+    },
+    EnableInCursor,
+    /// Copilot CLI has no project-level MCP config.
+    RegisterWithCopilot,
+    /// Amp runs a workspace MCP server only once it is approved.
+    ApproveInAmp {
+        project: PathBuf,
+    },
+}
+
+/// What [`ManualStep::RegisterWithCopilot`] adds to `~/.copilot/mcp-config.json`.
+pub const COPILOT_MCP_CONFIG: &str = r#"{"mcpServers": {"obmem": {"type": "local", "command": "obmem", "args": ["serve"], "tools": ["*"]}}}"#;
+
+impl std::fmt::Display for ManualStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ManualStep::ApproveInClaude => f.write_str(
+                "Start a new Claude Code session in this project and approve the `obmem` MCP server.",
+            ),
+            ManualStep::TrustInCodex { project } => write!(
+                f,
+                "Codex loads project config only for trusted projects: trust {} when Codex asks (or set \
+                 trust_level = \"trusted\" for it in ~/.codex/config.toml), then review and trust the two new hooks.",
+                project.display()
+            ),
+            ManualStep::EnableInCursor => {
+                f.write_str("In Cursor: Settings → MCP, enable `obmem` for this project.")
+            }
+            ManualStep::RegisterWithCopilot => write!(
+                f,
+                "Register the MCP server for Copilot CLI: add {COPILOT_MCP_CONFIG} to ~/.copilot/mcp-config.json \
+                 (or run /mcp add inside copilot). Repository hooks need the workspace to be trusted."
+            ),
+            ManualStep::ApproveInAmp { project } => write!(
+                f,
+                "Amp runs a workspace MCP server only after you approve it: cd {} && amp mcp approve obmem \
+                 (in an orb, Amp asks in the thread).",
+                project.display()
+            ),
+        }
+    }
 }
 
 impl Report {
@@ -346,7 +398,7 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
                 ("PreCompact", cmd("pre-compact")),
             ];
             r.note(&p, add_nested_hooks(&p, w, &events)?);
-            r.manual.push("Start a new Claude Code session in this project and approve the `obmem` MCP server.".into());
+            r.manual.push(ManualStep::ApproveInClaude);
         }
         Agent::Codex => {
             let p = root.join(CODEX_CONFIG);
@@ -365,11 +417,9 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
                     ],
                 )?,
             );
-            r.manual.push(format!(
-                "Codex loads project config only for trusted projects: trust {} when Codex asks (or set \
-                 trust_level = \"trusted\" for it in ~/.codex/config.toml), then review and trust the two new hooks.",
-                root.display()
-            ));
+            r.manual.push(ManualStep::TrustInCodex {
+                project: root.to_path_buf(),
+            });
         }
         Agent::Cursor => {
             // Some Cursor hosts (T3 Code's driver) start MCP servers in the home directory, so pin
@@ -384,8 +434,7 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
                 ("preCompact", json!({ "command": cmd("pre-compact") })),
             ];
             r.note(&p, add_flat_hooks(&p, w, &events)?);
-            r.manual
-                .push("In Cursor: Settings → MCP, enable `obmem` for this project.".into());
+            r.manual.push(ManualStep::EnableInCursor);
         }
         Agent::Copilot => {
             let p = root.join(".github/hooks/obmem.json");
@@ -397,12 +446,7 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
                 ("preCompact", entry("pre-compact")),
             ];
             r.note(&p, add_flat_hooks(&p, w, &events)?);
-            r.manual.push(
-                "Register the MCP server for Copilot CLI: add {\"mcpServers\": {\"obmem\": {\"type\": \"local\", \
-                 \"command\": \"obmem\", \"args\": [\"serve\"], \"tools\": [\"*\"]}}} to ~/.copilot/mcp-config.json \
-                 (or run /mcp add inside copilot). Repository hooks need the workspace to be trusted."
-                    .into(),
-            );
+            r.manual.push(ManualStep::RegisterWithCopilot);
         }
         Agent::Amp => {
             // The workspace settings, not the user's: an orb (Amp's remote machine) has the
@@ -415,11 +459,9 @@ fn run(cfg: &Config, agent: Agent, w: &Writer) -> Result<Report> {
                 w.write(&p, AMP_PLUGIN)?;
             }
             r.note(&p, changed);
-            r.manual.push(format!(
-                "Amp runs a workspace MCP server only after you approve it: cd {} && amp mcp approve obmem \
-                 (in an orb, Amp asks in the thread).",
-                root.display()
-            ));
+            r.manual.push(ManualStep::ApproveInAmp {
+                project: root.to_path_buf(),
+            });
         }
     }
     write_skills(root, agent, w, &mut r)?;

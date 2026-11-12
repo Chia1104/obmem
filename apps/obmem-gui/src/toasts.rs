@@ -8,6 +8,7 @@
 
 use crate::icons::{X, icon};
 use crate::widgets::{Level, mark};
+use crate::words::named;
 use nsh_base::{
     Anchor, ToastManager, ToastMotion, ToastOptions, ToastStackState, ToastTransitionStatus,
     button, theme, toast, toast_stack,
@@ -124,7 +125,7 @@ pub(crate) fn failed(why: impl Into<String>) {
     push(
         Report {
             level: Level::Error,
-            title: "That did not work".into(),
+            title: t!("toast.failed"),
             detail: why.into(),
         },
         None,
@@ -211,7 +212,7 @@ fn one(host: Host, entry: ReadSignal<Entry>) -> impl IntoElement {
                 .rounded(move || theme().radius)
                 .text_color(move || theme().muted_foreground)
                 .hover(|s| s.text_color(move || theme().foreground))
-                .accessibility_label("Dismiss")
+                .accessibility_label(named("common.dismiss"))
                 .on_press(move || host.dismiss(id))
                 .child(icon(X, 14.0)),
         )

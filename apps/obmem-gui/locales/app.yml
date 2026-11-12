@@ -1,0 +1,862 @@
+# The desktop app's words: every text the user reads, in English (`en`) and Traditional Chinese
+# (`zh`). rust-i18n's format, one file for both languages. `%{name}` is filled in by the code.
+#
+# Chinese is under `zh`, not `zh-Hant` or `zh-TW`, so that every Chinese a computer may name
+# finds it (see `Language::locale` in src/appearance.rs).
+#
+# A key names what the text is for, not the English text. A whole sentence is one key.
+# A test in src/words.rs checks that every key the code uses is here, in both languages.
+_version: 2
+
+common:
+  loading:
+    en: "Loading…"
+    zh: "載入中…"
+  save:
+    en: "Save"
+    zh: "儲存"
+  cancel:
+    en: "Cancel"
+    zh: "取消"
+  add:
+    en: "Add"
+    zh: "加入"
+  remove:
+    en: "Remove"
+    zh: "移除"
+  refresh:
+    en: "Refresh"
+    zh: "重新整理"
+  try_again:
+    en: "Try again"
+    zh: "再試一次"
+  dismiss:
+    en: "Dismiss"
+    zh: "關閉"
+  switched_on:
+    en: "On"
+    zh: "開"
+  switched_off:
+    en: "Off"
+    zh: "關"
+  open_in_obsidian:
+    en: "Open in Obsidian"
+    zh: "在 Obsidian 中打開"
+  show_in_finder:
+    en: "Show in Finder"
+    zh: "在 Finder 中顯示"
+  show_in_explorer:
+    en: "Show in Explorer"
+    zh: "在檔案總管中顯示"
+  project_vault:
+    en: "Project vault"
+    zh: "專案儲存庫"
+  personal_vault:
+    en: "Personal vault"
+    zh: "個人儲存庫"
+  unreadable:
+    en: "Could not read %{file}"
+    zh: "無法讀取 %{file}"
+  list_separator:
+    en: ", "
+    zh: "、"
+
+sidebar:
+  projects:
+    en: "Projects"
+    zh: "專案"
+  add:
+    en: "Add a project…"
+    zh: "加入專案…"
+  close:
+    en: "Close the project list"
+    zh: "關閉專案列表"
+  collapse:
+    en: "Collapse the sidebar"
+    zh: "收合側邊欄"
+  show:
+    en: "Show the project list"
+    zh: "顯示專案列表"
+  resize:
+    en: "Sidebar width"
+    zh: "側邊欄寬度"
+  empty:
+    en: "No projects yet. A project shows up here once an agent session starts in it, or add one with +."
+    zh: "還沒有專案。代理程式在某個專案中開始工作階段後，該專案就會出現在這裡；也可以按 + 加入。"
+  missing:
+    en: "%{path} (missing)"
+    zh: "%{path}（找不到）"
+  add_dialog:
+    title:
+      en: "Add a project"
+      zh: "加入專案"
+    button:
+      en: "Add"
+      zh: "加入"
+
+project:
+  none:
+    en: "Add a project to see its memory setup."
+    zh: "加入專案後，這裡會顯示它的記憶設定。"
+  unreadable:
+    en: "Could not read this project"
+    zh: "無法讀取這個專案"
+  remove:
+    en: "Remove from list"
+    zh: "從列表移除"
+  not_set_up:
+    en: "obmem is not set up in this folder"
+    zh: "這個資料夾還沒有設定 obmem"
+  not_set_up_about:
+    en: "Setting it up creates the project vault and .obmem.toml. Until then, hooks do nothing here."
+    zh: "設定時會建立專案儲存庫與 .obmem.toml。在那之前，hook 在這裡不會做任何事。"
+  set_up_here:
+    en: "Set up obmem here"
+    zh: "在這裡設定 obmem"
+  tabs:
+    overview:
+      en: "Overview"
+      zh: "總覽"
+    agent:
+      en: "Agent view"
+      zh: "代理程式視角"
+    sessions:
+      en: "Sessions"
+      zh: "工作階段"
+    settings:
+      en: "Settings"
+      zh: "設定"
+    secrets:
+      en: "Secrets"
+      zh: "機密"
+
+health:
+  title:
+    en: "Health"
+    zh: "健康狀態"
+  command:
+    en: "obmem command"
+    zh: "obmem 指令"
+  command_ok:
+    en: "obmem %{version} is on PATH, where hooks and MCP configs run it."
+    zh: "PATH 上有 obmem %{version}，hook 與 MCP 設定都從那裡執行它。"
+  command_differs:
+    en: "obmem %{version} is on PATH, but this app is %{app}. Install the matching version so agents run the same obmem."
+    zh: "PATH 上是 obmem %{version}，但這個 App 是 %{app}。請安裝相同的版本，讓代理程式執行同一個 obmem。"
+  command_missing:
+    en: "obmem is not on PATH. Every hook and MCP config runs it from there: install it first."
+    zh: "PATH 上沒有 obmem。所有 hook 與 MCP 設定都從那裡執行它，請先安裝。"
+  review:
+    en: "%{drafts} drafts and %{findings} open findings in the project vault."
+    zh: "專案儲存庫中有 %{drafts} 份草稿、%{findings} 個未解決的稽核問題。"
+  vault_missing:
+    en: "%{path} does not exist."
+    zh: "%{path} 不存在。"
+  vault_open:
+    en: "%{path} is open in Obsidian."
+    zh: "%{path} 已在 Obsidian 中開啟。"
+  vault_not_open:
+    en: "%{path} is not open in Obsidian, so search and link checks skip it. In Obsidian, choose “Open folder as vault” and pick this folder."
+    zh: "%{path} 還沒有在 Obsidian 中開啟，所以搜尋與連結檢查會略過它。請在 Obsidian 選擇「開啟資料夾作為儲存庫」，再選這個資料夾。"
+  vault_unknown:
+    en: "Could not read Obsidian's vault list: %{why}"
+    zh: "無法讀取 Obsidian 的儲存庫列表：%{why}"
+
+agents:
+  title:
+    en: "Agents"
+    zh: "代理程式"
+  is_set_up:
+    en: "Set up"
+    zh: "已設定"
+  set_up:
+    en: "Set up"
+    zh: "設定"
+  not_set_up:
+    en: "Not set up: %{files} file(s) to update"
+    zh: "尚未設定：有 %{files} 個檔案要更新"
+  set_up_done:
+    en: "%{agent} is set up"
+    zh: "%{agent} 已設定完成"
+  updated:
+    en: "Updated %{file}"
+    zh: "已更新 %{file}"
+  next:
+    en: "Next: %{step}"
+    zh: "下一步：%{step}"
+
+manual:
+  approve_in_claude:
+    en: "Start a new Claude Code session in this project and approve the `obmem` MCP server."
+    zh: "在這個專案中開始新的 Claude Code 工作階段，並核准 `obmem` MCP 伺服器。"
+  trust_in_codex:
+    en: "Codex loads project config only for trusted projects: trust %{project} when Codex asks (or set trust_level = \"trusted\" for it in ~/.codex/config.toml), then review and trust the two new hooks."
+    zh: "Codex 只會載入受信任專案的設定：Codex 詢問時請信任 %{project}（或在 ~/.codex/config.toml 為它設定 trust_level = \"trusted\"），再檢視並信任兩個新的 hook。"
+  enable_in_cursor:
+    en: "In Cursor: Settings → MCP, enable `obmem` for this project."
+    zh: "在 Cursor 的 Settings → MCP 中，為這個專案啟用 `obmem`。"
+  register_with_copilot:
+    en: "Register the MCP server for Copilot CLI: add %{config} to ~/.copilot/mcp-config.json (or run /mcp add inside copilot). Repository hooks need the workspace to be trusted."
+    zh: "為 Copilot CLI 註冊 MCP 伺服器：把 %{config} 加到 ~/.copilot/mcp-config.json（或在 copilot 中執行 /mcp add）。儲存庫的 hook 需要工作區受信任才會執行。"
+  approve_in_amp:
+    en: "Amp runs a workspace MCP server only after you approve it: cd %{project} && amp mcp approve obmem (in an orb, Amp asks in the thread)."
+    zh: "Amp 要在你核准後才會執行工作區的 MCP 伺服器：cd %{project} && amp mcp approve obmem（在 orb 中，Amp 會在對話串裡詢問）。"
+
+claude_memory:
+  title:
+    en: "Claude Code memory"
+    zh: "Claude Code 記憶"
+  unreadable:
+    en: "Could not read Claude Code's memory"
+    zh: "無法讀取 Claude Code 的記憶"
+  about:
+    en: "%{pending} of the %{all} memories in %{dir} are not in the vaults yet. They come in as drafts for you to approve."
+    zh: "%{dir} 的 %{all} 筆記憶中，有 %{pending} 筆還不在儲存庫裡。匯入後會是草稿，等你核准。"
+  already:
+    en: "already imported"
+    zh: "已匯入"
+  import:
+    en: "Import selected"
+    zh: "匯入所選項目"
+  imported:
+    en: "Claude Code memory imported"
+    zh: "已匯入 Claude Code 記憶"
+  imported_as:
+    en: "Imported %{name} as %{note}"
+    zh: "已將 %{name} 匯入為 %{note}"
+  skipped:
+    en: "Skipped %{name}: %{why}"
+    zh: "已略過 %{name}：%{why}"
+  exists:
+    en: "%{target} already exists"
+    zh: "%{target} 已經存在"
+
+agent_view:
+  task:
+    en: "For a task"
+    zh: "針對一項任務"
+  task_about:
+    en: "What memory_context returns when an agent describes this task, in any language."
+    zh: "代理程式描述這項任務時，memory_context 會回傳的內容。任務可以用任何語言描述。"
+  task_example:
+    en: "e.g. add a retry to the sync job"
+    zh: "例如：為同步工作加上重試"
+  preview:
+    en: "Preview"
+    zh: "預覽"
+  session_start:
+    en: "At session start"
+    zh: "工作階段開始時"
+  session_start_about:
+    en: "What the session-start hook gives an agent before its first message."
+    zh: "session-start hook 在代理程式的第一則訊息之前給它的內容。"
+  error:
+    en: "The agent would get this error instead"
+    zh: "代理程式會改為收到這個錯誤"
+
+sessions:
+  unreadable:
+    en: "Could not read the session logs"
+    zh: "無法讀取工作階段紀錄"
+  empty:
+    en: "No sessions logged yet. Agents log here with memory_log, and the hooks before compaction."
+    zh: "還沒有工作階段紀錄。代理程式會用 memory_log 寫在這裡，hook 則在壓縮對話前寫入。"
+
+settings:
+  title:
+    en: "Project settings"
+    zh: "專案設定"
+  about:
+    en: ".obmem.toml is committed with the project, so these apply to everyone working on it."
+    zh: ".obmem.toml 會隨專案一起提交，所以這些設定對所有參與專案的人都有效。"
+  name:
+    en: "Name"
+    zh: "名稱"
+  name_help:
+    en: "The folder for this project's session logs in your personal vault. Empty: the folder's name."
+    zh: "這個專案的工作階段紀錄在個人儲存庫中的資料夾。留空：使用專案資料夾的名稱。"
+  name_placeholder:
+    en: "Folder name"
+    zh: "資料夾名稱"
+  vault_help:
+    en: "Where the project's notes live, relative to the project."
+    zh: "專案筆記的位置，相對於專案根目錄。"
+  secret_mode:
+    en: "When a write contains a secret"
+    zh: "寫入的內容含有機密時"
+  secret_mode_help:
+    en: "Refuse it, or replace the secret with [REDACTED] and write the rest."
+    zh: "拒絕寫入，或把機密換成 [REDACTED] 後寫入其餘內容。"
+  refuse:
+    en: "Refuse"
+    zh: "拒絕"
+  redact:
+    en: "Redact"
+    zh: "遮蔽"
+  env_files:
+    en: "More env files"
+    zh: "其他 env 檔案"
+  env_files_help:
+    en: "Their values count as known secrets, one path per line. Always scanned: %{always}."
+    zh: "這些檔案中的值會視為已知機密，每行一個路徑。一律會掃描：%{always}。"
+  stale:
+    en: "Stale after (days)"
+    zh: "多久算過期（天）"
+  stale_help:
+    en: "Active notes not checked for this long are reported by the audit."
+    zh: "超過這個天數沒有檢查過的有效筆記，稽核時會回報。"
+  threshold:
+    en: "Duplicate threshold"
+    zh: "重複門檻"
+  threshold_help:
+    en: "How similar two titles must be (0 to 1) for the audit to call them duplicates."
+    zh: "兩個標題要多相似（0 到 1），稽核才會視為重複。"
+  saved:
+    en: "Settings saved."
+    zh: "設定已儲存。"
+
+codex:
+  auto_approve:
+    en: "Run obmem's tools without asking"
+    zh: "不詢問就執行 obmem 的工具"
+  auto_approve_help:
+    en: "Codex asks before each MCP tool call. `codex exec` cannot ask, so it can use obmem only with this on."
+    zh: "Codex 每次呼叫 MCP 工具前都會詢問。`codex exec` 無法詢問，所以要開啟這項才能使用 obmem。"
+  not_set_up:
+    en: "obmem is not set up for Codex in this project. Set it up in Overview first."
+    zh: "這個專案還沒有為 Codex 設定 obmem。請先在「總覽」中設定。"
+  auto_approve_on:
+    en: "Codex now runs obmem's tools without asking."
+    zh: "Codex 現在會不詢問就執行 obmem 的工具。"
+  auto_approve_off:
+    en: "Codex asks before running obmem's tools again."
+    zh: "Codex 執行 obmem 的工具前會再次詢問。"
+
+secrets:
+  scanner:
+    en: "Scanner"
+    zh: "掃描器"
+  every_write:
+    en: "Every write is scanned"
+    zh: "每次寫入都會掃描"
+  refused:
+    en: "A write that contains a secret is refused."
+    zh: "含有機密的寫入會被拒絕。"
+  redacted:
+    en: "A secret in a write is replaced with [REDACTED] and the rest is written."
+    zh: "寫入內容中的機密會換成 [REDACTED]，其餘內容照常寫入。"
+  rules:
+    en: "%{n} format rules"
+    zh: "%{n} 條格式規則"
+  rules_about:
+    en: "Known token formats, plus your own in the vault's _system/secret-rules.toml."
+    zh: "已知的權杖格式，加上你寫在儲存庫 _system/secret-rules.toml 中的規則。"
+  known:
+    en: "%{n} known values"
+    zh: "%{n} 個已知的值"
+  known_about:
+    en: "Values from the project's env files and sensitive-looking environment variables, kept in memory only."
+    zh: "來自專案的 env 檔案，以及看起來敏感的環境變數；這些值只留在記憶體中。"
+  try:
+    en: "Try it"
+    zh: "試試看"
+  try_about:
+    en: "Paste text to see what the scanner would catch. Nothing is stored."
+    zh: "貼上文字，看看掃描器會攔下什麼。不會儲存任何內容。"
+  try_placeholder:
+    en: "Text to scan"
+    zh: "要掃描的文字"
+  scan:
+    en: "Scan"
+    zh: "掃描"
+  nothing:
+    en: "Nothing found"
+    zh: "沒有發現機密"
+  nothing_about:
+    en: "This text would be written as it is."
+    zh: "這段文字會原樣寫入。"
+  hit:
+    en: "%{preview}   fingerprint %{fingerprint}"
+    zh: "%{preview}   指紋 %{fingerprint}"
+  allow_here:
+    en: "Allow in this project"
+    zh: "在這個專案中允許"
+  allow_everywhere:
+    en: "Allow in every project"
+    zh: "在所有專案中允許"
+  allowlist:
+    en: "This project's allowlist"
+    zh: "這個專案的允許清單"
+  allowlist_about:
+    en: "False positives allowed in this project, by fingerprint. The file comes with the project, so patterns and words count only in your personal settings."
+    zh: "這個專案中依指紋允許的誤判。這個檔案會隨專案一起提交，所以樣式與字詞只在你的個人設定中有效。"
+  allowlist_unreadable:
+    en: "Could not read the allowlist"
+    zh: "無法讀取允許清單"
+  allowlist_empty:
+    en: "Nothing allowed yet."
+    zh: "還沒有允許任何項目。"
+
+review:
+  title:
+    en: "Review"
+    zh: "審閱"
+  about:
+    en: "Agent drafts to approve and findings to resolve. Read a note in Obsidian, decide here."
+    zh: "等你核准的代理程式草稿，以及待處理的稽核問題。在 Obsidian 閱讀筆記，在這裡做決定。"
+  unreadable:
+    en: "Could not read the review list"
+    zh: "無法讀取審閱列表"
+  no_projects:
+    en: "No projects are set up yet."
+    zh: "還沒有設定好的專案。"
+  run_audit:
+    en: "Run audit"
+    zh: "執行稽核"
+  nothing:
+    en: "Nothing to review."
+    zh: "沒有需要審閱的項目。"
+  draft_about:
+    en: "%{note_type} draft · by %{author} · %{updated}"
+    zh: "%{note_type} 草稿 · 作者 %{author} · %{updated}"
+  finding_about:
+    en: "finding · %{status} · by %{author} · %{updated}"
+    zh: "稽核問題 · %{status} · 作者 %{author} · %{updated}"
+  about_note:
+    en: "About %{target}"
+    zh: "關於 %{target}"
+  approve:
+    en: "Approve"
+    zh: "核准"
+  verify:
+    en: "Verify note"
+    zh: "驗證筆記"
+  fixed:
+    en: "Fixed"
+    zh: "已修正"
+  accept:
+    en: "Accept"
+    zh: "接受"
+  reject:
+    en: "Reject"
+    zh: "駁回"
+  reopen:
+    en: "Reopen"
+    zh: "重新開啟"
+  reject_ask:
+    en: "Reject…"
+    zh: "駁回…"
+  reject_about:
+    en: "A false positive? It is never reported again."
+    zh: "這是誤判嗎？駁回後就不會再回報。"
+  audit_done:
+    en: "Checked %{checked} notes: %{errors} errors, %{warnings} warnings."
+    zh: "已檢查 %{checked} 篇筆記：%{errors} 個錯誤、%{warnings} 個警告。"
+  audit_done_with_findings:
+    en: "Checked %{checked} notes: %{errors} errors, %{warnings} warnings. Findings: %{new} new, %{reopened} reopened, %{closed} closed."
+    zh: "已檢查 %{checked} 篇筆記：%{errors} 個錯誤、%{warnings} 個警告。稽核問題：新增 %{new} 個、重新開啟 %{reopened} 個、關閉 %{closed} 個。"
+
+decided:
+  approved:
+    en: "[[%{id}]] is now active."
+    zh: "[[%{id}]] 現在是 active。"
+  resolved:
+    en: "[[%{id}]] is now %{status}"
+    zh: "[[%{id}]] 現在是 %{status}"
+  resolved_and_suppressed:
+    en: "[[%{id}]] is now %{status} and suppressed in %{file}"
+    zh: "[[%{id}]] 現在是 %{status}，並已記錄在 %{file}，之後不再回報"
+  verified_at_commit:
+    en: "[[%{id}]] verified against %{commit} on %{date}."
+    zh: "[[%{id}]] 已於 %{date} 對照 %{commit} 驗證。"
+  verified:
+    en: "[[%{id}]] verified on %{date} (no code_refs, so no commit recorded)."
+    zh: "[[%{id}]] 已於 %{date} 驗證（沒有 code_refs，所以沒有記錄 commit）。"
+
+personal:
+  title:
+    en: "Personal settings"
+    zh: "個人設定"
+  about:
+    en: "Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault."
+    zh: "只屬於你，對所有專案有效：~/.config/obmem/config.toml 與你的個人儲存庫。"
+  unreadable:
+    en: "Could not read your settings"
+    zh: "無法讀取你的設定"
+  settings:
+    en: "Settings"
+    zh: "設定"
+  vault_help:
+    en: "Your feedback, preferences and session logs. Now: %{now}. Empty: ~/Obsidian/AgentMemory."
+    zh: "你的回饋、偏好與工作階段紀錄。目前：%{now}。留空：~/Obsidian/AgentMemory。"
+  scan_env:
+    en: "Scan environment variables"
+    zh: "掃描環境變數"
+  scan_env_help:
+    en: "Treat the values of sensitive-looking environment variables as known secrets. Only you can turn this off; a project's settings cannot."
+    zh: "把看起來敏感的環境變數的值視為已知機密。只有你能關閉這項，專案的設定不能。"
+  auto_approve:
+    en: "Approve agent notes automatically"
+    zh: "自動核准代理程式的筆記"
+  auto_approve_help:
+    en: "Agents' notes are saved active instead of waiting in Review as drafts. Only you can turn this on; a project's .obmem.toml can turn it off with [review] auto_approve = false."
+    zh: "代理程式的筆記會直接存為 active，不會以草稿在「審閱」中等待。只有你能開啟這項；專案的 .obmem.toml 可以用 [review] auto_approve = false 關閉它。"
+  saved:
+    en: "Personal settings saved."
+    zh: "個人設定已儲存。"
+
+sync:
+  title:
+    en: "Sync"
+    zh: "同步"
+  about:
+    en: "Keep this personal vault the same on your Macs and PCs through an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Everything in the bucket is encrypted, and only your passphrase unlocks it."
+    zh: "透過你自己的 S3 相容儲存貯體（AWS S3、Cloudflare R2 或 MinIO），讓個人儲存庫在你的 Mac 與 PC 上保持一致。儲存貯體中的內容全部加密，只有你的通關密語能解開。"
+  unreadable:
+    en: "Could not read the sync settings"
+    zh: "無法讀取同步設定"
+  off:
+    en: "Off: no bucket yet."
+    zh: "未啟用：還沒有儲存貯體。"
+  keychain_unreadable:
+    en: "Could not read the keychain"
+    zh: "無法讀取鑰匙圈"
+  not_connected:
+    en: "This device is not connected"
+    zh: "這部裝置尚未連接"
+  not_connected_about:
+    en: "Enter the bucket's access key and your passphrase below."
+    zh: "請在下方輸入儲存貯體的存取金鑰與你的通關密語。"
+  not_synced:
+    en: "Connected, not synced yet"
+    zh: "已連接，尚未同步"
+  not_synced_about:
+    en: "Sync now, or start an agent session in an obmem project."
+    zh: "立即同步，或在 obmem 專案中開始代理程式的工作階段。"
+  last:
+    en: "Last sync"
+    zh: "上次同步"
+  last_failed:
+    en: "The last sync failed"
+    zh: "上次同步失敗"
+  last_about:
+    en: "%{what} (%{at})"
+    zh: "%{what}（%{at}）"
+  now:
+    en: "Sync now"
+    zh: "立即同步"
+  endpoint:
+    en: "Endpoint"
+    zh: "端點"
+  endpoint_help:
+    en: "The S3 API URL, e.g. https://<account-id>.r2.cloudflarestorage.com. Empty: AWS S3."
+    zh: "S3 API 的網址，例如 https://<account-id>.r2.cloudflarestorage.com。留空：AWS S3。"
+  bucket:
+    en: "Bucket"
+    zh: "儲存貯體"
+  bucket_help:
+    en: "Empty turns sync off."
+    zh: "留空會關閉同步。"
+  region:
+    en: "Region"
+    zh: "區域"
+  region_help:
+    en: "AWS needs the bucket's region. Empty: auto, which R2 expects."
+    zh: "AWS 需要儲存貯體的區域。留空：auto，R2 要的就是這個。"
+  prefix:
+    en: "Prefix"
+    zh: "前置路徑"
+  prefix_help:
+    en: "Where in the bucket the vault goes. Empty: obmem."
+    zh: "儲存庫放在儲存貯體中的哪裡。留空：obmem。"
+  device:
+    en: "This device's name"
+    zh: "這部裝置的名稱"
+  device_help:
+    en: "Shown in snapshots and conflict copies, and part of session log names. Connecting sets it to the host name plus four random hex digits, so two machines never share one."
+    zh: "會出現在快照與衝突副本中，也是工作階段紀錄檔名的一部分。連接時會設為主機名稱加四個隨機十六進位數字，所以兩部機器不會同名。"
+  auto:
+    en: "Sync automatically"
+    zh: "自動同步"
+  auto_help:
+    en: "Sync in the background when an agent session starts or a turn ends in an obmem project, at most once a minute."
+    zh: "在 obmem 專案中，代理程式的工作階段開始或一輪對話結束時於背景同步，最多每分鐘一次。"
+  plugins:
+    en: "Community plugins"
+    zh: "社群外掛"
+  plugins_help:
+    en: "Also sync .obsidian/plugins. Settings, themes and snippets always sync; the workspace layout never does."
+    zh: "也同步 .obsidian/plugins。設定、佈景主題與程式碼片段一律同步；工作區版面則永不同步。"
+  plugins_switch:
+    en: "Sync community plugins"
+    zh: "同步社群外掛"
+  connect_title:
+    en: "Connect this device"
+    zh: "連接這部裝置"
+  connect_about:
+    en: "The access key stays in this device's keychain. On the first device the passphrase you choose starts the vault; every other device unlocks it with the same one. If you forget it, the bucket cannot be read."
+    zh: "存取金鑰只留在這部裝置的鑰匙圈中。在第一部裝置上，你選的通關密語會建立儲存庫；其他裝置都用同一組通關密語解鎖。忘記的話，儲存貯體的內容就無法讀取。"
+  key_id:
+    en: "Access key ID"
+    zh: "存取金鑰 ID"
+  secret:
+    en: "Secret access key"
+    zh: "私密存取金鑰"
+  passphrase:
+    en: "Passphrase"
+    zh: "通關密語"
+  repeat:
+    en: "Repeat passphrase"
+    zh: "再次輸入通關密語"
+  connect:
+    en: "Connect"
+    zh: "連接"
+  saved:
+    en: "Sync settings saved."
+    zh: "同步設定已儲存。"
+  started_vault:
+    en: "Started a new encrypted vault in %{bucket}. Every other device unlocks it with the same passphrase."
+    zh: "已在 %{bucket} 建立新的加密儲存庫。其他裝置都用同一組通關密語解鎖。"
+  connected_to:
+    en: "Connected to the vault in %{bucket}."
+    zh: "已連接到 %{bucket} 中的儲存庫。"
+  synced:
+    en: "Synced: %{summary}"
+    zh: "已同步：%{summary}"
+  queued:
+    en: "A sync is already queued."
+    zh: "已經有一次同步在排隊。"
+  summary:
+    nothing:
+      en: "nothing to sync yet"
+      zh: "還沒有可同步的內容"
+    snapshot:
+      en: "snapshot %{seq}"
+      zh: "快照 %{seq}"
+    up_to_date:
+      en: "up to date with snapshot %{seq}"
+      zh: "與快照 %{seq} 一致"
+    with_parts:
+      en: "%{head}: %{parts}"
+      zh: "%{head}：%{parts}"
+    up:
+      en: "%{n} up"
+      zh: "上傳 %{n} 個"
+    down:
+      en: "%{n} down"
+      zh: "下載 %{n} 個"
+    conflict:
+      en: "%{n} conflict"
+      zh: "衝突 %{n} 個"
+    conflicts:
+      en: "%{n} conflicts"
+      zh: "衝突 %{n} 個"
+    deferred:
+      en: "%{n} left for the next sync"
+      zh: "%{n} 個留待下次同步"
+    skipped:
+      en: "%{n} skipped"
+      zh: "略過 %{n} 個"
+  cleanup:
+    removed:
+      en: "%{summary}; removed %{snapshots} old snapshots and %{blobs} unused blobs"
+      zh: "%{summary}；已移除 %{snapshots} 個舊快照與 %{blobs} 個不再使用的 blob"
+    failed:
+      en: "%{summary}; cleaning up old snapshots failed: %{why}"
+      zh: "%{summary}；清理舊快照失敗：%{why}"
+
+allowlist:
+  title:
+    en: "Allowed everywhere"
+    zh: "在所有專案中允許"
+  about:
+    en: "False positives the scanner lets through in every project. Only this list may hold patterns and words."
+    zh: "掃描器在所有專案中都會放行的誤判。只有這份清單可以包含樣式與字詞。"
+  unreadable:
+    en: "Could not read your allowlist"
+    zh: "無法讀取你的允許清單"
+  fingerprints:
+    en: "Fingerprints"
+    zh: "指紋"
+  fingerprints_help:
+    en: "Exact values, added from a scan."
+    zh: "完全相符的值，從掃描結果加入。"
+  patterns:
+    en: "Patterns"
+    zh: "樣式"
+  patterns_help:
+    en: "Regexes matched against a suspected secret."
+    zh: "用來比對疑似機密的正規表示式。"
+  words:
+    en: "Words"
+    zh: "字詞"
+  words_help:
+    en: "A value containing one of these (4+ letters) is not a secret."
+    zh: "含有其中任一字詞（至少 4 個字母）的值不算機密。"
+  add_patterns:
+    en: "Add to patterns"
+    zh: "加入樣式"
+  add_words:
+    en: "Add to words"
+    zh: "加入字詞"
+  none:
+    en: "None."
+    zh: "無。"
+  allowed_here:
+    en: "Allowed in this project."
+    zh: "已在這個專案中允許。"
+  allowed_everywhere:
+    en: "Allowed in every project."
+    zh: "已在所有專案中允許。"
+  removed:
+    en: "Removed from the allowlist."
+    zh: "已從允許清單移除。"
+
+ignored:
+  empty:
+    en: "The scanner would ignore \"%{entry}\": it is empty."
+    zh: "掃描器會忽略「%{entry}」：它是空的。"
+  matches_anything:
+    en: "The scanner would ignore \"%{entry}\": it matches almost anything."
+    zh: "掃描器會忽略「%{entry}」：它幾乎符合任何內容。"
+  invalid_regex:
+    en: "The scanner would ignore \"%{entry}\": it is not a valid regex: %{why}."
+    zh: "掃描器會忽略「%{entry}」：它不是有效的正規表示式：%{why}。"
+  too_short:
+    en: "The scanner would ignore \"%{entry}\": it is shorter than %{min} characters."
+    zh: "掃描器會忽略「%{entry}」：它少於 %{min} 個字元。"
+  too_generic:
+    en: "The scanner would ignore \"%{entry}\": it is too generic."
+    zh: "掃描器會忽略「%{entry}」：它太常見了。"
+
+rule:
+  vault_inside_project:
+    en: "The vault must be a relative path inside the project, without `..` or `~`."
+    zh: "儲存庫必須是專案內的相對路徑，不能含有 `..` 或 `~`。"
+  env_file_inside_project:
+    en: "The env file \"%{file}\" must be a relative path inside the project."
+    zh: "env 檔案「%{file}」必須是專案內的相對路徑。"
+  stale_days_at_least_one:
+    en: "Stale days must be at least 1."
+    zh: "過期天數至少要是 1。"
+  stale_days_whole:
+    en: "Stale days must be a whole number."
+    zh: "過期天數必須是整數。"
+  duplicate_threshold_in_range:
+    en: "The duplicate threshold must be above 0 and at most 1."
+    zh: "重複門檻必須大於 0，且不超過 1。"
+  duplicate_threshold_number:
+    en: "The duplicate threshold must be a number such as 0.75."
+    zh: "重複門檻必須是數字，例如 0.75。"
+  personal_vault_absolute:
+    en: "The personal vault must be an absolute path or start with ~/."
+    zh: "個人儲存庫必須是絕對路徑，或以 ~/ 開頭。"
+  endpoint_is_url:
+    en: "The endpoint must be a URL starting with https://."
+    zh: "端點必須是以 https:// 開頭的網址。"
+  bucket_is_name:
+    en: "The bucket is a name, without slashes or spaces."
+    zh: "儲存貯體是一個名稱，不能含有斜線或空格。"
+  key_id_needed:
+    en: "Enter the bucket's access key ID."
+    zh: "請輸入儲存貯體的存取金鑰 ID。"
+  secret_needed:
+    en: "Enter the bucket's secret access key."
+    zh: "請輸入儲存貯體的私密存取金鑰。"
+  passphrase_needed:
+    en: "Enter a passphrase."
+    zh: "請輸入通關密語。"
+  passphrases_differ:
+    en: "The passphrases differ."
+    zh: "兩次輸入的通關密語不同。"
+
+appearance:
+  title:
+    en: "Appearance"
+    zh: "外觀"
+  about:
+    en: "How this window looks, on this device."
+    zh: "這個視窗在這部裝置上的樣子。"
+  mode:
+    en: "Mode"
+    zh: "模式"
+  mode_about:
+    en: "System follows the computer's appearance."
+    zh: "「跟隨系統」會使用電腦的外觀。"
+  system:
+    en: "System"
+    zh: "跟隨系統"
+  light:
+    en: "Light"
+    zh: "淺色"
+  dark:
+    en: "Dark"
+    zh: "深色"
+  light_theme:
+    en: "Light theme"
+    zh: "淺色佈景主題"
+  light_theme_about:
+    en: "What the window shows in the light appearance."
+    zh: "視窗在淺色外觀下顯示的佈景主題。"
+  dark_theme:
+    en: "Dark theme"
+    zh: "深色佈景主題"
+  dark_theme_about:
+    en: "What the window shows in the dark appearance."
+    zh: "視窗在深色外觀下顯示的佈景主題。"
+  theme_gone:
+    en: "The theme %{theme} cannot be shown"
+    zh: "無法顯示佈景主題 %{theme}"
+  theme_gone_about:
+    en: "Its file is gone or cannot be read. The default theme shows instead."
+    zh: "它的檔案不見了或無法讀取，所以改為顯示預設的佈景主題。"
+  duplicate:
+    en: "Duplicate"
+    zh: "製作副本"
+  duplicate_about:
+    en: "Saves a copy of this theme in your themes folder, for you to edit."
+    zh: "把這個佈景主題的副本存到你的佈景主題資料夾，讓你編輯。"
+  duplicated:
+    en: "Saved as %{copy}.json in your themes folder. Edit it and come back."
+    zh: "已在你的佈景主題資料夾存為 %{copy}.json。編輯後回到這裡即可。"
+  own:
+    en: "Your themes"
+    zh: "你的佈景主題"
+  own_about:
+    en: "A theme is a JSON file of shadcn/ui colors, as tweakcn.com exports them. Duplicate one above or put a file in your themes folder, then edit it in any editor: it shows here when you come back to this window."
+    zh: "佈景主題是一個 shadcn/ui 顏色的 JSON 檔案，格式與 tweakcn.com 匯出的相同。在上方製作副本，或把檔案放進你的佈景主題資料夾，再用任何編輯器修改：回到這個視窗時就會顯示在這裡。"
+  open_folder:
+    en: "Open themes folder"
+    zh: "打開佈景主題資料夾"
+  own_none:
+    en: "None yet."
+    zh: "還沒有。"
+  left_out:
+    en: "%{file}. Left out: %{what}."
+    zh: "%{file}。未採用：%{what}。"
+  show_file:
+    en: "Show file"
+    zh: "顯示檔案"
+
+language:
+  title:
+    en: "Language"
+    zh: "語言"
+  about:
+    en: "System follows the computer's language: Chinese or English, and English for any other."
+    zh: "「跟隨系統」會使用電腦的語言：中文或英文；其他語言則顯示英文。"
+  system:
+    en: "System"
+    zh: "跟隨系統"
+  # A language is named in itself, in both languages, so that its speakers find it.
+  english:
+    en: "English"
+    zh: "English"
+  chinese:
+    en: "繁體中文"
+    zh: "繁體中文"
+
+toast:
+  failed:
+    en: "That did not work"
+    zh: "操作沒有成功"

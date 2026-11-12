@@ -1,34 +1,53 @@
 //! How the window looks: the mode, the theme each appearance shows, and the user's own theme
 //! files.
 
-use crate::appearance::{self, Mode, Scheme, ThemeFile};
+use crate::appearance::{self, Language, Mode, Scheme, ThemeFile};
 use crate::state::{self, Work};
 use crate::widgets::{
-    Level, action, card, check, choice, heading, muted, page, page_header, path_text,
+    Level, action, card, check, choice, heading, muted, page, page_header, path_text, select,
 };
+use crate::words::tr;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
 pub(crate) fn appearance_page() -> impl IntoElement {
     page(
         page_header(
-            "Appearance",
-            muted("How this window looks, on this device."),
+            tr!("appearance.title"),
+            muted(tr!("appearance.about")),
             vec![],
         ),
         view()
             .gap_4()
             .child(
                 card()
+                    .test_id("appearance-language")
+                    .gap_2()
+                    .child(heading(tr!("language.title")))
+                    .child(muted(tr!("language.about")))
+                    // A language is named in itself, so that its speakers find it.
+                    .child(view().pt_1().child(select(
+                        &[
+                            (Language::System, "language.system"),
+                            (Language::English, "language.english"),
+                            (Language::Chinese, "language.chinese"),
+                        ],
+                        state::language,
+                        state::set_language,
+                        "language.title",
+                    ))),
+            )
+            .child(
+                card()
                     .test_id("appearance-mode")
                     .gap_2()
-                    .child(heading("Mode"))
-                    .child(muted("System follows the computer's appearance."))
+                    .child(heading(tr!("appearance.mode")))
+                    .child(muted(tr!("appearance.mode_about")))
                     .child(view().pt_1().child(choice(
                         &[
-                            (Mode::System, "System"),
-                            (Mode::Light, "Light"),
-                            (Mode::Dark, "Dark"),
+                            (Mode::System, "appearance.system"),
+                            (Mode::Light, "appearance.light"),
+                            (Mode::Dark, "appearance.dark"),
                         ],
                         state::mode,
                         state::set_mode,
@@ -50,14 +69,8 @@ pub(crate) fn appearance_page() -> impl IntoElement {
 /// The themes to pick from for `scheme`, each drawn in its own colors.
 fn scheme_card(themes: &[ThemeFile], scheme: Scheme) -> View {
     let (title, about) = match scheme {
-        Scheme::Light => (
-            "Light theme",
-            "What the window shows in the light appearance.",
-        ),
-        Scheme::Dark => (
-            "Dark theme",
-            "What the window shows in the dark appearance.",
-        ),
+        Scheme::Light => ("appearance.light_theme", "appearance.light_theme_about"),
+        Scheme::Dark => ("appearance.dark_theme", "appearance.dark_theme_about"),
     };
     let mut list = nsh_base::radio_group()
         .flex_row()
@@ -69,15 +82,15 @@ fn scheme_card(themes: &[ThemeFile], scheme: Scheme) -> View {
     }
     card()
         .test_id(&format!("{}-theme", scheme.label()))
-        .child(heading(title))
-        .child(muted(about))
+        .child(heading(tr!(title)))
+        .child(muted(tr!(about)))
         .child(dynamic(move || {
             let chosen = state::chosen_theme(scheme);
             (chosen != state::shown_theme(scheme)).then(|| {
                 check(
                     Level::Warn,
-                    format!("The theme {chosen} cannot be shown"),
-                    "Its file is gone or cannot be read. The default theme shows instead.",
+                    tr!("appearance.theme_gone", theme = chosen),
+                    tr!("appearance.theme_gone_about"),
                 )
             })
         }))
@@ -90,13 +103,12 @@ fn scheme_card(themes: &[ThemeFile], scheme: Scheme) -> View {
                 .gap_3()
                 .pt_3()
                 .child(
-                    action("Duplicate", move || state::duplicate_theme(scheme))
-                        .busy(state::running(Work::DuplicateTheme(scheme))),
+                    action(tr!("appearance.duplicate"), move || {
+                        state::duplicate_theme(scheme)
+                    })
+                    .busy(state::running(Work::DuplicateTheme(scheme))),
                 )
-                .child(
-                    muted("Saves a copy of this theme in your themes folder, for you to edit.")
-                        .text_xs(),
-                ),
+                .child(muted(tr!("appearance.duplicate_about")).text_xs()),
         )
 }
 
@@ -203,8 +215,8 @@ fn tile(file: &ThemeFile, scheme: Scheme) -> impl IntoElement {
 fn own_themes(themes: &[ThemeFile]) -> View {
     let mut block = card()
         .test_id("own-themes")
-        .child(heading("Your themes"))
-        .child(muted("A theme is a JSON file of shadcn/ui colors, as tweakcn.com exports them. Duplicate one above or put a file in your themes folder, then edit it in any editor: it shows here when you come back to this window."))
+        .child(heading(tr!("appearance.own")))
+        .child(muted(tr!("appearance.own_about")))
         .child(
             view()
                 .flex_row()
@@ -212,12 +224,14 @@ fn own_themes(themes: &[ThemeFile]) -> View {
                 .items_center()
                 .gap_3()
                 .py_2()
-                .child(action("Open themes folder", || state::reveal_theme(None)))
+                .child(action(tr!("appearance.open_folder"), || {
+                    state::reveal_theme(None)
+                }))
                 .child(path_text(appearance::themes_dir().display().to_string())),
         );
     let own: Vec<&ThemeFile> = themes.iter().filter(|t| t.file.is_some()).collect();
     if own.is_empty() {
-        return block.child(muted("None yet."));
+        return block.child(muted(tr!("appearance.own_none")));
     }
     for own in own {
         let file = own.file.clone();
@@ -226,13 +240,22 @@ fn own_themes(themes: &[ThemeFile]) -> View {
             .and_then(|f| f.file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let (level, detail) = match &own.tokens {
-            Err(why) => (Level::Error, format!("{file_name}. {why}")),
-            Ok(_) if !own.ignored.is_empty() => (
-                Level::Warn,
-                format!("{file_name}. Left out: {}.", own.ignored.join("; ")),
+        // Why a file cannot be used, and what Native Shell left out of one, are their words.
+        let row = match &own.tokens {
+            Err(why) => check(
+                Level::Error,
+                own.name.clone(),
+                format!("{file_name}. {why}"),
             ),
-            Ok(_) => (Level::Ok, file_name),
+            Ok(_) if !own.ignored.is_empty() => {
+                let what = own.ignored.join("; ");
+                check(
+                    Level::Warn,
+                    own.name.clone(),
+                    tr!("appearance.left_out", file = file_name, what = what),
+                )
+            }
+            Ok(_) => check(Level::Ok, own.name.clone(), file_name),
         };
         block = block.child(
             view()
@@ -241,8 +264,8 @@ fn own_themes(themes: &[ThemeFile]) -> View {
                 .gap_3()
                 .border_t_1()
                 .border_t_color(move || theme().border)
-                .child(check(level, own.name.clone(), detail).flex_1())
-                .child(action("Show file", move || {
+                .child(row.flex_1())
+                .child(action(tr!("appearance.show_file"), move || {
                     state::reveal_theme(file.clone())
                 })),
         );

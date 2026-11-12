@@ -1,5 +1,5 @@
-//! How the window looks: the mode (the computer's appearance, light or dark) and the theme each
-//! of the two appearances shows.
+//! How the window looks: the mode (the computer's appearance, light or dark), the theme each
+//! of the two appearances shows, and the language of its text.
 //!
 //! A theme is a Native Shell theme file: shadcn/ui's `cssVars`, as tweakcn and shadcn's themes
 //! export them, with the app's own tokens (`ok`, `warn`, `highlight`) beside shadcn's. The themes
@@ -78,14 +78,45 @@ impl Scheme {
     }
 }
 
-/// What the user chose (`appearance.toml`): the mode, and the id of the theme each appearance
-/// shows.
+/// The language the window's text shows in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum Language {
+    /// The first of the computer's languages obmem has: Chinese or English, else English.
+    #[default]
+    #[serde(rename = "system")]
+    System,
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "zh")]
+    Chinese,
+}
+
+impl Language {
+    /// What Native Shell's `set_locale` takes: `None` follows the computer.
+    ///
+    /// obmem's Chinese is Traditional Chinese under the tag `zh` (`locales/app.yml`), so that
+    /// every Chinese the computer may name finds it: macOS says `zh-Hant-TW`, Windows `zh-TW`,
+    /// and Native Shell looks a tag up by cutting its last part off. Picked here it is `zh-Hant`,
+    /// which finds `zh` the same way and has dates and numbers written as Traditional Chinese
+    /// writes them.
+    pub(crate) fn locale(self) -> Option<nsh_core::platform::Locale> {
+        match self {
+            Language::System => None,
+            Language::English => nsh_core::platform::Locale::parse("en"),
+            Language::Chinese => nsh_core::platform::Locale::parse("zh-Hant"),
+        }
+    }
+}
+
+/// What the user chose (`appearance.toml`): the mode, the id of the theme each appearance shows,
+/// and the language.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct Chosen {
     pub mode: Mode,
     pub light: String,
     pub dark: String,
+    pub language: Language,
 }
 
 impl Default for Chosen {
@@ -94,6 +125,7 @@ impl Default for Chosen {
             mode: Mode::System,
             light: DEFAULT.to_owned(),
             dark: DEFAULT.to_owned(),
+            language: Language::System,
         }
     }
 }
@@ -272,7 +304,7 @@ pub(crate) fn save(chosen: &Chosen) -> Result<(), String> {
 fn save_at(path: &Path, chosen: &Chosen) -> Result<(), String> {
     let body = toml::to_string(chosen).map_err(|e| e.to_string())?;
     let text = format!(
-        "# How obmem's desktop app looks. `light` and `dark` name a theme: a built-in one, or a\n# file in the themes folder beside this file, without `.json`. Read when the app starts.\n{body}"
+        "# How obmem's desktop app looks. `light` and `dark` name a theme: a built-in one, or a\n# file in the themes folder beside this file, without `.json`. `language` is `system`, `en`\n# or `zh`. Read when the app starts.\n{body}"
     );
     let dir = path.parent().ok_or("the config has no folder")?;
     atomic_write(dir, path, &text).map_err(|e| format!("{e:#}"))
@@ -455,9 +487,15 @@ mod tests {
             mode: Mode::Dark,
             light: "sepia".into(),
             dark: "unit-01".into(),
+            language: Language::Chinese,
         };
         save_at(&path, &chosen).unwrap();
         assert_eq!(read_chosen(&path), chosen);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("language = \"zh\"")
+        );
 
         // A file that sets only some of it keeps the defaults for the rest.
         std::fs::write(&path, "mode = \"light\"\n").unwrap();

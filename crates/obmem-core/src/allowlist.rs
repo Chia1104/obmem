@@ -2,7 +2,7 @@
 //! scanner lets through. The scanner decides what counts: the project vault contributes exact
 //! fingerprints only, and broad entries (regexes, stopwords) count only in the personal vault.
 
-use crate::secrets::{regex_problem, stopword_problem};
+use crate::secrets::{Ignored, regex_problem, stopword_problem};
 use crate::store::atomic_write;
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -66,22 +66,21 @@ pub fn read(vault: &Path) -> Result<Allowlist> {
 
 /// Why the scanner would ignore this entry, if it would: the rules the scanner applies when it
 /// reads the list. A settings screen shows it at the entry; [`add`] refuses the entry with it.
-pub fn problem(kind: Kind, entry: &str) -> Option<String> {
+pub fn problem(kind: Kind, entry: &str) -> Option<Ignored> {
     let entry = entry.trim();
-    let why = match kind {
-        _ if entry.is_empty() => Some("it is empty".to_string()),
+    match kind {
+        _ if entry.is_empty() => Some(Ignored::Empty),
         Kind::Fingerprint => None,
         Kind::Regex => regex_problem(entry),
         Kind::Stopword => stopword_problem(entry),
-    }?;
-    Some(format!("The scanner would ignore \"{entry}\": {why}."))
+    }
 }
 
 /// Adds an entry, checked as the scanner checks it. Returns whether it was new.
 pub fn add(vault: &Path, kind: Kind, entry: &str) -> Result<bool> {
     let entry = entry.trim();
     if let Some(why) = problem(kind, entry) {
-        bail!("{why}");
+        bail!("The scanner would ignore \"{entry}\": {why}.");
     }
     let entry = if kind == Kind::Stopword {
         entry.to_lowercase()

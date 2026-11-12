@@ -4,6 +4,7 @@
 use crate::data::{Detail, Hit, Vault};
 use crate::state::{self, Work};
 use crate::widgets::{Level, action, card, check, heading, muted, primary, text_box};
+use crate::words::tr;
 use nsh_core::prelude::*;
 use obmem_core::allowlist::{Allowlist, Kind};
 use obmem_core::config::SecretMode;
@@ -19,23 +20,22 @@ pub(crate) fn secrets_tab(d: &Detail) -> View {
 fn scanner(d: &Detail) -> View {
     let st = &d.status;
     let mode = match st.secret_mode {
-        SecretMode::Block => "A write that contains a secret is refused.",
-        SecretMode::Redact => {
-            "A secret in a write is replaced with [REDACTED] and the rest is written."
-        }
+        SecretMode::Block => "secrets.refused",
+        SecretMode::Redact => "secrets.redacted",
     };
+    let (rules, known) = (st.secret_rules, st.known_secrets);
     card()
-        .child(heading("Scanner"))
-        .child(check(Level::Ok, "Every write is scanned", mode))
+        .child(heading(tr!("secrets.scanner")))
+        .child(check(Level::Ok, tr!("secrets.every_write"), tr!(mode)))
         .child(check(
             Level::Ok,
-            format!("{} format rules", st.secret_rules),
-            "Known token formats, plus your own in the vault's _system/secret-rules.toml.",
+            tr!("secrets.rules", n = rules),
+            tr!("secrets.rules_about"),
         ))
         .child(check(
             Level::Ok,
-            format!("{} known values", st.known_secrets),
-            "Values from the project's env files and sensitive-looking environment variables, kept in memory only.",
+            tr!("secrets.known", n = known),
+            tr!("secrets.known_about"),
         ))
 }
 
@@ -43,20 +43,20 @@ fn try_it() -> View {
     let input = signal(state::last_scanned());
     card()
         .test_id("scan")
-        .child(heading("Try it"))
-        .child(muted(
-            "Paste text to see what the scanner would catch. Nothing is stored.",
-        ))
+        .child(heading(tr!("secrets.try")))
+        .child(muted(tr!("secrets.try_about")))
         .child(
-            text_box(input, "Text to scan")
+            text_box(input, tr!("secrets.try_placeholder"))
                 .test_id("scan-input")
                 .multiline(true)
                 .min_h(px(80.0)),
         )
         .child(
             view().flex_row().pt_2().child(
-                primary("Scan", move || state::scan(input.get_untracked()))
-                    .busy(state::running(Work::Scan)),
+                primary(tr!("secrets.scan"), move || {
+                    state::scan(input.get_untracked())
+                })
+                .busy(state::running(Work::Scan)),
             ),
         )
         .child(dynamic(move || {
@@ -66,8 +66,8 @@ fn try_it() -> View {
                         return vec![
                             check(
                                 Level::Ok,
-                                "Nothing found",
-                                "This text would be written as it is.",
+                                tr!("secrets.nothing"),
+                                tr!("secrets.nothing_about"),
                             )
                             .into_element(),
                         ];
@@ -80,24 +80,25 @@ fn try_it() -> View {
 
 fn hit(h: Hit) -> View {
     let (here, everywhere) = (h.fingerprint.clone(), h.fingerprint.clone());
+    let (preview, fingerprint) = (h.preview.clone(), h.fingerprint.clone());
     let allowing =
         |vault| state::running(Work::Allow(vault, Kind::Fingerprint, h.fingerprint.clone()));
     check(
         Level::Error,
         format!("{}: {}", h.rule, h.description),
-        format!("{}   fingerprint {}", h.preview, h.fingerprint),
+        tr!("secrets.hit", preview = preview, fingerprint = fingerprint),
     )
     .child(
         view()
             .gap_1()
             .child(
-                action("Allow in this project", move || {
+                action(tr!("secrets.allow_here"), move || {
                     state::allow(Vault::Project, Kind::Fingerprint, here.clone())
                 })
                 .busy(allowing(Vault::Project)),
             )
             .child(
-                action("Allow in every project", move || {
+                action(tr!("secrets.allow_everywhere"), move || {
                     state::allow(Vault::Personal, Kind::Fingerprint, everywhere.clone())
                 })
                 .busy(allowing(Vault::Personal)),
@@ -106,19 +107,19 @@ fn hit(h: Hit) -> View {
 }
 
 fn allowlist(list: &Result<Allowlist, String>) -> View {
-    let mut c = card().test_id("project-allowlist").child(heading("This project's allowlist")).child(muted(
-        "False positives allowed in this project, by fingerprint. The file comes with the project, so patterns \
-         and words count only in your personal settings.",
-    ));
+    let mut c = card()
+        .test_id("project-allowlist")
+        .child(heading(tr!("secrets.allowlist")))
+        .child(muted(tr!("secrets.allowlist_about")));
     match list {
         Err(e) => {
             c = c.child(check(
                 Level::Error,
-                "Could not read the allowlist",
+                tr!("secrets.allowlist_unreadable"),
                 e.clone(),
             ))
         }
-        Ok(a) if a.fingerprints.is_empty() => c = c.child(muted("Nothing allowed yet.")),
+        Ok(a) if a.fingerprints.is_empty() => c = c.child(muted(tr!("secrets.allowlist_empty"))),
         Ok(a) => {
             for f in &a.fingerprints {
                 let entry = f.clone();
@@ -131,7 +132,7 @@ fn allowlist(list: &Result<Allowlist, String>) -> View {
                             .py_1()
                             .child(text(f.clone()).flex_1().text_sm())
                             .child(
-                                action("Remove", {
+                                action(tr!("common.remove"), {
                                     let entry = entry.clone();
                                     move || {
                                         state::disallow(

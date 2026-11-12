@@ -24,7 +24,9 @@ Long-term memory for coding agents: an MCP server, agent hooks and a CLI in one 
 | `crates/obmem` | The `obmem` binary: clap CLI | `crates/obmem/AGENTS.md` |
 | `apps/obmem-gui` | The desktop control panel (Native Shell, macOS and Windows) | `apps/obmem-gui/AGENTS.md` |
 
-Dependencies flow one way: `obmem` and `obmem-gui` → `obmem-mcp` / `obmem-agents` / `obmem-sync` / `obmem-update` → `obmem-core`. Put logic in the lowest crate that needs it, so every front end can reuse it. `default-members` leaves out the GUI, so a plain `cargo build` stays free of Native Shell. `--workspace` includes it.
+Dependencies flow one way: `obmem` and `obmem-gui` → `obmem-mcp` / `obmem-agents` / `obmem-sync` / `obmem-update` → `obmem-core`. Put logic in the lowest crate that needs it, so every front end can reuse it.
+
+What a library reports to a person about work that went through is a typed value, never a `String`: `settings::Rule`, `secrets::Ignored`, `store::Decided` and `import::Skip` in obmem-core, `setup::ManualStep` in obmem-agents, `Outcome`, `Summary` and `Cleanup` in obmem-sync. Its `Display` is the English the CLI and the MCP server print. The desktop app says the same value in the language its window is in (`apps/obmem-gui/src/words.rs`), so a new one needs a case there and its keys in `locales/app.yml`. An error stays an `anyhow` error with English text. `default-members` leaves out the GUI, so a plain `cargo build` stays free of Native Shell. `--workspace` includes it.
 
 ## Workflow
 

@@ -2,11 +2,12 @@
 //! Notes are read in Obsidian; this page decides on them.
 
 use crate::data::ReviewGroup;
-use crate::state::{self, Load, Work};
+use crate::state::{self, Decision, Load, Work};
 use crate::widgets::{
     Level, Press, action, card, check, heading, loading, muted, notice_area, page, page_header,
     primary,
 };
+use crate::words::{self, tr};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 use obmem_core::note::Scope;
@@ -18,12 +19,10 @@ use std::path::{Path, PathBuf};
 pub(crate) fn review_page() -> impl IntoElement {
     page(
         page_header(
-            "Review",
-            muted(
-                "Agent drafts to approve and findings to resolve. Read a note in Obsidian, decide here.",
-            ),
+            tr!("review.title"),
+            muted(tr!("review.about")),
             vec![
-                action("Refresh", state::load_review)
+                action(tr!("common.refresh"), state::load_review)
                     .busy(state::running(Work::LoadReview))
                     .into_element(),
             ],
@@ -33,12 +32,12 @@ pub(crate) fn review_page() -> impl IntoElement {
             .child(notice_area())
             .child(view().gap_4().child(dynamic(move || {
                 match state::review() {
-                    Load::Loading => vec![loading("Loading…").into_element()],
-                    Load::Failed(e) => vec![
-                        check(Level::Error, "Could not read the review list", e).into_element(),
-                    ],
+                    Load::Loading => vec![loading(tr!("common.loading")).into_element()],
+                    Load::Failed(e) => {
+                        vec![check(Level::Error, tr!("review.unreadable"), e).into_element()]
+                    }
                     Load::Ready(groups) if groups.is_empty() => {
-                        vec![muted("No projects are set up yet.").into_element()]
+                        vec![muted(tr!("review.no_projects")).into_element()]
                     }
                     Load::Ready(groups) => groups
                         .into_iter()
@@ -50,24 +49,32 @@ pub(crate) fn review_page() -> impl IntoElement {
 }
 
 fn group(g: ReviewGroup) -> View {
+    // The personal vault is every project's: it has no project, and no name but that.
+    let (id, title) = match g.project {
+        Some(_) => (format!("review-{}", g.name), heading(g.name.clone())),
+        None => (
+            "review-personal".to_owned(),
+            heading(tr!("common.personal_vault")),
+        ),
+    };
     let mut head = view()
         .flex_row()
         .items_center()
         .gap_3()
         .pb_1()
-        .child(view().flex_1().child(heading(g.title.clone())));
+        .child(view().flex_1().child(title));
     if let Some(project) = g.project.clone() {
         head = head.child(
-            action("Run audit", {
+            action(tr!("review.run_audit"), {
                 let project = project.clone();
                 move || state::run_audit(project.clone())
             })
             .busy(state::running(Work::Audit(project))),
         );
     }
-    let mut c = card().test_id(&format!("review-{}", g.title)).child(head);
+    let mut c = card().test_id(&id).child(head);
     if g.items.is_empty() {
-        return c.child(muted("Nothing to review."));
+        return c.child(muted(tr!("review.nothing")));
     }
     for item in g.items {
         c = c.child(row(&g.root, g.vault_id.as_deref(), item));
@@ -95,21 +102,21 @@ impl At {
         );
     }
 
-    /// `button`, busy while the decision named `label` runs on this item, and waiting while
-    /// another one does: two decisions on one item must not race.
-    fn decides(&self, label: &'static str, button: Press) -> Press {
+    /// `button`, busy while `decision` runs on this item, and waiting while another one does:
+    /// two decisions on one item must not race.
+    fn decides(&self, decision: Decision, button: Press) -> Press {
         button
-            .busy(state::running(Work::Review(self.item.clone(), label)))
+            .busy(state::running(Work::Review(self.item.clone(), decision)))
             .blocked(state::reviewing(self.item.clone()))
     }
 
     /// The button that resolves the finding with `verdict`.
     fn resolves(&self, verdict: Verdict, main: bool) -> Press {
-        let label = state::verdict_label(verdict);
+        let label = move || words::verdict(verdict);
         let at = self.clone();
         let press = move || at.resolve(verdict);
         self.decides(
-            label,
+            Decision::Resolve(verdict),
             if main {
                 primary(label, press)
             } else {
@@ -131,19 +138,28 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
         scope,
         rel: item.rel.clone(),
     };
+    // A note's type, status, rule and severity are what its file says: data, as in Obsidian.
+    let (note_type, status, author, updated) = (
+        item.note_type.clone(),
+        item.status.clone(),
+        item.author.clone(),
+        item.updated.clone(),
+    );
     let about = match item.kind {
-        Kind::Draft => format!(
-            "{} draft · by {} · {}",
-            item.note_type, item.author, item.updated
-        ),
+        Kind::Draft => muted(tr!(
+            "review.draft_about",
+            note_type = note_type,
+            author = author,
+            updated = updated
+        )),
         Kind::Finding => match (&item.rule, &item.severity) {
-            (Some(rule), Some(sev)) => {
-                format!("{rule} ({sev}) · {} · {}", item.status, item.updated)
-            }
-            _ => format!(
-                "finding · {} · by {} · {}",
-                item.status, item.author, item.updated
-            ),
+            (Some(rule), Some(sev)) => muted(format!("{rule} ({sev}) · {status} · {updated}")),
+            _ => muted(tr!(
+                "review.finding_about",
+                status = status,
+                author = author,
+                updated = updated
+            )),
         },
     };
     let mut actions = view().flex_row().flex_wrap().gap_2().pt_1();
@@ -151,8 +167,8 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
         Kind::Draft => {
             let a = at.clone();
             actions = actions.child(at.decides(
-                state::APPROVE,
-                primary(state::APPROVE, move || {
+                Decision::Approve,
+                primary(tr!("review.approve"), move || {
                     state::approve(a.item.clone(), a.root.clone(), a.scope, a.rel.clone())
                 }),
             ));
@@ -169,8 +185,8 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
                     ..at.clone()
                 };
                 actions = actions.child(at.decides(
-                    state::VERIFY,
-                    action(state::VERIFY, move || {
+                    Decision::Verify,
+                    action(tr!("review.verify"), move || {
                         state::verify(a.item.clone(), a.root.clone(), a.scope, a.rel.clone())
                     }),
                 ));
@@ -180,7 +196,7 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
     }
     if let Some(id) = vault_id {
         let url = obsidian::open_uri(id, &item.rel);
-        actions = actions.child(action("Open in Obsidian", move || {
+        actions = actions.child(action(tr!("common.open_in_obsidian"), move || {
             drop(open_url(url.clone()))
         }));
     }
@@ -191,9 +207,9 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
         .border_t_1()
         .border_t_color(move || theme().border)
         .child(text(item.title.clone()).font_weight(FontWeight::MEDIUM))
-        .child(muted(about));
-    if let Some(target) = &item.target {
-        body = body.child(muted(format!("About {target}")));
+        .child(about);
+    if let Some(target) = item.target.clone() {
+        body = body.child(muted(tr!("review.about_note", target = target)));
     }
     if !item.summary.is_empty() {
         body = body.child(text(item.summary.clone()).text_sm().number_of_lines(3u32));
@@ -207,15 +223,15 @@ fn reject(at: At) -> AnyElement {
     dynamic(move || {
         if !asking.get() {
             return vec![
-                action("Reject…", move || asking.set(true))
+                action(tr!("review.reject_ask"), move || asking.set(true))
                     .blocked(state::reviewing(at.item.clone()))
                     .into_element(),
             ];
         }
         vec![
-            muted("A false positive? It is never reported again.").into_element(),
+            muted(tr!("review.reject_about")).into_element(),
             at.resolves(Verdict::Rejected, true).into_element(),
-            action("Cancel", move || asking.set(false)).into_element(),
+            action(tr!("common.cancel"), move || asking.set(false)).into_element(),
         ]
     })
 }

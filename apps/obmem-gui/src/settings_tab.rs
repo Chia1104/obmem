@@ -1,20 +1,25 @@
 //! A project's settings: `.obmem.toml`, and whether Codex may run obmem's tools without asking.
 
 use crate::data::Detail;
-use crate::form::Problems;
+use crate::form::{Problems, said};
 use crate::state::{self, Work};
 use crate::widgets::{
     Level, Marked, card, check, checked_field, choice, field, heading, muted, primary,
     switch_control, text_box,
 };
+use crate::words::tr;
 use nsh_core::prelude::*;
 use obmem_core::config::SecretMode;
-use obmem_core::settings::{Problem, ProjectField, ProjectSettings, default_env_files};
+use obmem_core::settings::{ProjectField, ProjectSettings, default_env_files};
 
 pub(crate) fn settings_tab(d: &Detail) -> View {
     let form = match &d.settings {
         Ok(s) => project_form(s.clone()),
-        Err(e) => card().child(check(Level::Error, "Could not read .obmem.toml", e.clone())),
+        Err(e) => card().child(check(
+            Level::Error,
+            tr!("common.unreadable", file = ".obmem.toml"),
+            e.clone(),
+        )),
     };
     view().gap_4().child(form).child(codex(d))
 }
@@ -33,17 +38,14 @@ fn project_form(s: ProjectSettings) -> View {
     let draft = move || {
         let mut problems = Vec::new();
         let stale_days = stale.get().trim().parse::<i64>().unwrap_or_else(|_| {
-            problems.push(Problem {
-                field: ProjectField::StaleDays,
-                message: "Stale days must be a whole number.".into(),
-            });
+            problems.push((ProjectField::StaleDays, t!("rule.stale_days_whole")));
             1
         });
         let duplicate_threshold = threshold.get().trim().parse::<f64>().unwrap_or_else(|_| {
-            problems.push(Problem {
-                field: ProjectField::DuplicateThreshold,
-                message: "The duplicate threshold must be a number such as 0.75.".into(),
-            });
+            problems.push((
+                ProjectField::DuplicateThreshold,
+                t!("rule.duplicate_threshold_number"),
+            ));
             1.0
         });
         let settings = ProjectSettings {
@@ -60,7 +62,7 @@ fn project_form(s: ProjectSettings) -> View {
             stale_days,
             duplicate_threshold,
         };
-        problems.extend(settings.problems());
+        problems.extend(said(settings.problems()));
         if problems.is_empty() {
             Ok(settings)
         } else {
@@ -78,23 +80,39 @@ fn project_form(s: ProjectSettings) -> View {
     };
     card()
         .test_id("project-settings")
-        .child(heading("Project settings"))
-        .child(muted(".obmem.toml is committed with the project, so these apply to everyone working on it."))
-        .child(field("Name", "The folder for this project's session logs in your personal vault. Empty: the folder's name.", text_box(name, "Folder name").test_id("settings-name")))
+        .child(heading(tr!("settings.title")))
+        .child(muted(tr!("settings.about")))
+        .child(field(
+            tr!("settings.name"),
+            tr!("settings.name_help"),
+            text_box(name, tr!("settings.name_placeholder")).test_id("settings-name"),
+        ))
         .child(checked_field(
-            "Project vault",
-            "Where the project's notes live, relative to the project.",
-            text_box(vault, "docs/kb").marked(problems.marks(ProjectField::Vault)).test_id("settings-vault"),
+            tr!("common.project_vault"),
+            tr!("settings.vault_help"),
+            text_box(vault, "docs/kb")
+                .marked(problems.marks(ProjectField::Vault))
+                .test_id("settings-vault"),
             problems.at(ProjectField::Vault),
         ))
         .child(field(
-            "When a write contains a secret",
-            "Refuse it, or replace the secret with [REDACTED] and write the rest.",
-            choice(&[(SecretMode::Block, "Refuse"), (SecretMode::Redact, "Redact")], move || mode.get(), move |m| mode.set(m)),
+            tr!("settings.secret_mode"),
+            tr!("settings.secret_mode_help"),
+            choice(
+                &[
+                    (SecretMode::Block, "settings.refuse"),
+                    (SecretMode::Redact, "settings.redact"),
+                ],
+                move || mode.get(),
+                move |m| mode.set(m),
+            ),
         ))
         .child(checked_field(
-            "More env files",
-            &format!("Their values count as known secrets, one path per line. Always scanned: {}.", default_env_files().join(", ")),
+            tr!("settings.env_files"),
+            tr!(
+                "settings.env_files_help",
+                always = default_env_files().join(", ")
+            ),
             text_box(env_files, "config/.env.secrets")
                 .marked(problems.marks(ProjectField::EnvFiles))
                 .test_id("settings-env-files")
@@ -103,39 +121,48 @@ fn project_form(s: ProjectSettings) -> View {
             problems.at(ProjectField::EnvFiles),
         ))
         .child(checked_field(
-            "Stale after (days)",
-            "Active notes not checked for this long are reported by the audit.",
-            text_box(stale, "180").marked(problems.marks(ProjectField::StaleDays)).test_id("settings-stale"),
+            tr!("settings.stale"),
+            tr!("settings.stale_help"),
+            text_box(stale, "180")
+                .marked(problems.marks(ProjectField::StaleDays))
+                .test_id("settings-stale"),
             problems.at(ProjectField::StaleDays),
         ))
         .child(checked_field(
-            "Duplicate threshold",
-            "How similar two titles must be (0 to 1) for the audit to call them duplicates.",
-            text_box(threshold, "0.75").marked(problems.marks(ProjectField::DuplicateThreshold)).test_id("settings-threshold"),
+            tr!("settings.threshold"),
+            tr!("settings.threshold_help"),
+            text_box(threshold, "0.75")
+                .marked(problems.marks(ProjectField::DuplicateThreshold))
+                .test_id("settings-threshold"),
             problems.at(ProjectField::DuplicateThreshold),
         ))
-        .child(view().flex_row().pt_2().child(primary("Save", save).busy(state::running(Work::SaveSettings))))
+        .child(
+            view()
+                .flex_row()
+                .pt_2()
+                .child(primary(tr!("common.save"), save).busy(state::running(Work::SaveSettings))),
+        )
 }
 
 fn codex(d: &Detail) -> View {
     let control: AnyElement = match d.codex_auto_approve {
-        Ok(None) => {
-            muted("obmem is not set up for Codex in this project. Set it up in Overview first.")
-                .into_element()
-        }
+        Ok(None) => muted(tr!("codex.not_set_up")).into_element(),
         Ok(Some(on)) => switch_control(
             move || on,
-            "Run obmem's tools without asking",
+            tr!("codex.auto_approve"),
             state::set_codex_auto_approve,
         )
         .into_element(),
-        Err(ref e) => {
-            check(Level::Error, "Could not read .codex/config.toml", e.clone()).into_element()
-        }
+        Err(ref e) => check(
+            Level::Error,
+            tr!("common.unreadable", file = ".codex/config.toml"),
+            e.clone(),
+        )
+        .into_element(),
     };
     card().test_id("codex").child(heading("Codex")).child(field(
-        "Run obmem's tools without asking",
-        "Codex asks before each MCP tool call. `codex exec` cannot ask, so it can use obmem only with this on.",
+        tr!("codex.auto_approve"),
+        tr!("codex.auto_approve_help"),
         control,
     ))
 }

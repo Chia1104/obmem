@@ -1,6 +1,11 @@
 //! Small pieces the pages share, drawn with the theme, and how the layout follows the window.
+//!
+//! A piece that shows text takes it as `impl IntoReactive<SharedString>`: `tr!("key")` for the
+//! app's own words, which then follow the language, or a `String` for what is data (a name, a
+//! path, what a library reported).
 
 use crate::sidebar;
+use crate::words::tr;
 use nsh_base::{button, input, theme};
 use nsh_core::element::desktop::title_bar;
 use nsh_core::prelude::*;
@@ -59,7 +64,7 @@ pub(crate) fn page(header: impl IntoElement, body: impl IntoElement) -> impl Int
 /// A page's title, what it is about below it, and its actions, which move under the title when
 /// they do not fit beside it.
 pub(crate) fn page_header(
-    title: impl Into<SharedString>,
+    title: impl IntoReactive<SharedString>,
     about: impl IntoElement,
     actions: Vec<AnyElement>,
 ) -> View {
@@ -78,26 +83,20 @@ pub(crate) fn page_header(
                 .flex_1()
                 .min_w(px(220.0))
                 .gap_1()
-                .child(
-                    text(title.into())
-                        .text_2xl()
-                        .font_weight(FontWeight::SEMIBOLD),
-                )
+                .child(text(title).text_2xl().font_weight(FontWeight::SEMIBOLD))
                 .child(about),
         )
         .child(buttons)
 }
 
 /// A section title.
-pub(crate) fn heading(label: impl Into<SharedString>) -> Text {
-    text(label.into())
-        .text_sm()
-        .font_weight(FontWeight::SEMIBOLD)
+pub(crate) fn heading(label: impl IntoReactive<SharedString>) -> Text {
+    text(label).text_sm().font_weight(FontWeight::SEMIBOLD)
 }
 
 /// Secondary text.
-pub(crate) fn muted(label: impl Into<SharedString>) -> Text {
-    text(label.into())
+pub(crate) fn muted(label: impl IntoReactive<SharedString>) -> Text {
+    text(label)
         .text_sm()
         .text_color(move || theme().muted_foreground)
 }
@@ -113,16 +112,20 @@ pub(crate) fn path_text(label: impl IntoReactive<SharedString>) -> Text {
 /// A button for an action: bordered for a secondary one ([`action`]), filled for the main one of
 /// a block ([`primary`]). While its own work runs it spins and takes no presses.
 pub(crate) struct Press {
-    label: SharedString,
+    label: Reactive<SharedString>,
     main: bool,
     on_press: Box<dyn Fn()>,
     busy: Rc<dyn Fn() -> bool>,
     blocked: Rc<dyn Fn() -> bool>,
 }
 
-fn press(label: impl Into<SharedString>, main: bool, on_press: impl Fn() + 'static) -> Press {
+fn press(
+    label: impl IntoReactive<SharedString>,
+    main: bool,
+    on_press: impl Fn() + 'static,
+) -> Press {
     Press {
-        label: label.into(),
+        label: label.into_reactive(),
         main,
         on_press: Box::new(on_press),
         busy: Rc::new(|| false),
@@ -131,12 +134,18 @@ fn press(label: impl Into<SharedString>, main: bool, on_press: impl Fn() + 'stat
 }
 
 /// A bordered button for secondary actions.
-pub(crate) fn action(label: impl Into<SharedString>, on_press: impl Fn() + 'static) -> Press {
+pub(crate) fn action(
+    label: impl IntoReactive<SharedString>,
+    on_press: impl Fn() + 'static,
+) -> Press {
     press(label, false, on_press)
 }
 
 /// The button for the main action of a block.
-pub(crate) fn primary(label: impl Into<SharedString>, on_press: impl Fn() + 'static) -> Press {
+pub(crate) fn primary(
+    label: impl IntoReactive<SharedString>,
+    on_press: impl Fn() + 'static,
+) -> Press {
     press(label, true, on_press)
 }
 
@@ -230,7 +239,7 @@ pub(crate) fn spinner(color: impl Fn() -> AdaptiveColor + Copy + 'static) -> Vie
 }
 
 /// What shows while something is read: a spinner and what is being read.
-pub(crate) fn loading(label: impl Into<SharedString>) -> View {
+pub(crate) fn loading(label: impl IntoReactive<SharedString>) -> View {
     view()
         .flex_row()
         .items_center()
@@ -242,9 +251,10 @@ pub(crate) fn loading(label: impl Into<SharedString>) -> View {
 /// A square button holding an icon, for chrome such as the sidebar's.
 pub(crate) fn icon_button(
     paths: &'static str,
-    label: &'static str,
+    label: impl IntoReactive<SharedString>,
     on_press: impl Fn() + 'static,
 ) -> impl IntoElement {
+    let label = label.into_reactive();
     button()
         .w(px(28.0))
         .h(px(28.0))
@@ -257,7 +267,10 @@ pub(crate) fn icon_button(
                 .text_color(move || theme().foreground)
         })
         .active(|s| s.opacity(0.7))
-        .accessibility_label(label)
+        .accessibility_label({
+            let label = label.clone();
+            move || Some(label.get())
+        })
         .on_press(on_press)
         .child(crate::icons::icon(paths, 16.0))
         .with_hint(label)
@@ -265,8 +278,8 @@ pub(crate) fn icon_button(
 
 /// Shows `label` above an element while the pointer rests on it.
 pub(crate) trait WithHint: IntoElement + Sized {
-    fn with_hint(self, label: impl Into<SharedString>) -> View {
-        let label: SharedString = label.into();
+    fn with_hint(self, label: impl IntoReactive<SharedString>) -> View {
+        let label = label.into_reactive();
         view()
             .tooltip(
                 nsh_base::tooltip()
@@ -331,8 +344,8 @@ pub(crate) fn mark(level: Level) -> View {
 /// level with the title.
 pub(crate) fn check(
     level: Level,
-    title: impl Into<SharedString>,
-    detail: impl Into<SharedString>,
+    title: impl IntoReactive<SharedString>,
+    detail: impl IntoReactive<SharedString>,
 ) -> View {
     view()
         .flex_row()
@@ -341,16 +354,14 @@ pub(crate) fn check(
         .py_2()
         .child(mark(level))
         .child({
-            let detail: SharedString = detail.into();
             let body = view()
                 .flex_1()
                 .min_w(px(0.0))
                 .gap_1()
-                .child(text(title.into()).font_weight(FontWeight::MEDIUM));
-            if detail.is_empty() {
-                body
-            } else {
-                body.child(muted(detail))
+                .child(text(title).font_weight(FontWeight::MEDIUM));
+            match detail.into_reactive() {
+                Reactive::Static(detail) if detail.is_empty() => body,
+                detail => body.child(muted(detail)),
             }
         })
 }
@@ -367,7 +378,8 @@ pub(crate) fn card() -> View {
 }
 
 /// A row of tabs over the page (NSH's `Tabs`): the shown one is underlined in ink, and the
-/// underline travels to the next one. Tabs that do not fit wrap.
+/// underline travels to the next one. Tabs that do not fit wrap. Each option is a value and the
+/// translation key of its label.
 pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
     options: &[(T, &'static str)],
     current: impl Fn() -> T + Copy + 'static,
@@ -389,7 +401,7 @@ pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
                 .hover(|s| s.opacity(0.8))
                 .on_press(move || pick(value))
                 .child(
-                    text(label)
+                    text(move || t!(label))
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(move || {
@@ -406,6 +418,7 @@ pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
 }
 
 /// One choice among a few, as a segmented control of NSH `Toggle`s; the chosen one is raised.
+/// Each option is a value and the translation key of its label.
 pub(crate) fn choice<T: Copy + PartialEq + 'static>(
     options: &[(T, &'static str)],
     current: impl Fn() -> T + Copy + 'static,
@@ -438,7 +451,7 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
                 // Pressing the chosen one again keeps it: one of them is always chosen.
                 .on_change(move |_: &bool| pick(value))
                 .child(
-                    text(label)
+                    text(move || t!(label))
                         .text_sm()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(move || {
@@ -454,16 +467,88 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
     group
 }
 
+/// One choice among several, as a list that opens from its trigger (NSH's `Select`); the trigger
+/// shows the chosen one. Each option is a value and the translation key of its label, and `name`
+/// is the key of what screen readers call the control.
+pub(crate) fn select<T: Copy + PartialEq + 'static>(
+    options: &[(T, &'static str)],
+    current: impl Fn() -> T + Copy + 'static,
+    pick: impl Fn(T) + Copy + 'static,
+    name: &'static str,
+) -> impl IntoElement {
+    // An item's value is its place in `options`.
+    let options: Rc<[(T, &'static str)]> = options.into();
+    let chosen = {
+        let options = options.clone();
+        move || options.iter().position(|(value, _)| *value == current())
+    };
+    let label = {
+        let (options, chosen) = (options.clone(), chosen.clone());
+        move || chosen().map(|i| t!(options[i].1)).unwrap_or_default()
+    };
+    let items = {
+        let options = options.clone();
+        move || {
+            options
+                .iter()
+                .enumerate()
+                .map(|(i, (_, key))| nsh_base::SelectItem::new(i.to_string(), t!(*key)))
+                .collect::<Vec<_>>()
+        }
+    };
+    nsh_base::select()
+        .items(items)
+        .value(move || {
+            nsh_base::SelectValue::from(chosen().map(|i| SharedString::from(i.to_string())))
+        })
+        .accessibility_label(crate::words::named(name))
+        .on_change(move |value: &Option<SharedString>| {
+            let picked = value.as_ref().and_then(|v| v.parse::<usize>().ok());
+            if let Some((value, _)) = picked.and_then(|i| options.get(i)) {
+                pick(*value);
+            }
+        })
+        .self_start()
+        .popup_class("p-1 rounded-md border border-border bg-card shadow-md")
+        .item_class(
+            "px-3 py-1 rounded-sm text-sm text-muted-foreground selected:text-foreground \
+             selected:font-medium focus:bg-muted focus:text-foreground",
+        )
+        .trigger(
+            view()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .min_w(px(180.0))
+                .px_3()
+                .py_1()
+                .border_1()
+                .border_color(move || theme().input)
+                .rounded(move || theme().radius)
+                .bg(move || theme().card)
+                .hover(|s| s.bg(move || theme().muted))
+                .focus(|s| s.border_color(move || theme().ring))
+                .child(text(label).text_sm())
+                .child(
+                    view()
+                        .text_color(move || theme().muted_foreground)
+                        .child(crate::icons::icon(crate::icons::CHEVRONS, 14.0)),
+                ),
+        )
+}
+
 /// An on/off setting that takes effect when the form is saved or at once, as `change` does
 /// (NSH's `Switch`).
 pub(crate) fn switch_control(
     on: impl Fn() -> bool + Copy + 'static,
-    label: &str,
+    label: impl IntoReactive<SharedString>,
     change: impl Fn(bool) + 'static,
 ) -> impl IntoElement {
+    let label = label.into_reactive();
     nsh_base::switch()
         .checked(on)
-        .accessibility_label(label.to_string())
+        .accessibility_label(move || Some(label.get()))
         .self_start()
         .flex_row()
         .items_center()
@@ -471,7 +556,7 @@ pub(crate) fn switch_control(
         .on_change(move |v: &bool| change(*v))
         .track_class(Some("w-9 h-5 p-[2px] rounded-full bg-input checked:bg-primary transition-colors".into()))
         .thumb_class(Some("w-4 h-4 rounded-full bg-background shadow-xs checked:translate-x-4 transition-transform".into()))
-        .child(text(move || if on() { "On" } else { "Off" }).text_sm().text_color(move || theme().muted_foreground))
+        .child(text(move || if on() { t!("common.switched_on") } else { t!("common.switched_off") }).text_sm().text_color(move || theme().muted_foreground))
 }
 
 /// A box to tick (NSH's `Checkbox`) with its label after it.
@@ -499,15 +584,19 @@ pub(crate) fn checkbox_control(
 
 /// A labelled form row: what it is, what it does, and its control. In a narrow page the label
 /// goes above the control.
-pub(crate) fn field(label: &str, help: &str, control: impl IntoElement) -> View {
+pub(crate) fn field(
+    label: impl IntoReactive<SharedString>,
+    help: impl IntoReactive<SharedString>,
+    control: impl IntoElement,
+) -> View {
     checked_field(label, help, control, || None)
 }
 
 /// A [`field`] whose value has rules: the one it breaks (`form::Problems::at`) shows under the
 /// control, which marks itself too ([`Marked`]).
 pub(crate) fn checked_field(
-    label: &str,
-    help: &str,
+    label: impl IntoReactive<SharedString>,
+    help: impl IntoReactive<SharedString>,
     control: impl IntoElement,
     problem: impl Fn() -> Option<String> + 'static,
 ) -> View {
@@ -525,12 +614,8 @@ pub(crate) fn checked_field(
                 .flex_shrink_0()
                 .gap_1()
                 .style_when(stacked, |s| s.w_full())
-                .child(
-                    text(label.to_string())
-                        .text_sm()
-                        .font_weight(FontWeight::MEDIUM),
-                )
-                .child(muted(help.to_string()).text_xs()),
+                .child(text(label).text_sm().font_weight(FontWeight::MEDIUM))
+                .child(muted(help).text_xs()),
         )
         .child(
             view()
@@ -551,11 +636,11 @@ pub(crate) fn problem_text(message: String) -> Text {
 }
 
 /// A one-line text box bound to `value`.
-pub(crate) fn text_box(value: Signal<String>, placeholder: &str) -> Input {
+pub(crate) fn text_box(value: Signal<String>, placeholder: impl IntoReactive<String>) -> Input {
     input()
         .value(move || value.get())
         .on_change(move |v: &str| value.set(v.to_owned()))
-        .placeholder(placeholder.to_string())
+        .placeholder(placeholder)
         .px_3()
         .py_1()
         .bg(move || theme().background)
@@ -617,23 +702,7 @@ pub(crate) fn callout(
 pub(crate) fn notice_area() -> AnyElement {
     use crate::state::{self, Notice};
     dynamic(move || {
-        state::notice().map(|n| {
-            let mut lines: Vec<String> = Vec::new();
-            let title = match n {
-                Notice::Lines(title, l) => {
-                    lines = l;
-                    title
-                }
-                Notice::Audit(done) => {
-                    lines = done.notes;
-                    done.summary
-                }
-                Notice::SetUp(done) => {
-                    lines.extend(done.changed.iter().map(|f| format!("Updated {f}")));
-                    lines.extend(done.manual.iter().map(|m| format!("Next: {m}")));
-                    format!("{} is set up", done.agent.label())
-                }
-            };
+        state::notice().map(|Notice { title, lines }| {
             let mut body = view().child(check(Level::Ok, title, "").py_0());
             for l in lines {
                 body = body.child(muted(l).pl(px(30.0)));
@@ -643,7 +712,7 @@ pub(crate) fn notice_area() -> AnyElement {
                     .flex_row()
                     .pt_3()
                     .pl(px(30.0))
-                    .child(action("Dismiss", state::dismiss_notice)),
+                    .child(action(tr!("common.dismiss"), state::dismiss_notice)),
             );
             callout(tone(Level::Ok.token()), body).test_id("notice")
         })

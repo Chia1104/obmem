@@ -9,18 +9,18 @@
 //! a toast (`crate::toasts`). An outcome with more to read is a [`Notice`] on the page.
 //! While an action's work runs, the control that started it is busy ([`running`]).
 
+use crate::appearance::Language;
 use crate::appearance::{self, Chosen, Mode, Scheme, ThemeFile};
-use crate::data::{
-    self, AuditDone, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, SetupDone, Vault,
-};
+use crate::data::{self, Detail, Hit, Personal, ProjectRow, ReviewGroup, Sessions, Vault};
 use crate::toasts::{done, failed as fail};
+use crate::words;
 use nsh_core::file_dialog::OpenDialog;
 use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
 use obmem_core::allowlist::Kind;
 use obmem_core::note::Scope;
 use obmem_core::settings::{GlobalSettings, ProjectSettings, SyncSettings};
-use obmem_core::store::Verdict;
+use obmem_core::store::{Decided, Verdict};
 use std::path::PathBuf;
 
 /// Something loaded in the background.
@@ -32,14 +32,21 @@ pub(crate) enum Load<T> {
     Failed(String),
 }
 
-/// What the last action reported, when that is more than a line: shown above the page until
-/// it is dismissed.
+/// What the last action reported, when that is more than a line: a title and a line per thing
+/// that happened, in the language the window had then. Shown above the page until it is
+/// dismissed or the user leaves the screen.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum Notice {
-    SetUp(SetupDone),
-    Audit(AuditDone),
-    /// A title and one line per thing that happened.
-    Lines(String, Vec<String>),
+pub(crate) struct Notice {
+    pub title: String,
+    pub lines: Vec<String>,
+}
+
+/// A decision on a review item.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Decision {
+    Approve,
+    Verify,
+    Resolve(Verdict),
 }
 
 /// Work a control starts and waits for. The control is busy while it runs ([`running`]).
@@ -64,8 +71,8 @@ pub(crate) enum Work {
     /// Reading the review list again.
     LoadReview,
     Audit(PathBuf),
-    /// A decision on a review item: the item's id, and the button's label.
-    Review(String, &'static str),
+    /// A decision on a review item: the item's id, and which decision.
+    Review(String, Decision),
     /// Copying the theme an appearance shows into the user's themes folder.
     DuplicateTheme(Scheme),
 }
@@ -421,10 +428,22 @@ pub(crate) fn import_claude(chosen: Vec<PathBuf>) {
         move || data::import_claude(&path, &chosen),
         move |r| {
             match r {
-                Ok(lines) => set_notice(Some(Notice::Lines(
-                    "Claude Code memory imported".into(),
-                    lines,
-                ))),
+                Ok(files) => set_notice(Some(Notice {
+                    title: t!("claude_memory.imported"),
+                    lines: files
+                        .into_iter()
+                        .map(|(name, done)| match done {
+                            Ok(note) => {
+                                t!("claude_memory.imported_as", name = name, note = note)
+                            }
+                            Err(why) => t!(
+                                "claude_memory.skipped",
+                                name = name,
+                                why = words::skip(&why)
+                            ),
+                        })
+                        .collect(),
+                })),
                 Err(e) => fail(e),
             }
             reload(again);
@@ -436,8 +455,8 @@ pub(crate) fn import_claude(chosen: Vec<PathBuf>) {
 pub(crate) fn add_project() {
     run_task(async {
         let dialog = OpenDialog::folders()
-            .title("Add a project")
-            .button_label("Add");
+            .title(t!("sidebar.add_dialog.title"))
+            .button_label(t!("sidebar.add_dialog.button"));
         match pick_paths(dialog).await {
             Ok(Some(paths)) => {
                 let Some(folder) = paths.into_iter().next() else {
@@ -494,7 +513,19 @@ pub(crate) fn set_up(agent: Agent) {
         move || data::set_up(&path, agent),
         move |r| {
             match r {
-                Ok(done) => set_notice(Some(Notice::SetUp(done))),
+                Ok(done) => set_notice(Some(Notice {
+                    title: t!("agents.set_up_done", agent = done.agent.label()),
+                    lines: done
+                        .changed
+                        .iter()
+                        .map(|file| t!("agents.updated", file = file))
+                        .chain(
+                            done.manual
+                                .iter()
+                                .map(|step| t!("agents.next", step = words::manual(step))),
+                        )
+                        .collect(),
+                })),
                 Err(e) => fail(e),
             }
             reload(again);
@@ -512,7 +543,7 @@ pub(crate) fn save_settings(s: ProjectSettings) {
         move || data::save_settings(&path, &s),
         move |r| match r {
             Ok(()) => {
-                done("Settings saved.");
+                done(t!("settings.saved"));
                 reload(again);
             }
             // Reloading would rebuild the form from the file and lose what the user typed.
@@ -523,9 +554,9 @@ pub(crate) fn save_settings(s: ProjectSettings) {
 
 pub(crate) fn set_codex_auto_approve(on: bool) {
     let done = if on {
-        "Codex now runs obmem's tools without asking."
+        t!("codex.auto_approve_on")
     } else {
-        "Codex asks before running obmem's tools again."
+        t!("codex.auto_approve_off")
     };
     change_project(move |path| data::set_codex_auto_approve(&path, on), done);
 }
@@ -548,8 +579,8 @@ pub(crate) fn scan(input: String) {
 pub(crate) fn allow(vault: Vault, kind: Kind, entry: String) {
     let path = selected().unwrap_or_default();
     let done = match vault {
-        Vault::Project => "Allowed in this project.",
-        Vault::Personal => "Allowed in every project.",
+        Vault::Project => t!("allowlist.allowed_here"),
+        Vault::Personal => t!("allowlist.allowed_everywhere"),
     };
     let entry = entry.trim().to_string();
     in_background_as(
@@ -564,11 +595,11 @@ pub(crate) fn disallow(vault: Vault, kind: Kind, entry: String) {
     in_background_as(
         Work::Disallow(vault, kind, entry.clone()),
         move || data::disallow(&path, vault, kind, &entry),
-        move |r| after_allowlist_change(r, "Removed from the allowlist."),
+        move |r| after_allowlist_change(r, t!("allowlist.removed")),
     );
 }
 
-fn after_allowlist_change(r: Result<(), String>, said: &str) {
+fn after_allowlist_change(r: Result<(), String>, said: String) {
     match r {
         Ok(()) => done(said),
         Err(e) => fail(e),
@@ -608,7 +639,7 @@ pub(crate) fn save_personal(s: GlobalSettings) {
         move || data::save_personal(&s),
         |r| match r {
             Ok(()) => {
-                done("Personal settings saved.");
+                done(t!("personal.saved"));
                 load_personal();
             }
             // Reloading would rebuild the form from the file and lose what the user typed.
@@ -623,7 +654,7 @@ pub(crate) fn save_sync(s: SyncSettings) {
         move || data::save_sync(&s),
         |r| match r {
             Ok(()) => {
-                done("Sync settings saved.");
+                done(t!("sync.saved"));
                 load_personal();
             }
             // Reloading would rebuild the form from the file and lose what the user typed.
@@ -642,8 +673,12 @@ pub(crate) fn connect_sync(
         Work::ConnectSync,
         move || data::connect_sync(access_key_id, secret, passphrase, repeat),
         |r| match r {
-            Ok(msg) => {
-                done(msg);
+            Ok(connected) => {
+                done(if connected.created {
+                    t!("sync.started_vault", bucket = connected.bucket)
+                } else {
+                    t!("sync.connected_to", bucket = connected.bucket)
+                });
                 load_personal();
             }
             Err(e) => fail(e),
@@ -654,7 +689,8 @@ pub(crate) fn connect_sync(
 pub(crate) fn sync_now() {
     in_background_as(Work::Sync, data::sync_now, |r| {
         match r {
-            Ok(msg) => done(format!("Synced: {msg}")),
+            Ok(Some(summary)) => done(t!("sync.synced", summary = words::summary(&summary))),
+            Ok(None) => done(t!("sync.queued")),
             Err(e) => fail(e),
         }
         load_personal();
@@ -678,12 +714,16 @@ pub(crate) fn load_review() {
     });
 }
 
-/// Runs a review action, reports its message, and reads the review list (and the shown project,
-/// whose counts it changed) again.
-fn review_action(what: Work, work: impl FnOnce() -> Result<String, String> + Send + 'static) {
-    in_background_as(what, work, |r| {
+/// Runs a decision on a review item, says what it did, and reads the review list (and the shown
+/// project, whose counts it changed) again.
+fn decide(
+    item: String,
+    decision: Decision,
+    work: impl FnOnce() -> Result<Decided, String> + Send + 'static,
+) {
+    in_background_as(Work::Review(item, decision), work, |r| {
         match r {
-            Ok(msg) => done(msg),
+            Ok(decided) => done(words::decided(&decided)),
             Err(e) => fail(e),
         }
         load_review();
@@ -691,36 +731,22 @@ fn review_action(what: Work, work: impl FnOnce() -> Result<String, String> + Sen
     });
 }
 
-/// The labels of a review item's buttons, which name its decisions in [`Work::Review`].
-pub(crate) const APPROVE: &str = "Approve";
-pub(crate) const VERIFY: &str = "Verify note";
-
-/// The label of the button that resolves a finding with `verdict`.
-pub(crate) fn verdict_label(verdict: Verdict) -> &'static str {
-    match verdict {
-        Verdict::Fixed => "Fixed",
-        Verdict::Accepted => "Accept",
-        Verdict::Rejected => "Reject",
-        Verdict::Open => "Reopen",
-    }
-}
-
 /// Approves the draft the review item `item` is.
 pub(crate) fn approve(item: String, root: PathBuf, scope: Scope, rel: String) {
-    review_action(Work::Review(item, APPROVE), move || {
+    decide(item, Decision::Approve, move || {
         data::approve(&root, scope, &rel)
     });
 }
 
 pub(crate) fn resolve(item: String, root: PathBuf, scope: Scope, rel: String, verdict: Verdict) {
-    review_action(Work::Review(item, verdict_label(verdict)), move || {
+    decide(item, Decision::Resolve(verdict), move || {
         data::resolve(&root, scope, &rel, verdict)
     });
 }
 
 /// Verifies a note in `scope`'s vault: for a finding, the vault the finding is in.
 pub(crate) fn verify(item: String, root: PathBuf, scope: Scope, rel: String) {
-    review_action(Work::Review(item, VERIFY), move || {
+    decide(item, Decision::Verify, move || {
         data::verify(&root, scope, &rel)
     });
 }
@@ -731,7 +757,26 @@ pub(crate) fn run_audit(root: PathBuf) {
         move || data::run_audit(&root),
         |r| {
             match r {
-                Ok(done) => set_notice(Some(Notice::Audit(done))),
+                Ok(audit) => set_notice(Some(Notice {
+                    title: match audit.findings {
+                        Some((new, reopened, closed)) => t!(
+                            "review.audit_done_with_findings",
+                            checked = audit.checked,
+                            errors = audit.errors,
+                            warnings = audit.warnings,
+                            new = new,
+                            reopened = reopened,
+                            closed = closed
+                        ),
+                        None => t!(
+                            "review.audit_done",
+                            checked = audit.checked,
+                            errors = audit.errors,
+                            warnings = audit.warnings
+                        ),
+                    },
+                    lines: audit.notes,
+                })),
                 Err(e) => fail(e),
             }
             load_review();
@@ -763,6 +808,11 @@ pub(crate) fn mode() -> Mode {
     global::<Picked>().with(|p| p.0.mode)
 }
 
+/// The language the user chose for the window.
+pub(crate) fn language() -> Language {
+    global::<Picked>().with(|p| p.0.language)
+}
+
 /// The id of the theme chosen for `scheme`, which is gone when no theme has it.
 pub(crate) fn chosen_theme(scheme: Scheme) -> String {
     global::<Picked>().with(|p| p.0.theme(scheme).to_owned())
@@ -775,12 +825,14 @@ pub(crate) fn shown_theme(scheme: Scheme) -> String {
     })
 }
 
-/// Called by the root component: draws the window as the user chose, and keeps it so. The files
+/// Called by the root component: draws the window as the user chose, in the language they chose,
+/// and keeps it so. The files
 /// are read here, on the engine thread, so that the first frame already has the theme; they are
 /// a few small ones.
 pub(crate) fn start_appearance() {
     let chosen = appearance::chosen();
     set_color_scheme(chosen.mode.into());
+    set_locale(chosen.language.locale());
     global::<Picked>().set(Picked(chosen));
     global::<Themes>().set(Themes(appearance::themes()));
     // Again whenever a theme is picked or read again, and when the appearance shown changes: a
@@ -838,6 +890,12 @@ pub(crate) fn set_mode(mode: Mode) {
     choose(|c| c.mode = mode);
 }
 
+/// Shows the window in `language`, at once, and keeps the choice.
+pub(crate) fn set_language(language: Language) {
+    set_locale(language.locale());
+    choose(|c| c.language = language);
+}
+
 pub(crate) fn pick_theme(scheme: Scheme, id: String) {
     choose(|c| c.set_theme(scheme, id));
 }
@@ -851,9 +909,7 @@ pub(crate) fn duplicate_theme(scheme: Scheme) {
         move || appearance::duplicate(&id).map(|copy| (copy, appearance::themes())),
         move |r| match r {
             Ok((copy, themes)) => {
-                done(format!(
-                    "Saved as {copy}.json in your themes folder. Edit it and come back."
-                ));
+                done(t!("appearance.duplicated", copy = copy));
                 set_themes(themes);
                 pick_theme(scheme, copy);
             }

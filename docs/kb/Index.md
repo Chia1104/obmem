@@ -17,6 +17,7 @@ author: human
 - [[agent-guidance-is-a-short-always-loaded-guide-plus-skills-that-setup-installs]]: what agents are always told, and what is in the skills.
 - [[detect-unlogged-work-from-git-for-agents-other-than-claude-code]]: how the stop hook decides that a session did work.
 - [[obmem-gui-scope-control-panel-for-macos-and-windows-notes-stay-in-obsidian]]: what the desktop app does and does not do.
+- [[the-desktop-app-translates-in-the-window-and-libraries-report-typed-values-with-]]: the desktop app's two languages, and why libraries report typed values.
 - [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]]: encrypted sync of the personal vault.
 - [[sync-retention-keeps-a-week-then-dailies-then-weeklies-blobs-are-collected-after]]: what prune keeps and deletes.
 - [[remote-machines-sync-with-credentials-from-the-environment-and-an-ephemeral-sett]]: sync on servers and in cloud sandboxes.

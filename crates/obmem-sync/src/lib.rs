@@ -25,7 +25,7 @@ mod sync;
 pub use key::VaultKey;
 pub use prune::{PruneReport, prune};
 pub use remote::{Credentials, Remote};
-pub use run::{HOOK_WAIT, Status, connect, last_status, run, summary};
+pub use run::{Cleanup, HOOK_WAIT, Outcome, Status, Summary, connect, last_status, run};
 pub use sync::{Queued, SyncOptions, SyncReport, state_path, sync};
 
 use age::secrecy::SecretString;

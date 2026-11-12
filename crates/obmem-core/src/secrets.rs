@@ -151,27 +151,50 @@ fn merge_allowlist(into: &mut AllowlistDef, a: AllowlistDef, src: &Path, trusted
     }
 }
 
-/// Why the scanner would ignore this allowlist regex, if it would.
-pub fn regex_problem(r: &str) -> Option<String> {
-    match Regex::new(r) {
-        Ok(re) if ALLOWLIST_PROBES.iter().any(|p| re.is_match(p)) => {
-            Some("it matches almost anything".into())
+/// Why the scanner would ignore an allowlist entry. Written out (`Display`) it finishes the
+/// sentence "The scanner would ignore it: …".
+#[derive(Debug, Clone, PartialEq)]
+pub enum Ignored {
+    Empty,
+    MatchesAnything,
+    /// What the regex parser said.
+    InvalidRegex(String),
+    /// The fewest characters a word may have.
+    TooShort(usize),
+    TooGeneric,
+}
+
+impl std::fmt::Display for Ignored {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Ignored::Empty => f.write_str("it is empty"),
+            Ignored::MatchesAnything => f.write_str("it matches almost anything"),
+            Ignored::InvalidRegex(e) => write!(f, "it is not a valid regex: {e}"),
+            Ignored::TooShort(min) => write!(f, "it is shorter than {min} characters"),
+            Ignored::TooGeneric => f.write_str("it is too generic"),
         }
+    }
+}
+
+/// Why the scanner would ignore this allowlist regex, if it would.
+pub fn regex_problem(r: &str) -> Option<Ignored> {
+    match Regex::new(r) {
+        Ok(re) if ALLOWLIST_PROBES.iter().any(|p| re.is_match(p)) => Some(Ignored::MatchesAnything),
         Ok(_) => None,
-        Err(e) => Some(format!("it is not a valid regex: {e}")),
+        Err(e) => Some(Ignored::InvalidRegex(e.to_string())),
     }
 }
 
 /// Why the scanner would ignore this allowlist stopword (compared lower-cased), if it would.
-pub fn stopword_problem(w: &str) -> Option<String> {
+pub fn stopword_problem(w: &str) -> Option<Ignored> {
     let w = w.trim().to_lowercase();
     if w.chars().count() < MIN_STOPWORD_LEN {
-        Some(format!("it is shorter than {MIN_STOPWORD_LEN} characters"))
+        Some(Ignored::TooShort(MIN_STOPWORD_LEN))
     } else if ALLOWLIST_PROBES
         .iter()
         .any(|p| p.to_lowercase().contains(&w))
     {
-        Some("it is too generic".into())
+        Some(Ignored::TooGeneric)
     } else {
         None
     }

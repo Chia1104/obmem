@@ -31,6 +31,9 @@ nsh-platform-windows.workspace = true
 nsh-engine.workspace = true
 nsh-testing.workspace = true
 
+[build-dependencies]
+nsh-i18n.workspace = true
+
 [lints.rust]
 # macOS's linker notes that a build with all of Native Shell has more unwind data than its
 # compact table encodes; it only affects how fast a panic unwinds.

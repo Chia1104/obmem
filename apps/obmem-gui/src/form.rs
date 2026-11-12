@@ -6,12 +6,20 @@
 use nsh_core::prelude::*;
 use obmem_core::settings::Problem;
 
+/// Core's problems as a form takes them: each field with its rule in the window's language.
+pub(crate) fn said<F>(problems: Vec<Problem<F>>) -> Vec<(F, String)> {
+    problems
+        .into_iter()
+        .map(|p| (p.field, crate::words::rule(&p.rule)))
+        .collect()
+}
+
 /// The problems of a form's values, by field. None shows before the form is first sent, so an
 /// untouched form is not red. After that they follow what is typed: a problem goes as soon as its
 /// field is put right.
 pub(crate) struct Problems<F: 'static> {
     tried: Signal<bool>,
-    found: Memo<Vec<Problem<F>>>,
+    found: Memo<Vec<(F, String)>>,
 }
 
 impl<F> Clone for Problems<F> {
@@ -23,8 +31,9 @@ impl<F> Clone for Problems<F> {
 impl<F> Copy for Problems<F> {}
 
 impl<F: Copy + PartialEq + 'static> Problems<F> {
-    /// `check` reads the form's signals and gives every rule their values break.
-    pub(crate) fn of(check: impl Fn() -> Vec<Problem<F>> + 'static) -> Self {
+    /// `check` reads the form's signals and gives every rule their values break: the field, and
+    /// the rule in words. It reads the language too, so the words follow it.
+    pub(crate) fn of(check: impl Fn() -> Vec<(F, String)> + 'static) -> Self {
         Problems {
             tried: signal(false),
             found: computed(check),
@@ -39,8 +48,8 @@ impl<F: Copy + PartialEq + 'static> Problems<F> {
             }
             self.found.with(|all| {
                 all.iter()
-                    .find(|p| p.field == field)
-                    .map(|p| p.message.clone())
+                    .find(|(at, _)| *at == field)
+                    .map(|(_, rule)| rule.clone())
             })
         }
     }

@@ -3,6 +3,7 @@
 
 use crate::state::{self, Load, Work};
 use crate::widgets::{Level, card, check, heading, loading, muted, primary, text_box};
+use crate::words::tr;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
@@ -14,14 +15,12 @@ fn task() -> View {
     let input = signal(state::last_task());
     card()
         .test_id("task-preview")
-        .child(heading("For a task"))
-        .child(muted(
-            "What memory_context returns when an agent describes this task, in any language.",
-        ))
-        .child(text_box(input, "e.g. add a retry to the sync job").test_id("task-input"))
+        .child(heading(tr!("agent_view.task")))
+        .child(muted(tr!("agent_view.task_about")))
+        .child(text_box(input, tr!("agent_view.task_example")).test_id("task-input"))
         .child(
             view().flex_row().pt_2().child(
-                primary("Preview", move || {
+                primary(tr!("agent_view.preview"), move || {
                     state::preview_task(input.get_untracked())
                 })
                 .busy(state::running(Work::PreviewTask)),
@@ -33,20 +32,16 @@ fn task() -> View {
 fn session_start() -> View {
     card()
         .test_id("session-start")
-        .child(heading("At session start"))
-        .child(muted(
-            "What the session-start hook gives an agent before its first message.",
-        ))
+        .child(heading(tr!("agent_view.session_start")))
+        .child(muted(tr!("agent_view.session_start_about")))
         .child(dynamic(move || as_given(state::session_start())))
 }
 
 /// The text exactly as the agent receives it, line for line.
 fn as_given(text: Load<String>) -> AnyElement {
     match text {
-        Load::Loading => loading("Loading…").mt_2().into_element(),
-        Load::Failed(e) => {
-            check(Level::Error, "The agent would get this error instead", e).into_element()
-        }
+        Load::Loading => loading(tr!("common.loading")).mt_2().into_element(),
+        Load::Failed(e) => check(Level::Error, tr!("agent_view.error"), e).into_element(),
         Load::Ready(t) => view()
             .mt_2()
             .p_3()

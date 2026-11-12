@@ -1,15 +1,19 @@
 //! What the window shows and changes, through obmem's libraries. Everything here blocks (files,
 //! git, Obsidian's registry, child processes), so the UI runs it with `nsh_core::blocking`.
+//!
+//! Nothing here is in the window's language: this runs off the engine thread, where the language
+//! cannot be read. An outcome is a typed value that `crate::words` and the views put into words;
+//! a failure is the library's error, in English.
 
 use obmem_agents::hooks::Agent;
-use obmem_agents::setup;
+use obmem_agents::setup::{self, ManualStep};
 use obmem_core::allowlist::{self, Allowlist, Kind};
 use obmem_core::audit::{AuditOptions, Severity};
 use obmem_core::config::{self, Config};
 use obmem_core::note::Scope;
-use obmem_core::settings::{self, GlobalSettings, Problem, ProjectSettings, SyncSettings};
+use obmem_core::settings::{self, GlobalSettings, ProjectSettings, SyncSettings};
 use obmem_core::status::{self, Status};
-use obmem_core::store::{NoteRef, Store, Verdict};
+use obmem_core::store::{Decided, NoteRef, Store, Verdict};
 use obmem_core::{import, init, obsidian, projects, review, sessions};
 use std::path::{Path, PathBuf};
 
@@ -86,7 +90,7 @@ pub struct SetupDone {
     pub agent: Agent,
     pub changed: Vec<String>,
     /// Steps only the user can take (trust prompts, app settings).
-    pub manual: Vec<String>,
+    pub manual: Vec<ManualStep>,
 }
 
 fn text(e: anyhow::Error) -> String {
@@ -241,43 +245,34 @@ pub enum ConnectField {
     Repeat,
 }
 
-/// Every rule the connect form's values break, by field.
+/// The fields of the connect form whose value breaks its rule. Each has one: the key ID, the
+/// secret and the passphrase are needed, and the passphrase is typed the same twice.
 pub fn connect_problems(
     access_key_id: &str,
     secret_access_key: &str,
     passphrase: &str,
     repeat: &str,
-) -> Vec<Problem<ConnectField>> {
-    let mut out = Vec::new();
-    let mut need = |empty: bool, field, message: &str| {
-        if empty {
-            out.push(Problem {
-                field,
-                message: message.into(),
-            });
-        }
-    };
-    need(
-        access_key_id.trim().is_empty(),
-        ConnectField::KeyId,
-        "Enter the bucket's access key ID.",
-    );
-    need(
-        secret_access_key.is_empty(),
-        ConnectField::Secret,
-        "Enter the bucket's secret access key.",
-    );
-    need(
-        passphrase.is_empty(),
-        ConnectField::Passphrase,
-        "Enter a passphrase.",
-    );
-    need(
-        !passphrase.is_empty() && passphrase != repeat,
-        ConnectField::Repeat,
-        "The passphrases differ.",
-    );
-    out
+) -> Vec<ConnectField> {
+    [
+        (access_key_id.trim().is_empty(), ConnectField::KeyId),
+        (secret_access_key.is_empty(), ConnectField::Secret),
+        (passphrase.is_empty(), ConnectField::Passphrase),
+        (
+            !passphrase.is_empty() && passphrase != repeat,
+            ConnectField::Repeat,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(broken, field)| broken.then_some(field))
+    .collect()
+}
+
+/// A device connected to the vault in `bucket`. `created`: the bucket held no vault, so this
+/// device started one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Connected {
+    pub bucket: String,
+    pub created: bool,
 }
 
 /// Connect this device to the bucket the saved settings name.
@@ -286,36 +281,28 @@ pub fn connect_sync(
     secret_access_key: String,
     passphrase: String,
     repeat: String,
-) -> Result<String, String> {
+) -> Result<Connected, String> {
     let cfg = config::sync_config().map_err(text)?;
     let bucket = cfg.bucket.clone().ok_or("Save a bucket first.")?;
-    if let Some(p) = connect_problems(&access_key_id, &secret_access_key, &passphrase, &repeat)
-        .into_iter()
-        .next()
-    {
-        return Err(p.message);
+    // The form checks this before it sends, and says which field.
+    if !connect_problems(&access_key_id, &secret_access_key, &passphrase, &repeat).is_empty() {
+        return Err("The access key and the passphrase are needed, the passphrase twice.".into());
     }
     let creds = obmem_sync::Credentials {
         access_key_id: access_key_id.trim().to_string(),
         secret_access_key,
     };
     let created = obmem_sync::connect(&cfg, creds, &passphrase.into()).map_err(text)?;
-    Ok(if created {
-        format!(
-            "Started a new encrypted vault in {bucket}. Every other device unlocks it with the same passphrase."
-        )
-    } else {
-        format!("Connected to the vault in {bucket}.")
-    })
+    Ok(Connected { bucket, created })
 }
 
-/// One sync, now; the outcome also goes to the status the page shows.
-pub fn sync_now() -> Result<String, String> {
+/// One sync, now; the outcome also goes to the status the page shows. `None`: a sync is already
+/// queued, and takes these changes too.
+pub fn sync_now() -> Result<Option<obmem_sync::Summary>, String> {
     let cfg = config::sync_config().map_err(text)?;
-    match obmem_sync::run(&cfg, false, std::time::Duration::ZERO).map_err(text)? {
-        Some(r) => Ok(obmem_sync::summary(&r)),
-        None => Ok("A sync is already queued.".into()),
-    }
+    Ok(obmem_sync::run(&cfg, false, std::time::Duration::ZERO)
+        .map_err(text)?
+        .map(|r| (&r).into()))
 }
 
 pub fn save_personal(s: &GlobalSettings) -> Result<(), String> {
@@ -342,7 +329,8 @@ pub fn set_up(path: &Path, agent: Agent) -> Result<SetupDone, String> {
 /// One project's review items, or the personal vault's (shared by every project, listed once).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReviewGroup {
-    pub title: String,
+    /// The project's name. The personal vault has none.
+    pub name: String,
     /// The project actions go through; for the personal vault, any listed project.
     pub root: PathBuf,
     /// `None` for the personal vault, which has no audit of its own here.
@@ -371,7 +359,7 @@ pub fn review() -> Result<Vec<ReviewGroup>, String> {
             .partition(|i| i.scope == "project");
         if personal.is_none() {
             personal = Some(ReviewGroup {
-                title: "Personal vault".into(),
+                name: String::new(),
                 root: cfg.project_root.clone(),
                 project: None,
                 vault_id: obsidian::vault_id(&cfg.global_vault).ok().flatten(),
@@ -379,7 +367,7 @@ pub fn review() -> Result<Vec<ReviewGroup>, String> {
             });
         }
         groups.push(ReviewGroup {
-            title: cfg.project_name.clone(),
+            name: cfg.project_name.clone(),
             root: cfg.project_root.clone(),
             project: Some(cfg.project_root.clone()),
             vault_id: obsidian::vault_id(&cfg.project_vault).ok().flatten(),
@@ -396,20 +384,20 @@ fn store_at(root: &Path) -> Result<Store, String> {
 
 const BY: &str = "human (gui)";
 
-pub fn approve(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
+pub fn approve(root: &Path, scope: Scope, rel: &str) -> Result<Decided, String> {
     store_at(root)?
         .approve(NoteRef::At { scope, rel }, BY)
         .map_err(text)
 }
 
-pub fn resolve(root: &Path, scope: Scope, rel: &str, verdict: Verdict) -> Result<String, String> {
+pub fn resolve(root: &Path, scope: Scope, rel: &str, verdict: Verdict) -> Result<Decided, String> {
     store_at(root)?
         .resolve_finding(NoteRef::At { scope, rel }, verdict, None, BY, true)
         .map_err(text)
 }
 
 /// Records that the note was re-checked against the current code.
-pub fn verify(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
+pub fn verify(root: &Path, scope: Scope, rel: &str) -> Result<Decided, String> {
     store_at(root)?
         .verify(NoteRef::At { scope, rel }, BY, true)
         .map_err(text)
@@ -418,7 +406,12 @@ pub fn verify(root: &Path, scope: Scope, rel: &str) -> Result<String, String> {
 /// What an audit run reported.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditDone {
-    pub summary: String,
+    /// How many notes it checked, and the errors and warnings it found in them.
+    pub checked: usize,
+    pub errors: usize,
+    pub warnings: usize,
+    /// How the finding notes changed: new, reopened, closed.
+    pub findings: Option<(usize, usize, usize)>,
     /// What the audit could not check, and why.
     pub notes: Vec<String>,
 }
@@ -433,22 +426,11 @@ pub fn run_audit(root: &Path) -> Result<AuditDone, String> {
     };
     let (report, stats) = store.audit(&opts, Some(Severity::Warn)).map_err(text)?;
     let count = |s: Severity| report.issues.iter().filter(|i| i.severity == s).count();
-    let mut summary = format!(
-        "Checked {} notes: {} errors, {} warnings.",
-        report.checked_notes,
-        count(Severity::Error),
-        count(Severity::Warn)
-    );
-    if let Some(st) = stats {
-        summary.push_str(&format!(
-            " Findings: {} new, {} reopened, {} closed.",
-            st.created.len(),
-            st.reopened.len(),
-            st.closed.len()
-        ));
-    }
     Ok(AuditDone {
-        summary,
+        checked: report.checked_notes,
+        errors: count(Severity::Error),
+        warnings: count(Severity::Warn),
+        findings: stats.map(|st| (st.created.len(), st.reopened.len(), st.closed.len())),
         notes: report.notices,
     })
 }
@@ -515,8 +497,11 @@ fn claude_memory(store: &Store, root: &Path) -> Result<ClaudeMemory, String> {
     Ok(ClaudeMemory { dir, items })
 }
 
-/// Imports the chosen memory files as drafts. Returns what happened, one line per file.
-pub fn import_claude(root: &Path, chosen: &[PathBuf]) -> Result<Vec<String>, String> {
+/// What importing one memory file did: the note it is now, or why it was left out.
+pub type Imported = Result<String, import::Skip>;
+
+/// Imports the chosen memory files as drafts. Returns what happened to each file, by its name.
+pub fn import_claude(root: &Path, chosen: &[PathBuf]) -> Result<Vec<(String, Imported)>, String> {
     let mut store = store_at(root)?;
     let dir = import::default_dir(&store.config().project_root);
     let items = import::plan(&dir)
@@ -533,10 +518,11 @@ pub fn import_claude(root: &Path, chosen: &[PathBuf]) -> Result<Vec<String>, Str
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned();
-            match r {
-                import::ImportResult::Imported(p) => format!("Imported {name} as {p}"),
-                import::ImportResult::Skipped(why) => format!("Skipped {name}: {why}"),
-            }
+            let done = match r {
+                import::ImportResult::Imported(note) => Ok(note),
+                import::ImportResult::Skipped(why) => Err(why),
+            };
+            (name, done)
         })
         .collect())
 }

@@ -13,7 +13,7 @@ fn main() -> impl std::process::Termination {
     obmem_gui::prepare_process();
     env_logger::init();
     platform::run_app(
-        platform::AppSource::Rust(platform::Root::of::<obmem_gui::App>()),
+        platform::AppSource::Rust(obmem_gui::root()),
         platform::AppOptions {
             title: "obmem".to_owned(),
             #[cfg(target_os = "windows")]

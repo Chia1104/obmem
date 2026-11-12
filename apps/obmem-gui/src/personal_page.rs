@@ -2,25 +2,21 @@
 //! which apply to every project.
 
 use crate::data::{self, ConnectField, Personal, SyncInfo, Vault};
-use crate::form::Problems;
+use crate::form::{Problems, said};
 use crate::state::{self, Load, Work};
 use crate::widgets::{
     Level, Marked, action, card, check, checked_field, field, heading, loading, muted, notice_area,
     page, page_header, primary, problem_text, switch_control, text_box,
 };
+use crate::words::{self, tr};
 use nsh_core::prelude::*;
 use obmem_core::allowlist::{self, Allowlist, Kind};
-use obmem_core::settings::{GlobalField, GlobalSettings, Problem, SyncField, SyncSettings};
+use obmem_core::settings::{GlobalField, GlobalSettings, SyncField, SyncSettings};
+use obmem_sync::Outcome;
 
 pub(crate) fn personal_page() -> impl IntoElement {
     page(
-        page_header(
-            "Personal settings",
-            muted(
-                "Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault.",
-            ),
-            vec![],
-        ),
+        page_header(tr!("personal.title"), muted(tr!("personal.about")), vec![]),
         view()
             .gap_4()
             .child(notice_area())
@@ -28,10 +24,10 @@ pub(crate) fn personal_page() -> impl IntoElement {
                 view()
                     .gap_4()
                     .child(dynamic(move || match state::personal() {
-                        Load::Loading => vec![loading("Loading…").into_element()],
-                        Load::Failed(e) => vec![
-                            check(Level::Error, "Could not read your settings", e).into_element(),
-                        ],
+                        Load::Loading => vec![loading(tr!("common.loading")).into_element()],
+                        Load::Failed(e) => {
+                            vec![check(Level::Error, tr!("personal.unreadable"), e).into_element()]
+                        }
                         Load::Ready(p) => vec![
                             form(&p).into_element(),
                             sync_card(&p).into_element(),
@@ -51,47 +47,59 @@ fn form(p: &Personal) -> View {
         scan_process_env: scan_env.get(),
         auto_approve: auto_approve.get(),
     };
-    let problems = Problems::of(move || draft().problems());
+    let problems = Problems::of(move || said(draft().problems()));
     let save = move || {
         if problems.none() {
             state::save_personal(untracked(draft));
         }
     };
+    let now = p.vault.display().to_string();
     card()
         .test_id("personal-settings")
-        .child(heading("Settings"))
+        .child(heading(tr!("personal.settings")))
         .child(checked_field(
-            "Personal vault",
-            &format!("Your feedback, preferences and session logs. Now: {}. Empty: ~/Obsidian/AgentMemory.", p.vault.display()),
-            text_box(vault, "~/Obsidian/AgentMemory").marked(problems.marks(GlobalField::Vault)).test_id("personal-vault"),
+            tr!("common.personal_vault"),
+            tr!("personal.vault_help", now = now),
+            text_box(vault, "~/Obsidian/AgentMemory")
+                .marked(problems.marks(GlobalField::Vault))
+                .test_id("personal-vault"),
             problems.at(GlobalField::Vault),
         ))
         .child(field(
-            "Scan environment variables",
-            "Treat the values of sensitive-looking environment variables as known secrets. Only you can turn this off; a project's settings cannot.",
-            switch_control(move || scan_env.get(), "Scan environment variables", move |v| scan_env.set(v)),
+            tr!("personal.scan_env"),
+            tr!("personal.scan_env_help"),
+            switch_control(
+                move || scan_env.get(),
+                tr!("personal.scan_env"),
+                move |v| scan_env.set(v),
+            ),
         ))
         .child(field(
-            "Approve agent notes automatically",
-            "Agents' notes are saved active instead of waiting in Review as drafts. Only you can turn this on; a project's .obmem.toml can turn it off with [review] auto_approve = false.",
-            switch_control(move || auto_approve.get(), "Approve agent notes automatically", move |v| auto_approve.set(v)),
+            tr!("personal.auto_approve"),
+            tr!("personal.auto_approve_help"),
+            switch_control(
+                move || auto_approve.get(),
+                tr!("personal.auto_approve"),
+                move |v| auto_approve.set(v),
+            ),
         ))
-        .child(view().flex_row().pt_2().child(primary("Save", save).busy(state::running(Work::SavePersonal))))
+        .child(
+            view()
+                .flex_row()
+                .pt_2()
+                .child(primary(tr!("common.save"), save).busy(state::running(Work::SavePersonal))),
+        )
 }
 
 fn sync_card(p: &Personal) -> View {
     let c = card()
         .test_id("personal-sync")
-        .child(heading("Sync"))
-        .child(muted("Keep this personal vault the same on your Macs and PCs through an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Everything in the bucket is encrypted, and only your passphrase unlocks it."));
+        .child(heading(tr!("sync.title")))
+        .child(muted(tr!("sync.about")));
     let info = match &p.sync {
         Ok(i) => i.clone(),
         Err(e) => {
-            return c.child(check(
-                Level::Error,
-                "Could not read the sync settings",
-                e.clone(),
-            ));
+            return c.child(check(Level::Error, tr!("sync.unreadable"), e.clone()));
         }
     };
     let c = c
@@ -106,42 +114,51 @@ fn sync_card(p: &Personal) -> View {
 fn sync_status(info: &SyncInfo) -> View {
     let row = view().gap_2().pt_2();
     if info.settings.bucket.is_empty() {
-        return row.child(muted("Off: no bucket yet."));
+        return row.child(muted(tr!("sync.off")));
     }
     match &info.connected {
         Err(e) => {
             return row.child(check(
                 Level::Error,
-                "Could not read the keychain",
+                tr!("sync.keychain_unreadable"),
                 e.clone(),
             ));
         }
         Ok(false) => {
             return row.child(check(
                 Level::Warn,
-                "This device is not connected",
-                "Enter the bucket's access key and your passphrase below.",
+                tr!("sync.not_connected"),
+                tr!("sync.not_connected_about"),
             ));
         }
         Ok(true) => {}
     }
-    let line = match &info.last {
+    let line = match info.last.clone() {
         None => check(
             Level::Warn,
-            "Connected, not synced yet",
-            "Sync now, or start an agent session in an obmem project.",
+            tr!("sync.not_synced"),
+            tr!("sync.not_synced_about"),
         ),
-        Some(s) if s.ok => check(Level::Ok, "Last sync", format!("{} ({})", s.message, s.at)),
-        Some(s) => check(
-            Level::Error,
-            "The last sync failed",
-            format!("{} ({})", s.message, s.at),
-        ),
+        Some(last) => {
+            let (level, title) = match last.outcome {
+                Outcome::Failed(_) => (Level::Error, "sync.last_failed"),
+                Outcome::Synced { .. } => (Level::Ok, "sync.last"),
+            };
+            check(
+                level,
+                tr!(title),
+                tr!(
+                    "sync.last_about",
+                    what = words::outcome(&last.outcome),
+                    at = last.at
+                ),
+            )
+        }
     };
     row.child(line).child(
         view()
             .flex_row()
-            .child(primary("Sync now", state::sync_now).busy(state::running(Work::Sync))),
+            .child(primary(tr!("sync.now"), state::sync_now).busy(state::running(Work::Sync))),
     )
 }
 
@@ -162,7 +179,7 @@ fn sync_settings(s: &SyncSettings) -> View {
         auto: auto.get(),
         community_plugins: plugins.get(),
     };
-    let problems = Problems::of(move || draft().problems());
+    let problems = Problems::of(move || said(draft().problems()));
     let save = move || {
         if problems.none() {
             state::save_sync(untracked(draft));
@@ -171,31 +188,56 @@ fn sync_settings(s: &SyncSettings) -> View {
     view()
         .gap_1()
         .child(checked_field(
-            "Endpoint",
-            "The S3 API URL, e.g. https://<account-id>.r2.cloudflarestorage.com. Empty: AWS S3.",
-            text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com").marked(problems.marks(SyncField::Endpoint)).test_id("sync-endpoint"),
+            tr!("sync.endpoint"),
+            tr!("sync.endpoint_help"),
+            text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com")
+                .marked(problems.marks(SyncField::Endpoint))
+                .test_id("sync-endpoint"),
             problems.at(SyncField::Endpoint),
         ))
         .child(checked_field(
-            "Bucket",
-            "Empty turns sync off.",
-            text_box(bucket, "my-obmem-vault").marked(problems.marks(SyncField::Bucket)).test_id("sync-bucket"),
+            tr!("sync.bucket"),
+            tr!("sync.bucket_help"),
+            text_box(bucket, "my-obmem-vault")
+                .marked(problems.marks(SyncField::Bucket))
+                .test_id("sync-bucket"),
             problems.at(SyncField::Bucket),
         ))
-        .child(field("Region", "AWS needs the bucket's region. Empty: auto, which R2 expects.", text_box(region, "auto")))
-        .child(field("Prefix", "Where in the bucket the vault goes. Empty: obmem.", text_box(prefix, "obmem")))
-        .child(field("This device's name", "Shown in snapshots and conflict copies, and part of session log names. Connecting sets it to the host name plus four random hex digits, so two machines never share one.", text_box(device, "work-mac").test_id("sync-device")))
         .child(field(
-            "Sync automatically",
-            "Sync in the background when an agent session starts or a turn ends in an obmem project, at most once a minute.",
-            switch_control(move || auto.get(), "Sync automatically", move |v| auto.set(v)),
+            tr!("sync.region"),
+            tr!("sync.region_help"),
+            text_box(region, "auto"),
         ))
         .child(field(
-            "Community plugins",
-            "Also sync .obsidian/plugins. Settings, themes and snippets always sync; the workspace layout never does.",
-            switch_control(move || plugins.get(), "Sync community plugins", move |v| plugins.set(v)),
+            tr!("sync.prefix"),
+            tr!("sync.prefix_help"),
+            text_box(prefix, "obmem"),
         ))
-        .child(view().flex_row().pt_2().child(primary("Save", save).busy(state::running(Work::SaveSync))))
+        .child(field(
+            tr!("sync.device"),
+            tr!("sync.device_help"),
+            text_box(device, "work-mac").test_id("sync-device"),
+        ))
+        .child(field(
+            tr!("sync.auto"),
+            tr!("sync.auto_help"),
+            switch_control(move || auto.get(), tr!("sync.auto"), move |v| auto.set(v)),
+        ))
+        .child(field(
+            tr!("sync.plugins"),
+            tr!("sync.plugins_help"),
+            switch_control(
+                move || plugins.get(),
+                tr!("sync.plugins_switch"),
+                move |v| plugins.set(v),
+            ),
+        ))
+        .child(
+            view()
+                .flex_row()
+                .pt_2()
+                .child(primary(tr!("common.save"), save).busy(state::running(Work::SaveSync))),
+        )
 }
 
 fn connect_form() -> View {
@@ -210,6 +252,17 @@ fn connect_form() -> View {
             &passphrase.get(),
             &repeat.get(),
         )
+        .into_iter()
+        .map(|field| {
+            let rule = match field {
+                ConnectField::KeyId => t!("rule.key_id_needed"),
+                ConnectField::Secret => t!("rule.secret_needed"),
+                ConnectField::Passphrase => t!("rule.passphrase_needed"),
+                ConnectField::Repeat => t!("rule.passphrases_differ"),
+            };
+            (field, rule)
+        })
+        .collect()
     });
     let connect = move || {
         if problems.none() {
@@ -221,44 +274,72 @@ fn connect_form() -> View {
             )
         }
     };
-    let row =
-        move |field: ConnectField, label: &str, value: Signal<String>, masked: bool, id: &str| {
-            checked_field(
-                label,
-                "",
-                text_box(value, label)
-                    .marked(problems.marks(field))
-                    .masked(masked)
-                    .test_id(id),
-                problems.at(field),
-            )
-        };
+    // `label` is a translation key.
+    let row = move |field: ConnectField,
+                    label: &'static str,
+                    value: Signal<String>,
+                    masked: bool,
+                    id: &str| {
+        checked_field(
+            tr!(label),
+            "",
+            text_box(value, tr!(label))
+                .marked(problems.marks(field))
+                .masked(masked)
+                .test_id(id),
+            problems.at(field),
+        )
+    };
     view()
         .test_id("sync-connect")
         .gap_1()
         .pt_3()
-        .child(text("Connect this device").font_weight(FontWeight::MEDIUM))
-        .child(muted("The access key stays in this device's keychain. On the first device the passphrase you choose starts the vault; every other device unlocks it with the same one. If you forget it, the bucket cannot be read."))
-        .child(row(ConnectField::KeyId, "Access key ID", key_id, false, "connect-key-id"))
-        .child(row(ConnectField::Secret, "Secret access key", secret, true, "connect-secret"))
-        .child(row(ConnectField::Passphrase, "Passphrase", passphrase, true, "connect-passphrase"))
-        .child(row(ConnectField::Repeat, "Repeat passphrase", repeat, true, "connect-repeat"))
-        .child(view().flex_row().pt_2().child(primary("Connect", connect).busy(state::running(Work::ConnectSync))))
+        .child(text(tr!("sync.connect_title")).font_weight(FontWeight::MEDIUM))
+        .child(muted(tr!("sync.connect_about")))
+        .child(row(
+            ConnectField::KeyId,
+            "sync.key_id",
+            key_id,
+            false,
+            "connect-key-id",
+        ))
+        .child(row(
+            ConnectField::Secret,
+            "sync.secret",
+            secret,
+            true,
+            "connect-secret",
+        ))
+        .child(row(
+            ConnectField::Passphrase,
+            "sync.passphrase",
+            passphrase,
+            true,
+            "connect-passphrase",
+        ))
+        .child(row(
+            ConnectField::Repeat,
+            "sync.repeat",
+            repeat,
+            true,
+            "connect-repeat",
+        ))
+        .child(
+            view().flex_row().pt_2().child(
+                primary(tr!("sync.connect"), connect).busy(state::running(Work::ConnectSync)),
+            ),
+        )
 }
 
 fn allowlist(p: &Personal) -> View {
     let mut c = card()
         .test_id("personal-allowlist")
-        .child(heading("Allowed everywhere"))
-        .child(muted("False positives the scanner lets through in every project. Only this list may hold patterns and words."));
+        .child(heading(tr!("allowlist.title")))
+        .child(muted(tr!("allowlist.about")));
     let a = match &p.allowlist {
         Ok(a) => a.clone(),
         Err(e) => {
-            return c.child(check(
-                Level::Error,
-                "Could not read your allowlist",
-                e.clone(),
-            ));
+            return c.child(check(Level::Error, tr!("allowlist.unreadable"), e.clone()));
         }
     };
     let Allowlist {
@@ -266,38 +347,27 @@ fn allowlist(p: &Personal) -> View {
         regexes,
         stopwords,
     } = a;
-    c = c.child(entries(
-        "Fingerprints",
-        "Exact values, added from a scan.",
-        Kind::Fingerprint,
-        fingerprints,
-        false,
-    ));
-    c = c.child(entries(
-        "Patterns",
-        "Regexes matched against a suspected secret.",
-        Kind::Regex,
-        regexes,
-        true,
-    ));
-    c.child(entries(
-        "Words",
-        "A value containing one of these (4+ letters) is not a secret.",
-        Kind::Stopword,
-        stopwords,
-        true,
-    ))
+    c = c.child(entries(Kind::Fingerprint, fingerprints, false));
+    c = c.child(entries(Kind::Regex, regexes, true));
+    c.child(entries(Kind::Stopword, stopwords, true))
 }
 
-fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool) -> View {
+/// One kind of entry: what tests find it by, which is also the end of its translation keys
+/// (`allowlist.<id>`, `allowlist.<id>_help`, `allowlist.add_<id>`).
+fn entries(kind: Kind, list: Vec<String>, addable: bool) -> View {
+    let id = match kind {
+        Kind::Fingerprint => "fingerprints",
+        Kind::Regex => "patterns",
+        Kind::Stopword => "words",
+    };
     let mut block = view()
-        .test_id(&format!("entries-{}", title.to_lowercase()))
+        .test_id(&format!("entries-{id}"))
         .gap_1()
         .pt_3()
-        .child(text(title.to_string()).font_weight(FontWeight::MEDIUM))
-        .child(muted(help.to_string()));
+        .child(text(move || t!(&format!("allowlist.{id}"))).font_weight(FontWeight::MEDIUM))
+        .child(muted(move || t!(&format!("allowlist.{id}_help"))));
     if list.is_empty() {
-        block = block.child(muted("None."));
+        block = block.child(muted(tr!("allowlist.none")));
     }
     for e in list {
         let entry = e.clone();
@@ -309,7 +379,7 @@ fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool
                 .py_1()
                 .child(text(e).flex_1().text_sm())
                 .child(
-                    action("Remove", {
+                    action(tr!("common.remove"), {
                         let entry = entry.clone();
                         move || state::disallow(Vault::Personal, kind, entry.clone())
                     })
@@ -325,8 +395,9 @@ fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool
         let draft = signal(String::new());
         // The scanner's own rule for an entry: one it would ignore is not added.
         let problems = Problems::of(move || {
-            allowlist::problem(kind, &draft.get())
-                .map(|message| Problem { field: (), message })
+            let entry = draft.get();
+            allowlist::problem(kind, &entry)
+                .map(|why| ((), words::ignored(&entry, &why)))
                 .into_iter()
                 .collect()
         });
@@ -350,12 +421,12 @@ fn entries(title: &str, help: &str, kind: Kind, list: Vec<String>, addable: bool
                     .gap_2()
                     .pt_1()
                     .child(
-                        text_box(draft, &format!("Add to {}", title.to_lowercase()))
+                        text_box(draft, move || t!(&format!("allowlist.add_{id}")))
                             .marked(problems.marks(()))
-                            .test_id(&format!("add-{}", title.to_lowercase()))
+                            .test_id(&format!("add-{id}"))
                             .flex_1(),
                     )
-                    .child(action("Add", add).busy(adding)),
+                    .child(action(tr!("common.add"), add).busy(adding)),
             )
             .child(dynamic(move || problem().map(problem_text)));
     }

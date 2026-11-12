@@ -19,6 +19,7 @@ mod sidebar;
 mod state;
 mod toasts;
 mod widgets;
+mod words;
 
 use nsh_base::theme;
 use nsh_core::prelude::*;
@@ -29,6 +30,14 @@ use nsh_core::prelude::*;
 fn native(registry: &mut Registry) {
     prepare_process();
     registry.register::<App>();
+}
+
+/// The app as a host built by Cargo starts it (`cargo run`, the tests): [`App`], with the
+/// translations in `locales/`, which `build.rs` read. The nsh CLI's runners make their own root
+/// and read `locales/` themselves.
+pub fn root() -> nsh_core::element::Root {
+    nsh_core::element::Root::of::<App>()
+        .translations_json(include_str!(concat!(env!("OUT_DIR"), "/translations.json")))
 }
 
 /// Once per process, before any thread starts: see [`login_env`].

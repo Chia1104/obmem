@@ -7,10 +7,11 @@
 
 use crate::data::ProjectRow;
 use crate::icons::{self, INBOX, PALETTE, PERSON, PLUS, SIDEBAR};
+use crate::motion::{self, Eased, pressed, pressed_icon};
 use crate::state::{self, Load, Screen};
 use crate::widgets::{self, WithHint, icon_button, loading, muted, path_text};
 use crate::words::{named, tr};
-use nsh_base::{HandleEdge, ResizeHandleState, button, resize_handle, theme};
+use nsh_base::{HandleEdge, ResizeHandleState, SheetEvent, button, resize_handle, sheet, theme};
 use nsh_core::element::desktop::title_bar;
 use nsh_core::geometry::Axis;
 use nsh_core::prelude::*;
@@ -101,6 +102,7 @@ fn toggle() {
     if widgets::narrow() {
         global::<Drawer>().update(|d| d.0 = !d.0);
     } else {
+        motion::glide();
         set_collapsed(!global::<Collapsed>().get_untracked().0);
     }
 }
@@ -183,36 +185,23 @@ pub(crate) fn sidebar() -> impl IntoElement {
         )
 }
 
-/// The full list over the page, while it is open in a narrow window, with a scrim behind it that
-/// closes it.
-pub(crate) fn drawer() -> AnyElement {
-    dynamic(move || {
-        (widgets::narrow() && global::<Drawer>().with(|d| d.0)).then(|| {
-            view()
-                .absolute()
-                .inset_0()
-                .flex_row()
-                .z_index(10)
-                .child(
-                    view()
-                        .w(px(DEFAULT))
-                        .h_full()
-                        .bg(move || theme().sidebar)
-                        .border_r_1()
-                        .border_r_color(move || theme().sidebar_border)
-                        .shadow_xl()
-                        .child(widgets::title_strip())
-                        .child(panel(true)),
-                )
-                .child(
-                    button()
-                        .flex_1()
-                        .bg(move || theme().foreground.opacity(0.18))
-                        .on_press(close_drawer)
-                        .accessibility_label(named("sidebar.close")),
-                )
+/// The full list over the page, while it is open in a narrow window (NSH's `Sheet`): it slides in
+/// from the left over a scrim, and a press on the scrim or Escape closes it.
+pub(crate) fn drawer() -> impl IntoElement {
+    sheet()
+        .side(Placement::Left)
+        .open(move || Some(widgets::narrow() && global::<Drawer>().with(|d| d.0)))
+        .on_open_change(|e: &SheetEvent| {
+            if let SheetEvent::OpenChange(false, _) = e {
+                close_drawer();
+            }
         })
-    })
+        .popup_class(format!(
+            "w-[{DEFAULT}px] bg-sidebar border-r border-sidebar-border shadow-xl"
+        ))
+        .backdrop_class("bg-foreground/18")
+        .child(widgets::title_strip())
+        .child(panel(true))
 }
 
 /// The full sidebar: the projects, then the other screens.
@@ -324,8 +313,9 @@ fn screen_entry(paths: &'static str, screen: Screen, show: fn()) -> impl IntoEle
             .py(px(7.0))
             .rounded(move || theme().radius)
             .bg(entry_bg(chosen))
+            .presses()
             .hover(|s| s.bg(move || theme().sidebar_accent))
-            .active(|s| s.opacity(0.7))
+            .active(pressed)
             .text_color(move || {
                 if chosen() {
                     theme().foreground
@@ -367,8 +357,9 @@ fn project_row(row: ReadSignal<ProjectRow>) -> impl IntoElement {
         .py(px(6.0))
         .rounded(move || theme().radius)
         .bg(entry_bg(chosen))
+        .presses()
         .hover(|s| s.bg(move || theme().sidebar_accent))
-        .active(|s| s.opacity(0.7))
+        .active(pressed)
         .on_press(move || {
             close_drawer();
             state::open(path());
@@ -451,7 +442,8 @@ fn rail_project(row: ReadSignal<ProjectRow>) -> impl IntoElement {
     let name = row.with_untracked(|r| r.name.clone());
     button()
         .rounded(move || theme().radius)
-        .active(|s| s.opacity(0.7))
+        .presses()
+        .active(pressed_icon)
         .accessibility_label(name.clone())
         .on_press(move || state::open(path()))
         .child(monogram(move || row.with(|r| r.name.clone()), chosen, 34.0))
@@ -469,8 +461,9 @@ fn rail_screen(paths: &'static str, screen: Screen, show: fn()) -> impl IntoElem
             .justify_center()
             .rounded(move || theme().radius)
             .bg(entry_bg(chosen))
+            .presses()
             .hover(|s| s.bg(move || theme().sidebar_accent))
-            .active(|s| s.opacity(0.7))
+            .active(pressed_icon)
             .text_color(move || {
                 if chosen() {
                     theme().primary

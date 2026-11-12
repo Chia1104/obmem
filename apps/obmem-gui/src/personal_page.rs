@@ -6,7 +6,7 @@ use crate::form::{Problems, said};
 use crate::state::{self, Load, Work};
 use crate::widgets::{
     Level, Marked, action, card, check, checked_field, field, heading, loading, muted, notice_area,
-    page, page_header, primary, problem_text, switch_control, text_box,
+    page, page_header, primary, problem_line, switch_control, text_box,
 };
 use crate::words::{self, tr};
 use nsh_core::prelude::*;
@@ -428,7 +428,7 @@ fn entries(kind: Kind, list: Vec<String>, addable: bool) -> View {
                     )
                     .child(action(tr!("common.add"), add).busy(adding)),
             )
-            .child(dynamic(move || problem().map(problem_text)));
+            .child(problem_line(problem));
     }
     block
 }

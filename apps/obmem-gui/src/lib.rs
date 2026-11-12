@@ -9,6 +9,7 @@ mod data;
 mod form;
 mod icons;
 mod login_env;
+mod motion;
 mod personal_page;
 mod project_page;
 mod review_page;
@@ -59,6 +60,7 @@ pub fn App() -> impl IntoElement {
     nsh_core::element::desktop::current_window().set(attributes);
     state::own_tasks();
     state::start_appearance();
+    widgets::glide_at_breakpoints();
     state::load_projects(None);
     view()
         .flex_1()

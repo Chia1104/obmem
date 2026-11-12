@@ -2,6 +2,7 @@
 //! files.
 
 use crate::appearance::{self, Language, Mode, Scheme, ThemeFile};
+use crate::motion::{Eased, pressed};
 use crate::state::{self, Work};
 use crate::widgets::{
     Level, action, card, check, choice, heading, muted, page, page_header, path_text, select,
@@ -177,7 +178,8 @@ fn tile(file: &ThemeFile, scheme: Scheme) -> impl IntoElement {
         .accessibility_label(file.name.clone())
         .on_change(move |_: &bool| state::pick_theme(scheme, id.clone()))
         .gap_1()
-        .active(|s| s.opacity(0.7))
+        .presses()
+        .active(pressed)
         .child(
             // The mark of the chosen one: a ring around its window.
             view()

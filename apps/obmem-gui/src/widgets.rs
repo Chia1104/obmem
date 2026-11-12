@@ -4,6 +4,7 @@
 //! app's own words, which then follow the language, or a `String` for what is data (a name, a
 //! path, what a library reported).
 
+use crate::motion::{self, Eased, Enters, pressed, pressed_icon};
 use crate::sidebar;
 use crate::words::tr;
 use nsh_base::{button, input, theme};
@@ -21,6 +22,19 @@ const PAGE_MAX: f32 = 920.0;
 /// The window is too narrow to keep the sidebar beside the page.
 pub(crate) fn narrow() -> bool {
     window().width.0 < NARROW
+}
+
+/// Makes the layout glide when the window crosses a width where it rearranges: the sidebar
+/// becomes a rail, or form rows put their labels above their controls. Call it once, in the
+/// root component.
+pub(crate) fn glide_at_breakpoints() {
+    let last = stored(None);
+    effect(move || {
+        let now = (narrow(), page_width() < STACK_FIELDS);
+        if last.replace(Some(now)).is_some_and(|was| was != now) {
+            untracked(motion::glide);
+        }
+    });
 }
 
 /// The width left for the page beside the sidebar.
@@ -43,7 +57,7 @@ pub(crate) fn title_strip() -> View {
 }
 
 /// A page: its header, then its blocks, in a column that scrolls and stops growing in a wide
-/// window.
+/// window. The column rises in when the page is opened.
 pub(crate) fn page(header: impl IntoElement, body: impl IntoElement) -> impl IntoElement {
     view().flex_1().min_w(px(0.0)).child(title_strip()).child(
         scroll().flex_1().child(
@@ -56,7 +70,8 @@ pub(crate) fn page(header: impl IntoElement, body: impl IntoElement) -> impl Int
                 .pt_2()
                 .style_when(narrow, |s| s.px_4().pb_4())
                 .child(header)
-                .child(body),
+                .child(body)
+                .rises(),
         ),
     )
 }
@@ -201,6 +216,7 @@ impl IntoElement for Press {
             .border_color(move || if main { theme().primary } else { theme().input })
             .rounded(move || theme().radius)
             .bg(move || if main { theme().primary } else { theme().card })
+            .presses()
             .hover(|s| {
                 if main {
                     s.opacity(0.88)
@@ -208,7 +224,7 @@ impl IntoElement for Press {
                     s.bg(move || theme().muted)
                 }
             })
-            .active(|s| s.opacity(0.7))
+            .active(pressed)
             .disabled(off)
             .disabled_style(|s| s.opacity(0.6))
             .on_press(on_press)
@@ -262,11 +278,12 @@ pub(crate) fn icon_button(
         .justify_center()
         .rounded(move || theme().radius)
         .text_color(move || theme().muted_foreground)
+        .presses()
         .hover(|s| {
             s.bg(move || theme().sidebar_accent)
                 .text_color(move || theme().foreground)
         })
-        .active(|s| s.opacity(0.7))
+        .active(pressed_icon)
         .accessibility_label({
             let label = label.clone();
             move || Some(label.get())
@@ -398,6 +415,7 @@ pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
             nsh_base::tab()
                 .selected(on)
                 .py_2()
+                .washes()
                 .hover(|s| s.opacity(0.8))
                 .on_press(move || pick(value))
                 .child(
@@ -447,7 +465,8 @@ pub(crate) fn choice<T: Copy + PartialEq + 'static>(
                     }
                 })
                 .style_when(on, |s| s.shadow_xs())
-                .active(|s| s.opacity(0.7))
+                .presses()
+                .active(pressed)
                 // Pressing the chosen one again keeps it: one of them is always chosen.
                 .on_change(move |_: &bool| pick(value))
                 .child(
@@ -527,6 +546,7 @@ pub(crate) fn select<T: Copy + PartialEq + 'static>(
                 .border_color(move || theme().input)
                 .rounded(move || theme().radius)
                 .bg(move || theme().card)
+                .washes()
                 .hover(|s| s.bg(move || theme().muted))
                 .focus(|s| s.border_color(move || theme().ring))
                 .child(text(label).text_sm())
@@ -624,15 +644,27 @@ pub(crate) fn checked_field(
                 .justify_center()
                 .gap_1()
                 .child(control)
-                .child(dynamic(move || problem().map(problem_text))),
+                .child(problem_line(problem)),
         )
 }
 
-/// A rule a value breaks, said under its control.
-pub(crate) fn problem_text(message: String) -> Text {
-    text(message)
-        .text_xs()
-        .text_color(move || theme().destructive)
+/// The rule a value breaks, said under its control while it breaks one. The line fades in when
+/// there is a rule to say, and follows what is typed after that without coming in again.
+pub(crate) fn problem_line(problem: impl Fn() -> Option<String> + 'static) -> AnyElement {
+    let problem = Rc::new(problem);
+    let broken = computed({
+        let problem = problem.clone();
+        move || problem().is_some()
+    });
+    dynamic(move || {
+        broken.get().then(|| {
+            let problem = problem.clone();
+            text(move || problem().unwrap_or_default())
+                .text_xs()
+                .text_color(move || theme().destructive)
+                .fades_in()
+        })
+    })
 }
 
 /// A one-line text box bound to `value`.
@@ -714,7 +746,9 @@ pub(crate) fn notice_area() -> AnyElement {
                     .pl(px(30.0))
                     .child(action(tr!("common.dismiss"), state::dismiss_notice)),
             );
-            callout(tone(Level::Ok.token()), body).test_id("notice")
+            callout(tone(Level::Ok.token()), body)
+                .test_id("notice")
+                .rises()
         })
     })
 }

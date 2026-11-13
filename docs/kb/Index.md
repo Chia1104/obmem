@@ -21,6 +21,7 @@ author: human
 - [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]]: encrypted sync of the personal vault.
 - [[sync-retention-keeps-a-week-then-dailies-then-weeklies-blobs-are-collected-after]]: what prune keeps and deletes.
 - [[remote-machines-sync-with-credentials-from-the-environment-and-an-ephemeral-sett]]: sync on servers and in cloud sandboxes.
+- [[a-project-vault-can-be-private-outside-the-repo-named-by-the-user-s-config]]: a project vault outside the repo, how a team syncs it and how a machine joins.
 - [[obmem-update-replaces-only-standalone-installs-by-running-the-release-s-install-]]: `obmem update` and the install channels.
 - [[npm-packages-are-published-under-the-chia1104-scope]]: why the npm name has a scope.
 - [[the-secret-scanner-never-looks-up-a-value-from-an-env-file-on-disk]]: how the scanner tells a path from a secret.

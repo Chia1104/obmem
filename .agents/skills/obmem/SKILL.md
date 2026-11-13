@@ -7,7 +7,7 @@ metadata:
 
 # obmem
 
-Memory is two vaults of Obsidian notes that people review. The **project vault** is in the repo and shared through git. The **personal vault** is this user's, for every project.
+Memory is two vaults of Obsidian notes that people review. The **project vault** is the team's: in the repo and shared through git, or a private folder outside the repo. The **personal vault** is this user's, for every project.
 
 The routine is two calls: `memory_context` before a task, `memory_log` before finishing. This skill is everything between.
 

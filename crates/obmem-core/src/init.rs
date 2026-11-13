@@ -104,6 +104,25 @@ fn template(ty: &str, extra: &str) -> String {
     )
 }
 
+/// A new project's `.obmem.toml`. It says where the vault is in the repo, or that it is private:
+/// where a private vault is on a machine is for that user's config to say.
+fn project_file(cfg: &Config) -> String {
+    let vault = if cfg.vault_is_private() {
+        "private = true   # the vault is outside the repo: each user's own config says where"
+            .to_string()
+    } else {
+        let pv = &cfg.project_vault;
+        format!(
+            "vault = \"{}\"",
+            pv.strip_prefix(&cfg.project_root).unwrap_or(pv).display()
+        )
+    };
+    format!(
+        "# obmem project config\n{vault}\nname = \"{}\"\n\n[secrets]\nmode = \"block\"   # or \"redact\"\nenv_files = [\".env\", \".env.local\", \".env.development\", \".env.production\"]\nscan_process_env = true\n",
+        cfg.project_name
+    )
+}
+
 pub fn run(cfg: &Config) -> Result<Vec<String>> {
     let mut created = Vec::new();
     let pv = &cfg.project_vault;
@@ -112,11 +131,7 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
     put(
         Some(&cfg.project_root),
         &cfg.project_root.join(PROJECT_CONFIG_FILE),
-        &format!(
-            "# obmem project config\nvault = \"{}\"\nname = \"{}\"\n\n[secrets]\nmode = \"block\"   # or \"redact\"\nenv_files = [\".env\", \".env.local\", \".env.development\", \".env.production\"]\nscan_process_env = true\n",
-            pv.strip_prefix(&cfg.project_root).unwrap_or(pv).display(),
-            cfg.project_name
-        ),
+        &project_file(cfg),
         &mut created,
     )?;
     put(
@@ -126,7 +141,7 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
         &mut created,
     )?;
 
-    // Project vault (in repo, shared)
+    // Project vault (shared with the team: in the repo, or a private folder outside it)
     put(
         Some(pv),
         &pv.join("Index.md"),

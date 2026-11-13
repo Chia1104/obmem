@@ -1,6 +1,6 @@
 # obmem
 
-Long-term memory for coding agents: an MCP server, agent hooks and a CLI in one Rust binary, storing Obsidian notes that people review. README.md describes what users see. This file and each crate's `AGENTS.md` describe how the code works.
+Long-term memory for coding agents: an MCP server, agent hooks and a CLI in one Rust binary, storing Obsidian notes that people review. A project's notes are in a vault the team shares, in the repo or in a private folder outside it; a person's own are in their personal vault. README.md describes what users see. This file and each crate's `AGENTS.md` describe how the code works.
 
 ## Engineering principles
 

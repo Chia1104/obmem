@@ -14,7 +14,7 @@ use obmem_core::settings::{ProjectField, ProjectSettings, default_env_files};
 
 pub(crate) fn settings_tab(d: &Detail) -> View {
     let form = match &d.settings {
-        Ok(s) => project_form(s.clone()),
+        Ok(s) => project_form(s.clone(), d.status.project_vault.path.display().to_string()),
         Err(e) => card().child(check(
             Level::Error,
             tr!("common.unreadable", file = ".obmem.toml"),
@@ -24,10 +24,13 @@ pub(crate) fn settings_tab(d: &Detail) -> View {
     view().gap_4().child(form).child(codex(d))
 }
 
-fn project_form(s: ProjectSettings) -> View {
+/// `vault_path` is where the project vault is now, which a private project shows in place of
+/// the setting: its vault is for the user's own config to name.
+fn project_form(s: ProjectSettings, vault_path: String) -> View {
     // The form's own copy: it starts from the file and is written back on save.
     let name = signal(s.name.clone());
     let vault = signal(s.vault.clone());
+    let private = s.private;
     let mode = signal(s.secret_mode);
     let env_files = signal(s.extra_env_files.join("\n"));
     let stale = signal(s.stale_days.to_string());
@@ -51,6 +54,7 @@ fn project_form(s: ProjectSettings) -> View {
         let settings = ProjectSettings {
             name: name.get(),
             vault: vault.get(),
+            private,
             secret_mode: mode.get(),
             extra_env_files: env_files
                 .get()
@@ -90,14 +94,23 @@ fn project_form(s: ProjectSettings) -> View {
             )
             .first_row(),
         )
-        .child(checked_field(
-            tr!("common.project_vault"),
-            tr!("settings.vault_help"),
-            text_box(vault, "docs/kb")
-                .marked(problems.marks(ProjectField::Vault))
-                .test_id("settings-vault"),
-            problems.at(ProjectField::Vault),
-        ))
+        .child(if private {
+            field(
+                tr!("common.project_vault"),
+                tr!("settings.vault_private", path = vault_path),
+                view(),
+            )
+            .test_id("settings-vault-private")
+        } else {
+            checked_field(
+                tr!("common.project_vault"),
+                tr!("settings.vault_help"),
+                text_box(vault, "docs/kb")
+                    .marked(problems.marks(ProjectField::Vault))
+                    .test_id("settings-vault"),
+                problems.at(ProjectField::Vault),
+            )
+        })
         .child(field(
             tr!("settings.secret_mode"),
             tr!("settings.secret_mode_help"),

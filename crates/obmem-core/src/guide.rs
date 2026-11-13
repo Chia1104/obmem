@@ -5,7 +5,7 @@
 //! `obmem setup` installs (`crates/obmem-agents/skills/`), which an agent loads when it needs them.
 
 pub const GUIDE: &str = "\
-obmem is long-term memory for this project (repo vault) and this user (personal vault), stored as \
+obmem is long-term memory for this project (project vault) and this user (personal vault), stored as \
 Obsidian notes that humans review.
 
 Before a non-trivial task: memory_context with the task description. Prefer what memory says over \

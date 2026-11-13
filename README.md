@@ -13,6 +13,19 @@ obmem is one Rust binary that works as an MCP server, a set of agent hooks and a
 | project | `<repo>/docs/kb`, committed and shared with the team | decisions, facts, concepts, architecture, procedures, findings |
 | global | `~/Obsidian/AgentMemory`, personal | feedback and preferences, session logs |
 
+### A private project vault
+
+A team that does not want its memory in the repo keeps the project vault in a folder outside it:
+
+```sh
+obmem init --private ~/Obsidian/acme-memory
+```
+
+- Your own config records the folder, under `[[project]]` in `~/.config/obmem/config.toml`. `.obmem.toml` only says `private = true`, so the repo never says where the notes are.
+- Each person runs the command once on each machine, with the folder that holds their copy of the vault. Until then obmem refuses the project there, and writes no note into the repo.
+- obmem does not carry a private vault between machines yet: share the folder your own way, for example as a private git repository. `obmem sync` covers the personal vault only.
+- On a project that already has `docs/kb`, the command switches it to the private vault and leaves the old notes where they are. Move them yourself, and take the folder out of git.
+
 ## Requirements
 
 - Obsidian 1.12 or later, with Settings → General → **Command line interface** turned on.

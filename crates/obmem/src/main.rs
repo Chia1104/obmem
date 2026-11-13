@@ -1,5 +1,5 @@
 use obmem_agents::{hooks, setup};
-use obmem_core::{audit, config, context, import, init, note, projects, status, store};
+use obmem_core::{audit, config, context, import, init, note, projects, settings, status, store};
 use obmem_mcp as server;
 
 use anyhow::Result;
@@ -24,7 +24,14 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Create the project vault, global vault and config files (never overwrites).
-    Init,
+    Init {
+        /// Keep the project vault in this folder, outside the repo, instead of `docs/kb`: for
+        /// memory that must not be in the repo. Your own config records the folder
+        /// (`[[project]]` in ~/.config/obmem/config.toml); `.obmem.toml` only says the vault
+        /// is private. Also how another machine says where its copy of the vault is.
+        #[arg(long, value_name = "FOLDER")]
+        private: Option<PathBuf>,
+    },
     /// Run the MCP server on stdio.
     Serve,
     /// Search memory from the shell.
@@ -321,10 +328,24 @@ fn main() -> Result<()> {
     if let Cmd::Update { check } = &cli.cmd {
         return run_update(*check);
     }
+    // A private project loads only once this machine's config names its vault.
+    let mut left_in_repo = None;
+    if let Cmd::Init {
+        private: Some(folder),
+    } = &cli.cmd
+    {
+        let root = config::project_root(cli.project.as_deref())?;
+        let folder = std::path::absolute(folder)?;
+        left_in_repo = config::Config::load(Some(&root))
+            .ok()
+            .filter(|c| !c.vault_is_private() && c.project_vault.is_dir())
+            .map(|c| c.project_vault);
+        settings::make_private(&root, &folder.to_string_lossy())?;
+    }
     let cfg = config::Config::load(cli.project.as_deref())?;
 
     match cli.cmd {
-        Cmd::Init => {
+        Cmd::Init { .. } => {
             let created = init::run(&cfg)?;
             projects::record(&cfg.project_root)?;
             println!(
@@ -339,6 +360,13 @@ fn main() -> Result<()> {
                 for c in created {
                     println!("  {c}");
                 }
+            }
+            if let Some(old) = left_in_repo {
+                println!(
+                    "\nThe notes in {} were not moved. Move them to the private vault yourself, \
+                     and take the folder out of git.",
+                    old.display()
+                );
             }
             let bin = std::env::current_exe()?.display().to_string();
             println!("\n{}", init::setup_snippets(&bin, &cfg));
@@ -568,7 +596,16 @@ fn main() -> Result<()> {
                 }
             );
             for (name, v) in [("project", &st.project_vault), ("global", &st.global_vault)] {
-                println!("{:<16}{}", format!("{name} vault:"), v.path.display());
+                let private = if name == "project" && st.private {
+                    " (private: outside the repo)"
+                } else {
+                    ""
+                };
+                println!(
+                    "{:<16}{}{private}",
+                    format!("{name} vault:"),
+                    v.path.display()
+                );
                 // Without Obsidian nothing needs the vault to be registered.
                 if headless {
                     continue;

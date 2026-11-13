@@ -60,6 +60,8 @@ const UNLOGGED: &str = "detect-unlogged-work-from-git-for-agents-other-than-clau
 const GUIDANCE: &str =
     "agent-guidance-is-a-short-always-loaded-guide-plus-skills-that-setup-installs";
 const WORKSPACE: &str = "split-obmem-into-a-cargo-workspace-so-a-gui-can-reuse-the-core";
+const AGENT_LOOP: &str =
+    "the-calling-agent-is-the-retrieval-loop-memory-tools-say-where-to-search-next-an";
 
 /// Tasks in the notes' language.
 const ENGLISH: &[Case] = &[
@@ -141,6 +143,39 @@ const ENGLISH: &[Case] = &[
     },
 ];
 
+/// Tasks put as questions, or with a short word in them. Their common words (`does`, `not`) are
+/// in most notes, and a short word is inside longer ones (`rag` in `storage`, `app` in `happen`).
+const LOOSE: &[Case] = &[
+    Case {
+        task: "why does search not work in a git worktree",
+        expect: &[WORKTREE],
+    },
+    Case {
+        task: "why does the stop hook not see the work that Codex did",
+        expect: &[UNLOGGED],
+    },
+    Case {
+        task: "what should the desktop app not do",
+        expect: &[GUI_SCOPE],
+    },
+    Case {
+        task: "how does a new machine get the notes of the team",
+        expect: &[PRIVATE_VAULT],
+    },
+    Case {
+        task: "should obmem use RAG with embeddings to find notes",
+        expect: &[AGENT_LOOP],
+    },
+    Case {
+        task: "which words can go in a log line of the app",
+        expect: &[TRANSLATES],
+    },
+    Case {
+        task: "where does the key of a vault go when sync is set up",
+        expect: &[SYNC],
+    },
+];
+
 /// The same kind of task in Chinese. The notes are in English and matching is literal, so only
 /// the words a task leaves in English can find anything.
 const CHINESE: &[Case] = &[
@@ -209,17 +244,31 @@ fn measure(store: &mut Store, name: &str, cases: &[Case]) -> Tally {
             .expect
             .iter()
             .map(|id| {
-                let mark = if matched(id) {
-                    "found"
-                } else if linked(id) {
-                    "linked"
-                } else {
-                    "MISSED"
+                let mark = match r.notes.iter().position(|m| m.hit.id == *id) {
+                    Some(at) => format!("#{}", at + 1),
+                    None if linked(id) => "linked".into(),
+                    None => "MISSED".into(),
                 };
                 format!("{mark} {}", id.chars().take(28).collect::<String>())
             })
             .collect();
         println!("  {}\n      {}", case.task, marks.join(" | "));
+        // what outranks an expected note that is not near the top
+        let last = case
+            .expect
+            .iter()
+            .filter_map(|id| r.notes.iter().position(|m| m.hit.id == *id))
+            .max();
+        if let Some(last) = last.filter(|at| *at >= 3) {
+            for (at, m) in r.notes.iter().enumerate().take(last + 1) {
+                println!(
+                    "        #{} {} ({})",
+                    at + 1,
+                    m.hit.id.chars().take(40).collect::<String>(),
+                    m.terms.join(", ")
+                );
+            }
+        }
         if case.expect.iter().any(|id| !matched(id) && !linked(id)) {
             println!("      said no note contains: {}", r.unmatched.join(", "));
             tally.silent_misses += usize::from(r.unmatched.is_empty());
@@ -275,7 +324,7 @@ fn recall_on_this_repos_vault() {
     };
     let mut store = Store::open_with(cfg, Backend::Headless).unwrap();
 
-    for case in ENGLISH.iter().chain(CHINESE) {
+    for case in ENGLISH.iter().chain(LOOSE).chain(CHINESE) {
         for id in case.expect {
             assert!(
                 store.get(id).is_ok(),
@@ -286,19 +335,25 @@ fn recall_on_this_repos_vault() {
     }
 
     let english = measure(&mut store, "English tasks", ENGLISH);
+    let loose = measure(&mut store, "Questions and short words", LOOSE);
     let chinese = measure(&mut store, "Chinese tasks", CHINESE);
     let _ = std::fs::remove_dir_all(&global);
 
-    // Measured on 2026-11-14: English 97% found, 75% near the top, 100% reachable; Chinese 56%
-    // found, 67% reachable. Raise a floor when a change lifts the number.
+    // Measured on 2026-11-14: English 97% found, 81% near the top, 100% reachable; questions and
+    // short words 86% near the top; Chinese 56% found, 67% reachable. Raise a floor when a change
+    // lifts the number.
     assert!(english.found() >= 0.90, "English tasks, found");
-    assert!(english.top() >= 0.65, "English tasks, near the top");
+    assert!(english.top() >= 0.75, "English tasks, near the top");
     assert!(english.reachable() >= 0.95, "English tasks, reachable");
+    assert!(
+        loose.top() >= 0.70,
+        "questions and short words, near the top"
+    );
     assert!(chinese.reachable() >= 0.55, "Chinese tasks, reachable");
     // A task that finds nothing must say which of its words no note has: that is what tells an
     // agent to search again in other words.
     assert_eq!(
-        english.silent_misses + chinese.silent_misses,
+        english.silent_misses + loose.silent_misses + chinese.silent_misses,
         0,
         "missed notes without saying what no note contains"
     );

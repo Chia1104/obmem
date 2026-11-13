@@ -51,7 +51,7 @@ Rules for changing them:
 - A new skill needs a line in `GUIDE` only when an agent must reach it without being asked. Every word there is paid for in every session.
 - Tool names and behaviour that a skill describes are in obmem-mcp and obmem-core. When one changes, change the skill in the same commit.
 
-Where each agent reads skills was taken from its docs on 2026-11-10. Only Claude Code was checked: a new session lists both skills. No agent has run a task with them yet.
+Where each agent reads skills was taken from its docs on 2026-11-10. Only Claude Code was checked: a new session lists both skills. On 2026-11-14 four Claude Sonnet subagents followed the `obmem` skill's Recall routine for Chinese tasks, through the CLI (`obmem context`, `search`, `get`), and each found the notes that one `memory_context` call missed. No agent has run a skill through the MCP tools in a task of its own yet, and no other agent has been tried.
 
 ## Tested in the real apps
 

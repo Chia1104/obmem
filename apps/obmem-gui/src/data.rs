@@ -168,7 +168,7 @@ pub fn remove_project(path: &Path) -> Result<(), String> {
 
 pub fn detail(path: &Path) -> Result<Detail, Unreadable> {
     let cfg = Config::load(Some(path)).map_err(Unreadable::of)?;
-    let store = Store::open(cfg.clone()).map_err(Unreadable::of)?;
+    let mut store = Store::open(cfg.clone()).map_err(Unreadable::of)?;
     let agents = Agent::ALL
         .into_iter()
         .map(|agent| AgentState {
@@ -184,7 +184,7 @@ pub fn detail(path: &Path) -> Result<Detail, Unreadable> {
         settings: settings::read_project(root).map_err(text),
         codex_auto_approve: setup::codex_auto_approve(&cfg).map_err(text),
         allowlist: allowlist::read(&cfg.project_vault).map_err(text),
-        claude_memory: claude_memory(&store, root),
+        claude_memory: claude_memory(&mut store, root),
         sync: cfg.vault_is_private().then(|| project_sync_info(&cfg)),
     })
 }
@@ -584,25 +584,28 @@ pub struct ImportItem {
     pub title: String,
     /// Where it goes: `project/fact`, `global/feedback`, ...
     pub destination: String,
-    /// A note with its name is already there, so importing skips it.
+    /// It was imported before, so importing skips it.
     pub exists: bool,
 }
 
-fn claude_memory(store: &Store, root: &Path) -> Result<ClaudeMemory, String> {
+fn claude_memory(store: &mut Store, root: &Path) -> Result<ClaudeMemory, String> {
     let dir = import::default_dir(root);
     if !dir.is_dir() {
         return Ok(ClaudeMemory { dir, items: vec![] });
     }
-    let items = import::plan(&dir)
-        .map_err(text)?
-        .into_iter()
-        .map(|p| ImportItem {
-            exists: import::target(store, &p).exists(),
+    store.sync().map_err(text)?;
+    let mut items = Vec::new();
+    for p in import::plan(&dir).map_err(text)? {
+        items.push(ImportItem {
+            exists: matches!(
+                import::standing(store, &p).map_err(text)?,
+                Some(import::Skip::Imported(_))
+            ),
             destination: format!("{}/{}", p.scope.as_str(), p.note_type.as_str()),
             title: p.title,
             source: p.source,
-        })
-        .collect();
+        });
+    }
     Ok(ClaudeMemory { dir, items })
 }
 

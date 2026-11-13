@@ -31,6 +31,7 @@ pub struct Meta {
     pub title: String,
     pub note_type: String,
     pub status: String,
+    pub tags: Vec<String>,
     pub mtime: SystemTime,
 }
 
@@ -85,6 +86,7 @@ impl Catalog {
                     title: fm.title.clone().unwrap_or_else(|| id.clone()),
                     note_type: fm.note_type.unwrap_or_default(),
                     status: fm.status.unwrap_or_default(),
+                    tags: fm.tags,
                     mtime: entry
                         .metadata()
                         .ok()
@@ -157,21 +159,31 @@ impl Catalog {
             .count()
     }
 
-    /// The user's guidance for every project: `active` feedback and preference notes from the
-    /// global vault, as (id, title). A draft is not guidance yet: an agent wrote it and nobody
-    /// approved it.
-    pub fn global_guidance(&self) -> Result<Vec<(String, String)>> {
+    /// The user's guidance for the project with `project_tag`: `active` feedback and preference
+    /// notes from the global vault, as (id, title). A note tagged with projects is guidance in
+    /// those projects only, and one with no project tag in every project. A draft is not guidance
+    /// yet: an agent wrote it and nobody approved it.
+    pub fn global_guidance(&self, project_tag: &str) -> Result<Vec<(String, String)>> {
         let mut v = Vec::new();
         for ty in ["feedback", "preference"] {
             v.extend(
                 self.notes
                     .iter()
                     .filter(|m| m.note_type == ty && m.scope == "global" && m.status == "active")
+                    .filter(|m| holds_in(&m.tags, project_tag))
                     .map(|m| (m.id.clone(), m.title.clone())),
             );
         }
         Ok(v)
     }
+}
+
+/// Whether a note with these tags holds in the project with `project_tag`: it names the project,
+/// or no project at all.
+pub fn holds_in(tags: &[String], project_tag: &str) -> bool {
+    use crate::config::{is_project_tag, tag_key};
+    let mut projects = tags.iter().filter(|t| is_project_tag(t)).peekable();
+    projects.peek().is_none() || projects.any(|t| tag_key(t) == tag_key(project_tag))
 }
 
 #[cfg(test)]

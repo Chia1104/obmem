@@ -11,6 +11,20 @@ use std::path::{Path, PathBuf};
 
 pub const PROJECT_CONFIG_FILE: &str = ".obmem.toml";
 
+/// What a project's tag starts with ([`Config::project_tag`]).
+pub const PROJECT_TAG: &str = "project/";
+
+/// A tag as it is compared: Obsidian reads tags without regard to case, and a person may write
+/// one with its `#`.
+pub fn tag_key(tag: &str) -> String {
+    tag.trim_start_matches('#').to_lowercase()
+}
+
+/// Whether a tag names a project a note holds in.
+pub fn is_project_tag(tag: &str) -> bool {
+    tag_key(tag).starts_with(PROJECT_TAG)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct ProjectFile {
@@ -316,6 +330,12 @@ impl Config {
     /// vault always is, so the paths say which one this is.
     pub fn vault_is_private(&self) -> bool {
         !self.project_vault.starts_with(&self.project_root)
+    }
+
+    /// The tag of what is this project's in the global vault: its session logs, and the feedback
+    /// that holds only here (see `Catalog::global_guidance`).
+    pub fn project_tag(&self) -> String {
+        format!("{PROJECT_TAG}{}", crate::note::slugify(&self.project_name))
     }
 
     /// Session logs etc. for this project inside the global vault.

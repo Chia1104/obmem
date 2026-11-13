@@ -28,7 +28,9 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 - `sessions::logs` reads a project's session logs, newest first, and `sessions::entries` splits a log into entries. The session-start context uses the same parser.
 - Claude Code's memory files are written by an agent, so their frontmatter is not always valid YAML. `import::quote_values` quotes a top-level value that holds `: ` or ` #` before the file is parsed. It is for imported files only: `Note::parse` reads obmem's own notes strictly.
 - `import::plan` fails on the first file it cannot read and names that file. Nothing has been written by then.
-- `import::target` is where an imported memory would go. A file already there means it is skipped, so a front end can show that before importing.
+- `import::standing` is what keeps a memory out, as a `Skip`: it was imported before (the note there names its memory file), another note has its name, or a note of the same type and scope has a similar title (`Store::duplicate_of`, the check `write` makes). A front end asks it to show what an import would do, and `import::run` asks it before each write. It reads the catalog as of the store's last `sync`.
+- Claude Code keeps one memory folder per project, so a `feedback` memory is imported for this project only (`Planned::this_project_only`). A `user` memory is not: who the user is does not change with the project.
+- An imported note sets `WriteRequest::needs_review`, so it is a draft whatever `[review] auto_approve` says. Nobody wrote it under obmem's rules.
 
 ## Obsidian (`obsidian.rs`)
 
@@ -56,7 +58,8 @@ obmem keeps no index of its own. Search, a note's links and backlinks, unresolve
 - New notes start as `draft`. An agent edit of an `active` note sets it back to `draft`. `superseded` and `archived` notes cannot be edited.
 - Findings change only through resolve, never through write.
 - Only a person approves a draft (`Store::approve`: `draft` → `active`). The CLI and GUI offer it; the MCP server does not.
-- The exception is the user's own choice: with `[review] auto_approve = true` in their config, `write` approves new notes and edits itself (`approved_by: auto-approve`). Findings keep their own lifecycle.
+- The exception is the user's own choice: with `[review] auto_approve = true` in their config, `write` approves new notes and edits itself (`approved_by: auto-approve`). Findings keep their own lifecycle, and a request with `needs_review` (an import) stays a draft.
+- `this_project_only` gives a new note for the global vault the project's tag (`Config::project_tag`). An edit keeps the note's `project/…` tags whatever tags it names, and is refused when it asks for a project the note does not hold in: where a note holds is the user's to change.
 - `code_refs` record `verified_commit` = HEAD.
 - Every persisted field is secret-scanned.
 
@@ -68,6 +71,7 @@ The project vault and `.obmem.toml` may come from an untrusted clone. Input the 
 - A fingerprint allows one exact secret. A private key's fingerprint is taken over the key through its END line (`secrets::secret_end`), never over the BEGIN line alone: that line is the same for every key, so its fingerprint is public.
 - A value from an env file is only compared as text. The scanner never looks one up on disk: on Windows, looking up `//host/share` sends the user's credentials to that host. Only values from the process environment are checked for being an existing path.
 - The session-start context lists only `active` feedback and preferences as the user's guidance. A draft one is listed with the unreviewed drafts.
+- A note in the global vault with `project/<name>` tags is guidance in those projects only (`Catalog::global_guidance`, `Config::project_tag`). The name is the repo's, so a clone that takes another project's name is shown that project's guidance. Without the tags every project was shown it: a tag narrows who sees a note and never widens it. An agent's edit cannot remove one.
 - `[review] auto_approve` is on only when the user's config turns it on. The repo's `.obmem.toml` can turn it off for that project, never on.
 - A project vault outside the repo is named only by the user's config (`[[project]]`, checked by `config::private_vault_path`): a folder of its own, outside the project and apart from the personal vault. `.obmem.toml` can say `private = true`, which names no folder: without an entry in the user's config `Config::load` fails, and nothing is written to `docs/kb` instead. `Config::vault_is_private` tells the two kinds apart by the paths.
 - The bucket a private vault syncs through is in the user's config too (`[project.sync]`, read by `config::project_sync`), like `[sync]`: never in `.obmem.toml`.

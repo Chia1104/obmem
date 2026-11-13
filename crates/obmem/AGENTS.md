@@ -4,7 +4,7 @@ The `obmem` CLI. It parses arguments with clap, calls obmem-core, obmem-mcp, obm
 
 - This crate turns on the `clap` feature of obmem-core and obmem-agents.
 - `obmem update` and the `binary:` line of `obmem status` come from obmem-update. `update` runs before any project config is loaded, like `hook` and `sync`: it works anywhere.
-- `init --private <folder>` calls `settings::make_private` before the config is loaded, with the folder made absolute from the current directory. The same command starts a private vault, moves a project to one, and tells another machine where its copy is.
+- `init --private <folder>` calls `settings::make_private` before the config is loaded, with the folder made absolute from the current directory. The same command starts a private vault, moves a project to one, and tells another machine where its copy is. With `--bucket` it also records `[project.sync]`, asks for the keys (`ask_keys`, shared with `sync setup`) and calls `obmem_sync::join` before `init` writes anything: a vault that was fetched gets `init::run_beside_fetched_vault`, which adds no file to it.
 - `init` and the session-start hook record the project in the machine's project list (`obmem projects`). A failure to record never fails the hook.
 - `obmem scan --staged` reads staged blobs from the git index, not from the working tree, so it sees exactly what the commit will contain. It fails rather than skipping a file it cannot read.
 - `obmem sync` syncs every target there is: the personal vault, and the current project's vault when it is private and has a bucket (`sync_all`). A subcommand is about one vault, the personal one unless `--vault project` says otherwise (`sync_target`). A project that does not load never stops the personal vault's sync.

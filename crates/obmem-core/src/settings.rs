@@ -4,7 +4,7 @@
 //! comments included.
 
 use crate::config::{
-    GlobalFile, PROJECT_CONFIG_FILE, ProjectFile, SecretMode, SecretsConfig, expand_tilde,
+    Bucket, GlobalFile, PROJECT_CONFIG_FILE, ProjectFile, SecretMode, SecretsConfig, expand_tilde,
     global_config_path, global_vault_from, is_plain_relative, private_vault_path,
     project_vault_path, resolved,
 };
@@ -300,11 +300,15 @@ pub fn save_project(root: &Path, s: &ProjectSettings) -> Result<()> {
 ///
 /// `vault` is an absolute path or starts with `~/`. An absolute one is recorded with its links
 /// and `..` resolved; one under `~/` as it is, so the same line works on another machine.
-pub fn make_private(root: &Path, vault: &str) -> Result<()> {
-    make_private_at(&global_config_path(), root, vault)
+///
+/// With `bucket`, the project's `[project.sync]` names that bucket, in place of the one it named.
+/// Without, what it names stays.
+pub fn make_private(root: &Path, vault: &str, bucket: Option<&Bucket>) -> Result<()> {
+    make_private_at(&global_config_path(), root, vault, bucket)
 }
 
-fn make_private_at(config: &Path, root: &Path, vault: &str) -> Result<()> {
+fn make_private_at(config: &Path, root: &Path, vault: &str, bucket: Option<&Bucket>) -> Result<()> {
+    let sync = bucket.map(sync_table).transpose()?;
     let root = std::path::absolute(root)?;
     let mut doc = read_doc(config)?;
     let file: GlobalFile = toml::from_str(&doc.to_string())?;
@@ -329,14 +333,18 @@ fn make_private_at(config: &Path, root: &Path, vault: &str) -> Result<()> {
             .and_then(Item::as_str)
             .is_some_and(|r| resolved(Path::new(r)) == real_root)
     });
-    match known {
-        Some(entry) => assign(&mut entry["vault"], vault),
+    let entry = match known {
+        Some(entry) => entry,
         None => {
             let mut entry = Table::new();
             entry.insert("root", toml_edit::value(root.display().to_string()));
-            entry.insert("vault", toml_edit::value(vault));
             list.push(entry);
+            list.iter_mut().last().expect("just added")
         }
+    };
+    assign(&mut entry["vault"], vault);
+    if let Some(sync) = sync {
+        entry.insert("sync", Item::Table(sync));
     }
     let dir = config.parent().context("config path has no parent")?;
     std::fs::create_dir_all(dir)?;
@@ -349,6 +357,33 @@ fn make_private_at(config: &Path, root: &Path, vault: &str) -> Result<()> {
         atomic_write(&root, &path, &doc.to_string())?;
     }
     Ok(())
+}
+
+/// `[project.sync]` for `bucket`, checked by the rules `[sync]` has.
+fn sync_table(bucket: &Bucket) -> Result<Table> {
+    let text = |v: &Option<String>| v.as_deref().unwrap_or_default().trim().to_string();
+    let as_settings = SyncSettings {
+        endpoint: text(&bucket.endpoint),
+        bucket: text(&bucket.bucket),
+        ..Default::default()
+    };
+    refuse(as_settings.problems())?;
+    if as_settings.bucket.is_empty() {
+        bail!("a project vault's sync needs a bucket");
+    }
+    let mut table = Table::new();
+    for (key, value) in [
+        ("endpoint", &bucket.endpoint),
+        ("region", &bucket.region),
+        ("bucket", &bucket.bucket),
+        ("prefix", &bucket.prefix),
+    ] {
+        let value = text(value);
+        if !value.is_empty() {
+            table.insert(key, toml_edit::value(value));
+        }
+    }
+    Ok(table)
 }
 
 /// `private = true` where `vault` was, under the comment lines `vault` had above it.
@@ -679,7 +714,7 @@ mod tests {
 
         // As a person types a folder beside the repo.
         let typed = root.join("../memory").display().to_string();
-        make_private_at(&config, &root, &typed).unwrap();
+        make_private_at(&config, &root, &typed, None).unwrap();
         // The folder as the file system names it: a temp folder is behind a link on macOS.
         let vault = resolved(&vault);
         assert_eq!(
@@ -711,14 +746,49 @@ mod tests {
 
         // Naming another folder replaces the entry.
         let moved = dir.join("moved");
-        make_private_at(&config, &root, &moved.display().to_string()).unwrap();
+        make_private_at(&config, &root, &moved.display().to_string(), None).unwrap();
         let list = projects();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].vault, resolved(&moved).display().to_string());
 
+        // With a bucket, the project's sync names it; naming the folder again keeps it.
+        let team = Bucket {
+            endpoint: Some("https://team.example".into()),
+            bucket: Some("team".into()),
+            prefix: Some(" acme ".into()),
+            region: None,
+        };
+        make_private_at(&config, &root, &moved.display().to_string(), Some(&team)).unwrap();
+        let named = Some(Bucket {
+            prefix: Some("acme".into()),
+            ..team.clone()
+        });
+        assert_eq!(projects()[0].sync, named);
+        make_private_at(&config, &root, &moved.display().to_string(), None).unwrap();
+        let list = projects();
+        assert_eq!((list.len(), &list[0].sync), (1, &named));
+        // The personal vault's own sync is another table.
+        let user: GlobalFile = toml::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        assert_eq!(user.sync.bucket.as_deref(), Some("b"));
+        for bad in [
+            Bucket::default(),
+            Bucket {
+                bucket: Some("a/b".into()),
+                ..Default::default()
+            },
+            Bucket {
+                endpoint: Some("team.example".into()),
+                ..team.clone()
+            },
+        ] {
+            let folder = moved.display().to_string();
+            assert!(make_private_at(&config, &root, &folder, Some(&bad)).is_err());
+        }
+        assert_eq!(projects(), list);
+
         // A folder a private vault cannot be changes nothing.
         for bad in [root.join("docs/kb"), personal.clone()] {
-            assert!(make_private_at(&config, &root, &bad.display().to_string()).is_err());
+            assert!(make_private_at(&config, &root, &bad.display().to_string(), None).is_err());
         }
         assert_eq!(projects(), list);
         let _ = std::fs::remove_dir_all(&dir);

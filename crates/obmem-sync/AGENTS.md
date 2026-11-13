@@ -25,6 +25,7 @@ Under `[sync] prefix` (default `obmem`):
 - `Target::project` refuses a bucket and prefix that are the personal vault's (`apart`). The two vaults would share one key and one line of snapshots, and each sync would copy one vault's notes into the other.
 - A project vault syncs nothing of `.obsidian/` (`files::AppFiles::None`): it is a team's, and the app's settings are each person's own.
 - Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, for every target that names a bucket, unless `auto` is false. Such a sync waits up to `HOOK_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records (`SyncOptions::spacing`). At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
+- `join` is `connect` for a device that may be late: when the bucket already holds snapshots, it restores the latest into the target's folder, which must be empty or missing, before the keys are kept. A device that joins this way has the team's files, so its first sync merges nothing. Without it, the first files `init` writes meet the team's as conflict copies.
 - `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
 
 ## Ephemeral machines (`[sync] ephemeral = true`)
@@ -49,7 +50,7 @@ A cloud sandbox starts without the vault and may be gone as soon as the session 
 - Downloaded content is checked against its HMAC and written through `obmem_core::store::atomic_write_bytes`. Restore writes only into a missing or empty folder.
 - `files::scan` never follows symlinks and leaves out dot-entries, except the settings part of `.obsidian/` (top-level `*.json` other than `workspace*`, `themes/`, `snippets/`; `plugins/` and `community-plugins.json` only with `[sync] community_plugins = true`).
 - Secrets live in the OS keychain (`keychain.rs`, the `keyring` crate): one entry per `<endpoint>/<bucket>/<prefix>`, holding the access key pair and the unlocked vault key. `[sync]` in the user's config holds only locations. It is read from the user's config only, never from a repo's `.obmem.toml`.
-- The environment's secrets are the personal vault's. A project target reads the keychain only (`keychain::stored`): with the environment's key, a first sync would write the team's bucket under a key no teammate has.
+- A project target has environment variables of its own (`keychain::PROJECT_ENV_VARS`, picked by `keychain::Holder`): with the personal vault's key, a first sync would write the team's bucket under a key no teammate has. They are one project's keys, so `Target::keys` refuses them when the config names a bucket for more than one project.
 - A machine without a keychain takes the same three secrets from the environment (`keychain::ENV_VARS`). When any of the three is set, all must be, and the keychain is not asked. An error about them names the variable and never prints its value.
 
 ## Tests

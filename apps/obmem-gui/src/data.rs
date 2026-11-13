@@ -216,20 +216,17 @@ pub fn personal() -> Result<Personal, String> {
 fn sync_info() -> Result<SyncInfo, String> {
     let settings = settings::read_sync().map_err(text)?;
     let cfg = config::sync_config().map_err(text)?;
-    let configured = cfg.bucket.is_some();
+    // Without a bucket there is nothing to be connected to.
+    let target = match cfg.bucket {
+        Some(_) => Some(obmem_sync::Target::personal(cfg).map_err(text)?),
+        None => None,
+    };
     Ok(SyncInfo {
-        connected: if configured {
-            obmem_sync::keychain::is_set_up(&cfg).map_err(text)
-        } else {
-            Ok(false)
+        connected: match &target {
+            Some(target) => target.is_set_up().map_err(text),
+            None => Ok(false),
         },
-        last: if configured {
-            obmem_sync::Target::personal(cfg)
-                .ok()
-                .and_then(|target| obmem_sync::last_status(&target))
-        } else {
-            None
-        },
+        last: target.as_ref().and_then(obmem_sync::last_status),
         settings,
     })
 }

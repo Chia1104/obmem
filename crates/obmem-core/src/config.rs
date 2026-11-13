@@ -418,6 +418,16 @@ pub fn project_sync(root: &Path) -> Result<Option<SyncConfig>> {
     Ok(project_sync_in(&gf, root))
 }
 
+/// How many projects the user's config names a bucket for.
+pub fn synced_projects() -> Result<usize> {
+    let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+    Ok(gf
+        .projects
+        .iter()
+        .filter(|p| p.sync.as_ref().is_some_and(|b| b.bucket.is_some()))
+        .count())
+}
+
 fn project_sync_in(gf: &GlobalFile, root: &Path) -> Option<SyncConfig> {
     let real_root = resolved(root);
     gf.projects

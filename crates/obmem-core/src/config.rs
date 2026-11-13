@@ -1,6 +1,7 @@
 //! Configuration: where the two vaults live and how writes are policed.
 //!
-//! - Project vault: inside the repo (default `docs/kb`), shared with the team via git.
+//! - Project vault: inside the repo (default `docs/kb`), shared with the team via git. Or
+//!   private: a vault outside the repo, which the user's own config names (`[[project]]`).
 //! - Global vault:  a personal vault (default `~/Obsidian/AgentMemory`) for preferences,
 //!   cross-project feedback and noisy session logs that should not land in the repo.
 
@@ -15,6 +16,10 @@ pub const PROJECT_CONFIG_FILE: &str = ".obmem.toml";
 pub struct ProjectFile {
     /// Vault directory, relative to the project root.
     pub vault: Option<String>,
+    /// The project's memory is kept outside the repo, and `vault` is not read: the vault is the
+    /// one each user's own config names for this project (`[[project]]`). A machine that names
+    /// none refuses to load the project, so nothing private is written into the repo.
+    pub private: Option<bool>,
     /// Project name used in the global vault (`Projects/<name>/`).
     pub name: Option<String>,
     pub secrets: SecretsConfig,
@@ -56,6 +61,20 @@ pub struct GlobalFile {
     pub secrets: GlobalSecrets,
     pub review: ReviewConfig,
     pub sync: SyncConfig,
+    /// `[[project]]`: the projects on this machine whose vault is outside their repo.
+    #[serde(rename = "project")]
+    pub projects: Vec<PrivateProject>,
+}
+
+/// `[[project]]`: a project whose memory is private, and where its vault is on this machine.
+/// Only the user's config has it: a repo's `.obmem.toml` arrives with a clone and must not be
+/// able to send writes anywhere outside the repo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PrivateProject {
+    /// The project root, an absolute path.
+    pub root: String,
+    /// The vault: an absolute path, or one starting with `~/`.
+    pub vault: String,
 }
 
 /// `[sync]`: where the personal vault is backed up, an S3-compatible bucket (AWS S3, Cloudflare R2,
@@ -143,6 +162,7 @@ impl Default for SecretsConfig {
 pub struct Config {
     pub project_root: PathBuf,
     pub project_name: String,
+    /// Inside `project_root`, or a private vault outside it (see [`Config::vault_is_private`]).
     pub project_vault: PathBuf,
     pub global_vault: PathBuf,
     pub secrets: SecretsConfig,
@@ -204,30 +224,49 @@ pub fn find_project_root(start: &Path) -> PathBuf {
     start.to_path_buf()
 }
 
+/// The project a command is about: found from `project_override`, else `OBMEM_PROJECT_ROOT`,
+/// else the current directory.
+pub fn project_root(project_override: Option<&Path>) -> Result<PathBuf> {
+    let start = match project_override {
+        Some(p) => p.to_path_buf(),
+        None => match std::env::var("OBMEM_PROJECT_ROOT") {
+            Ok(p) => PathBuf::from(p),
+            Err(_) => std::env::current_dir()?,
+        },
+    };
+    Ok(find_project_root(&start))
+}
+
 impl Config {
     pub fn load(project_override: Option<&Path>) -> Result<Self> {
-        let start = match project_override {
-            Some(p) => p.to_path_buf(),
-            None => match std::env::var("OBMEM_PROJECT_ROOT") {
-                Ok(p) => PathBuf::from(p),
-                Err(_) => std::env::current_dir()?,
-            },
-        };
-        let project_root = find_project_root(&start);
-
+        let project_root = project_root(project_override)?;
         let pf: ProjectFile =
             read_toml(&project_root.join(PROJECT_CONFIG_FILE))?.unwrap_or_default();
         let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+        Self::resolve(project_root, pf, gf)
+    }
 
+    /// What the project's file and the user's file come to, for the project at `project_root`.
+    fn resolve(project_root: PathBuf, pf: ProjectFile, gf: GlobalFile) -> Result<Self> {
         let project_name = pf.name.clone().unwrap_or_else(|| {
             project_root
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "default".into())
         });
-        let project_vault =
-            project_vault_path(&project_root, pf.vault.as_deref().unwrap_or(DEFAULT_VAULT))?;
         let global_vault = global_vault_from(gf.vault);
+        let project_vault = match private_vault(&gf.projects, &project_root, &global_vault)? {
+            Some(vault) => vault,
+            None if pf.private.unwrap_or(false) => anyhow::bail!(
+                "{}: this project keeps its memory in a private vault outside the repo, and \
+                 this machine has none for it. Run `obmem init --private <folder>` here to say \
+                 where it is.",
+                project_root.join(PROJECT_CONFIG_FILE).display()
+            ),
+            None => {
+                project_vault_path(&project_root, pf.vault.as_deref().unwrap_or(DEFAULT_VAULT))?
+            }
+        };
 
         let secrets = secrets_policy(&project_root, pf.secrets, &gf.secrets)?;
         let auto_approve = auto_approve(&pf.review, &gf.review);
@@ -242,6 +281,13 @@ impl Config {
             auto_approve,
             device,
         })
+    }
+
+    /// The project vault is outside the repo: the user's config names it, git does not carry it.
+    /// A private vault is never inside the project ([`private_vault_path`]), and a repo's own
+    /// vault always is, so the paths say which one this is.
+    pub fn vault_is_private(&self) -> bool {
+        !self.project_vault.starts_with(&self.project_root)
     }
 
     /// Session logs etc. for this project inside the global vault.
@@ -337,7 +383,7 @@ pub(crate) fn sync_config_at(path: &Path) -> Result<SyncConfig> {
     Ok(gf.sync)
 }
 
-fn global_vault_from(configured: Option<String>) -> PathBuf {
+pub(crate) fn global_vault_from(configured: Option<String>) -> PathBuf {
     std::env::var("OBMEM_GLOBAL_VAULT")
         .ok()
         .or(configured)
@@ -375,6 +421,73 @@ pub fn project_vault_path(project_root: &Path, vault: &str) -> Result<PathBuf> {
     let project_vault = project_root.join(vault);
     ensure_within(project_root, &project_vault)?;
     Ok(project_vault)
+}
+
+/// The private vault the user's config names for the project at `root`, when it names one.
+fn private_vault(
+    projects: &[PrivateProject],
+    root: &Path,
+    personal: &Path,
+) -> Result<Option<PathBuf>> {
+    let real_root = resolved(root);
+    projects
+        .iter()
+        .find(|p| resolved(Path::new(&p.root)) == real_root)
+        .map(|p| private_vault_path(root, &p.vault, personal))
+        .transpose()
+}
+
+/// The private vault of the project at `root`, for `vault` as the user's config states it. It is
+/// a folder of its own: outside the project, where git would carry it, and apart from the
+/// personal vault, whose sync and whose Obsidian vault would otherwise take it in.
+pub fn private_vault_path(root: &Path, vault: &str, personal: &Path) -> Result<PathBuf> {
+    let path = expand_tilde(vault.trim());
+    let plain = path
+        .components()
+        .all(|c| !matches!(c, std::path::Component::ParentDir));
+    if !path.is_absolute() || !plain {
+        anyhow::bail!(
+            "the private vault \"{vault}\" must be an absolute path or start with ~/, without `..`"
+        );
+    }
+    let (real, real_root, real_personal) = (resolved(&path), resolved(root), resolved(personal));
+    if path.starts_with(root) || real.starts_with(&real_root) {
+        anyhow::bail!(
+            "the private vault {} is inside the project {}: a private vault is kept outside the repo",
+            path.display(),
+            root.display()
+        );
+    }
+    if real.starts_with(&real_personal) || real_personal.starts_with(&real) {
+        anyhow::bail!(
+            "the private vault {} and the personal vault {} must be separate folders",
+            path.display(),
+            personal.display()
+        );
+    }
+    Ok(path)
+}
+
+/// `p` with symlinks resolved as far as it exists; what does not exist yet stays as written.
+/// Two paths to one folder compare equal this way, whether or not the folder is there.
+pub(crate) fn resolved(p: &Path) -> PathBuf {
+    let mut missing = Vec::new();
+    let mut cur = p;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(cur) {
+            return missing
+                .iter()
+                .rev()
+                .fold(real, |path, name| path.join(name));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name);
+                cur = parent;
+            }
+            _ => return p.to_path_buf(),
+        }
+    }
 }
 
 /// The deepest existing ancestor of `p` (or `p` itself), with symlinks resolved.
@@ -526,5 +639,95 @@ mod tests {
         let dir = c.global_project_dir();
         assert_eq!(dir.parent().unwrap(), c.global_vault.join("Projects"));
         assert!(!dir.file_name().unwrap().to_string_lossy().contains(".."));
+    }
+
+    /// A project root, a folder beside it for a private vault, and a personal vault.
+    fn private_setup(name: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("obmem-cfg-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("repo")).unwrap();
+        (dir.join("repo"), dir.join("memory"), dir.join("personal"))
+    }
+
+    fn user_file(root: &Path, vault: &Path, personal: &Path) -> GlobalFile {
+        GlobalFile {
+            vault: Some(personal.display().to_string()),
+            projects: vec![PrivateProject {
+                root: root.display().to_string(),
+                vault: vault.display().to_string(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_users_config_names_a_private_vault() {
+        let (root, vault, personal) = private_setup("private");
+        let repo = ProjectFile {
+            vault: Some("docs/kb".into()),
+            ..Default::default()
+        };
+        let c = Config::resolve(root.clone(), repo, user_file(&root, &vault, &personal)).unwrap();
+        assert_eq!(c.project_vault, vault, "the user's choice beats the repo's");
+        assert!(c.vault_is_private());
+
+        // Another project on the same machine keeps its vault in its repo.
+        let other = root.with_file_name("other");
+        let c = Config::resolve(
+            other.clone(),
+            ProjectFile::default(),
+            user_file(&root, &vault, &personal),
+        )
+        .unwrap();
+        assert_eq!(c.project_vault, other.join(DEFAULT_VAULT));
+        assert!(!c.vault_is_private());
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn a_private_project_without_a_vault_here_does_not_load() {
+        let (root, _, _) = private_setup("unlinked");
+        let repo = ProjectFile {
+            private: Some(true),
+            // What a clone could add to get notes written into the repo after all.
+            vault: Some("docs/kb".into()),
+            ..Default::default()
+        };
+        let err = Config::resolve(root.clone(), repo, GlobalFile::default())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("obmem init --private"), "{err}");
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn a_private_vault_is_a_folder_of_its_own() {
+        let (root, vault, personal) = private_setup("apart");
+        assert_eq!(
+            private_vault_path(&root, &vault.display().to_string(), &personal).unwrap(),
+            vault
+        );
+        let refused = |v: &Path| private_vault_path(&root, &v.display().to_string(), &personal);
+        assert!(refused(Path::new("memory")).is_err(), "relative");
+        assert!(refused(&root.join("docs/kb")).is_err(), "inside the repo");
+        assert!(refused(&root).is_err(), "the repo itself");
+        assert!(
+            refused(&root.join("../repo/kb")).is_err(),
+            "inside the repo, by `..`"
+        );
+        assert!(refused(&personal).is_err(), "the personal vault");
+        assert!(refused(&personal.join("Projects/x")).is_err(), "inside it");
+        assert!(refused(personal.parent().unwrap()).is_err(), "around it");
+        // A link beside the repo that leads back into it.
+        #[cfg(unix)]
+        {
+            let link = root.with_file_name("link");
+            std::os::unix::fs::symlink(&root, &link).unwrap();
+            assert!(
+                refused(&link.join("kb")).is_err(),
+                "inside the repo, by a link"
+            );
+        }
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
 }

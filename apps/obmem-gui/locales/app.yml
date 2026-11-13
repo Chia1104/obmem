@@ -307,6 +307,9 @@ settings:
   vault_help:
     en: "Where the project's notes live, relative to the project."
     zh: "專案筆記的位置，相對於專案根目錄。"
+  vault_private:
+    en: "Private: outside the repo, at %{path}. Your own config names the folder; change it with obmem init --private."
+    zh: "私有：在 repo 之外，位於 %{path}。資料夾由你自己的設定指定；用 obmem init --private 變更。"
   secret_mode:
     en: "When a write contains a secret"
     zh: "寫入的內容含有機密時"

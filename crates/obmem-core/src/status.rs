@@ -16,6 +16,8 @@ pub struct Status {
     /// Where search, backlinks and link checks come from.
     pub backend: obsidian::Backend,
     pub project_vault: VaultStatus,
+    /// The project vault is outside the repo, where the user's config says.
+    pub private: bool,
     pub global_vault: VaultStatus,
     pub secret_rules: usize,
     pub known_secrets: usize,
@@ -62,6 +64,7 @@ pub fn status(store: &Store) -> Status {
         initialized: cfg.project_root.join(PROJECT_CONFIG_FILE).exists(),
         backend: store.backend(),
         project_vault: vault(&cfg.project_vault),
+        private: cfg.vault_is_private(),
         global_vault: vault(&cfg.global_vault),
         secret_rules: store.scanner().rule_count(),
         known_secrets: store.scanner().known_value_count(),

@@ -5,20 +5,24 @@
 
 use crate::config::{
     GlobalFile, PROJECT_CONFIG_FILE, ProjectFile, SecretMode, SecretsConfig, expand_tilde,
-    global_config_path, is_plain_relative, project_vault_path,
+    global_config_path, global_vault_from, is_plain_relative, private_vault_path,
+    project_vault_path, resolved,
 };
 use crate::store::atomic_write;
 use anyhow::{Context, Result, bail};
 use std::path::Path;
-use toml_edit::{Array, DocumentMut, Item, Value};
+use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 /// What `.obmem.toml` sets.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectSettings {
     /// The name in the personal vault (`Projects/<name>`); empty: the folder's name.
     pub name: String,
-    /// The project vault, relative to the project root.
+    /// The project vault, relative to the project root. Not read while `private` is set.
     pub vault: String,
+    /// The project's memory is kept outside the repo, in the vault the user's config names
+    /// ([`make_private`] sets it). A save keeps it as the file has it.
+    pub private: bool,
     pub secret_mode: SecretMode,
     /// Env files scanned for known secrets besides the defaults, which are always scanned.
     pub extra_env_files: Vec<String>,
@@ -132,7 +136,7 @@ impl ProjectSettings {
     /// file. A settings screen shows them at the settings; a save refuses the first.
     pub fn problems(&self) -> Vec<Problem<ProjectField>> {
         let mut out = Vec::new();
-        if !is_plain_relative(self.vault.trim()) {
+        if !self.private && !is_plain_relative(self.vault.trim()) {
             out.push(Problem::new(ProjectField::Vault, Rule::VaultInsideProject));
         }
         if let Some(f) = self
@@ -243,6 +247,7 @@ pub fn read_project(root: &Path) -> Result<ProjectSettings> {
         vault: file
             .vault
             .unwrap_or_else(|| crate::config::DEFAULT_VAULT.into()),
+        private: file.private.unwrap_or(false),
         secret_mode: file.secrets.mode,
         extra_env_files: file
             .secrets
@@ -258,13 +263,15 @@ pub fn read_project(root: &Path) -> Result<ProjectSettings> {
 /// Checks the settings ([`ProjectSettings::problems`]), then writes them.
 pub fn save_project(root: &Path, s: &ProjectSettings) -> Result<()> {
     refuse(s.problems())?;
-    // Also that the vault does not leave the project through a symlink.
-    project_vault_path(root, s.vault.trim())?;
     let path = root.join(PROJECT_CONFIG_FILE);
     let mut doc = read_doc(&path)?;
     let name = s.name.trim();
     assign_or_remove(&mut doc, "name", (!name.is_empty()).then_some(name));
-    assign(&mut doc["vault"], s.vault.trim());
+    if !s.private {
+        // Also that the vault does not leave the project through a symlink.
+        project_vault_path(root, s.vault.trim())?;
+        assign(&mut doc["vault"], s.vault.trim());
+    }
     let mode = match s.secret_mode {
         SecretMode::Block => "block",
         SecretMode::Redact => "redact",
@@ -284,6 +291,80 @@ pub fn save_project(root: &Path, s: &ProjectSettings) -> Result<()> {
         s.duplicate_threshold,
     );
     atomic_write(root, &path, &doc.to_string())
+}
+
+/// Makes the project at `root` keep its memory in `vault`, a folder outside the repo. The user's
+/// config names the vault (`[[project]]`, in place of what it named for this project before), and
+/// an existing `.obmem.toml` is marked `private`, so that a machine whose config names no vault
+/// refuses the project instead of writing its notes into the repo. No note is moved.
+///
+/// `vault` is an absolute path or starts with `~/`. An absolute one is recorded with its links
+/// and `..` resolved; one under `~/` as it is, so the same line works on another machine.
+pub fn make_private(root: &Path, vault: &str) -> Result<()> {
+    make_private_at(&global_config_path(), root, vault)
+}
+
+fn make_private_at(config: &Path, root: &Path, vault: &str) -> Result<()> {
+    let root = std::path::absolute(root)?;
+    let mut doc = read_doc(config)?;
+    let file: GlobalFile = toml::from_str(&doc.to_string())?;
+    let vault = match vault.trim() {
+        home if home.starts_with('~') => home.to_string(),
+        path => resolved(Path::new(path)).display().to_string(),
+    };
+    let vault = vault.as_str();
+    private_vault_path(&root, vault, &global_vault_from(file.vault))?;
+    let list = doc
+        .entry("project")
+        .or_insert(Item::ArrayOfTables(ArrayOfTables::new()));
+    let Some(list) = list.as_array_of_tables_mut() else {
+        bail!(
+            "`project` in {} is not a list of tables (`[[project]]`)",
+            config.display()
+        )
+    };
+    let real_root = resolved(&root);
+    let known = list.iter_mut().find(|t| {
+        t.get("root")
+            .and_then(Item::as_str)
+            .is_some_and(|r| resolved(Path::new(r)) == real_root)
+    });
+    match known {
+        Some(entry) => assign(&mut entry["vault"], vault),
+        None => {
+            let mut entry = Table::new();
+            entry.insert("root", toml_edit::value(root.display().to_string()));
+            entry.insert("vault", toml_edit::value(vault));
+            list.push(entry);
+        }
+    }
+    let dir = config.parent().context("config path has no parent")?;
+    std::fs::create_dir_all(dir)?;
+    atomic_write(dir, config, &doc.to_string())?;
+
+    let path = root.join(PROJECT_CONFIG_FILE);
+    if path.exists() {
+        let mut doc = read_doc(&path)?;
+        mark_private(&mut doc);
+        atomic_write(&root, &path, &doc.to_string())?;
+    }
+    Ok(())
+}
+
+/// `private = true` where `vault` was, under the comment lines `vault` had above it.
+fn mark_private(doc: &mut DocumentMut) {
+    let order: Vec<String> = doc
+        .iter()
+        .map(|(key, _)| if key == "vault" { "private" } else { key }.to_string())
+        .collect();
+    let comments = doc.key("vault").map(|key| key.leaf_decor().clone());
+    doc.remove("vault");
+    assign(&mut doc["private"], true);
+    if let (Some(comments), Some(mut key)) = (comments, doc.key_mut("private")) {
+        *key.leaf_decor_mut() = comments;
+    }
+    let place = |key: &toml_edit::Key| order.iter().position(|k| k == key.get());
+    doc.sort_values_by(|a, _, b, _| place(a).cmp(&place(b)));
 }
 
 pub fn read_global() -> Result<GlobalSettings> {
@@ -570,10 +651,84 @@ mod tests {
     }
 
     #[test]
+    fn make_private_names_the_vault_and_marks_the_repo() {
+        let dir = temp("private");
+        let (root, config) = (dir.join("repo"), dir.join("config/config.toml"));
+        let (vault, personal) = (dir.join("memory"), dir.join("personal"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            root.join(PROJECT_CONFIG_FILE),
+            "# team config\nvault = \"docs/kb\" # where notes go\nname = \"acme\"\n\n[secrets]\nmode = \"block\"\n",
+        )
+        .unwrap();
+        // A literal string: a Windows path has backslashes.
+        std::fs::write(
+            &config,
+            format!(
+                "# mine\nvault = '{}'\n\n[sync]\nbucket = \"b\"\n",
+                personal.display()
+            ),
+        )
+        .unwrap();
+        let projects = || {
+            let text = std::fs::read_to_string(&config).unwrap();
+            assert!(text.contains("# mine") && text.contains("[sync]"), "{text}");
+            toml::from_str::<GlobalFile>(&text).unwrap().projects
+        };
+
+        // As a person types a folder beside the repo.
+        let typed = root.join("../memory").display().to_string();
+        make_private_at(&config, &root, &typed).unwrap();
+        // The folder as the file system names it: a temp folder is behind a link on macOS.
+        let vault = resolved(&vault);
+        assert_eq!(
+            projects(),
+            [crate::config::PrivateProject {
+                root: root.display().to_string(),
+                vault: vault.display().to_string(),
+            }]
+        );
+        let text = std::fs::read_to_string(root.join(PROJECT_CONFIG_FILE)).unwrap();
+        assert!(
+            text.starts_with("# team config\nprivate = true\nname = \"acme\"\n"),
+            "{text}"
+        );
+        assert!(!text.contains("vault"), "{text}");
+
+        // A settings screen saves the rest and leaves the vault to the user's config.
+        let mut s = read_project(&root).unwrap();
+        assert!(s.private && s.problems().is_empty());
+        s.stale_days = 30;
+        save_project(&root, &s).unwrap();
+        let text = std::fs::read_to_string(root.join(PROJECT_CONFIG_FILE)).unwrap();
+        assert!(
+            text.contains("private = true") && !text.contains("vault"),
+            "{text}"
+        );
+        assert_eq!(read_project(&root).unwrap(), s);
+
+        // Naming another folder replaces the entry.
+        let moved = dir.join("moved");
+        make_private_at(&config, &root, &moved.display().to_string()).unwrap();
+        let list = projects();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].vault, resolved(&moved).display().to_string());
+
+        // A folder a private vault cannot be changes nothing.
+        for bad in [root.join("docs/kb"), personal.clone()] {
+            assert!(make_private_at(&config, &root, &bad.display().to_string()).is_err());
+        }
+        assert_eq!(projects(), list);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn problems_name_every_setting_that_breaks_a_rule() {
         let project = ProjectSettings {
             name: String::new(),
             vault: "../outside".into(),
+            private: false,
             secret_mode: SecretMode::Block,
             extra_env_files: vec!["ok/.env".into(), "/etc/passwd".into()],
             stale_days: 0,

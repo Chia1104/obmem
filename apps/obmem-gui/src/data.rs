@@ -224,7 +224,9 @@ fn sync_info() -> Result<SyncInfo, String> {
             Ok(false)
         },
         last: if configured {
-            obmem_sync::last_status(&cfg)
+            obmem_sync::Target::personal(cfg)
+                .ok()
+                .and_then(|target| obmem_sync::last_status(&target))
         } else {
             None
         },
@@ -292,15 +294,17 @@ pub fn connect_sync(
         access_key_id: access_key_id.trim().to_string(),
         secret_access_key,
     };
-    let created = obmem_sync::connect(&cfg, creds, &passphrase.into()).map_err(text)?;
+    let target = obmem_sync::Target::personal(cfg).map_err(text)?;
+    let created = obmem_sync::connect(&target, creds, &passphrase.into()).map_err(text)?;
     Ok(Connected { bucket, created })
 }
 
 /// One sync, now; the outcome also goes to the status the page shows. `None`: a sync is already
 /// queued, and takes these changes too.
 pub fn sync_now() -> Result<Option<obmem_sync::Summary>, String> {
-    let cfg = config::sync_config().map_err(text)?;
-    Ok(obmem_sync::run(&cfg, false, std::time::Duration::ZERO)
+    let target =
+        obmem_sync::Target::personal(config::sync_config().map_err(text)?).map_err(text)?;
+    Ok(obmem_sync::run(&target, false, std::time::Duration::ZERO)
         .map_err(text)?
         .map(|r| (&r).into()))
 }

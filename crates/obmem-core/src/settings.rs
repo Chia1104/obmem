@@ -687,6 +687,7 @@ mod tests {
             [crate::config::PrivateProject {
                 root: root.display().to_string(),
                 vault: vault.display().to_string(),
+                sync: None,
             }]
         );
         let text = std::fs::read_to_string(root.join(PROJECT_CONFIG_FILE)).unwrap();

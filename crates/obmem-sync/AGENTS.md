@@ -1,6 +1,6 @@
 # obmem-sync
 
-Two-way sync and backup of the personal (global) vault through an S3-compatible bucket, so that macOS and Windows machines share one vault. The project vault is not included, because git already carries it. This crate holds the network code and the async runtime, which obmem-core must not have. Its API is blocking: `Remote` runs `object_store` on a current-thread tokio runtime of its own.
+Two-way sync and backup of a vault through an S3-compatible bucket, so that macOS and Windows machines share one vault. What a sync carries is a `Target` (`run.rs`): the personal (global) vault through `[sync]`, or a private project vault through the bucket the user's config names for it (`[project.sync]`), which a team shares. A project vault in the repo is not included, because git already carries it. This crate holds the network code and the async runtime, which obmem-core must not have. Its API is blocking: `Remote` runs `object_store` on a current-thread tokio runtime of its own.
 
 ## Bucket layout (`lib.rs`)
 
@@ -20,8 +20,11 @@ Under `[sync] prefix` (default `obmem`):
 
 ## Running a sync (`run.rs`)
 
-- `run` is what front ends call. It loads the credentials (`keychain::load`), syncs the personal vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. The file keeps the numbers (`Outcome`, `Summary`, `Cleanup`), not a sentence: `Display` writes the CLI's line, and the desktop app writes its own in its language. `connect` stores a device's credentials and unlocks the key, or creates it.
-- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, if `[sync]` names a bucket and `auto` is not false. Such a sync waits up to `HOOK_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records (`SyncOptions::spacing`). At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
+- `run` is what front ends call, with a `Target`. It loads the credentials (`Target::keys`), syncs the target's vault, and writes the outcome to `<state>.status.json`, which `last_status` reads for `obmem status` and the desktop app. The file keeps the numbers (`Outcome`, `Summary`, `Cleanup`), not a sentence: `Display` writes the CLI's line, and the desktop app writes its own in its language. `connect` stores a device's credentials and unlocks the key, or creates it.
+- A project target takes its bucket from `[project.sync]` and everything about the machine (`device`, `auto`, `ephemeral`) from `[sync]`: `config::project_sync` merges the two into one `SyncConfig`, so the remote, the keychain entry and the state file need no second code path. Each target has its own state, lock and status file, because `state_path` hashes the bucket location and the vault folder.
+- `Target::project` refuses a bucket and prefix that are the personal vault's (`apart`). The two vaults would share one key and one line of snapshots, and each sync would copy one vault's notes into the other.
+- A project vault syncs nothing of `.obsidian/` (`files::AppFiles::None`): it is a team's, and the app's settings are each person's own.
+- Agent hooks start `obmem sync --background` (the CLI's `spawn_background_sync`) at session start and when a turn ends, for every target that names a bucket, unless `auto` is false. Such a sync waits up to `HOOK_WAIT` for a running one, and starts no sooner than `MIN_INTERVAL` (a minute) after the last start, which the `.lock` file's time records (`SyncOptions::spacing`). At most one sync waits (a file lock on `.queued`); any other returns `Queued`, because the waiting sync will see its changes. So a burst of agent turns makes one sync, and the last change always gets one. A queued return is not recorded as a status.
 - `connect` sets `[sync] device` to `config::new_device_name` (host name plus four random hex digits) when it is unset: two machines with one host name would otherwise write the same session log every day.
 
 ## Ephemeral machines (`[sync] ephemeral = true`)
@@ -46,6 +49,7 @@ A cloud sandbox starts without the vault and may be gone as soon as the session 
 - Downloaded content is checked against its HMAC and written through `obmem_core::store::atomic_write_bytes`. Restore writes only into a missing or empty folder.
 - `files::scan` never follows symlinks and leaves out dot-entries, except the settings part of `.obsidian/` (top-level `*.json` other than `workspace*`, `themes/`, `snippets/`; `plugins/` and `community-plugins.json` only with `[sync] community_plugins = true`).
 - Secrets live in the OS keychain (`keychain.rs`, the `keyring` crate): one entry per `<endpoint>/<bucket>/<prefix>`, holding the access key pair and the unlocked vault key. `[sync]` in the user's config holds only locations. It is read from the user's config only, never from a repo's `.obmem.toml`.
+- The environment's secrets are the personal vault's. A project target reads the keychain only (`keychain::stored`): with the environment's key, a first sync would write the team's bucket under a key no teammate has.
 - A machine without a keychain takes the same three secrets from the environment (`keychain::ENV_VARS`). When any of the three is set, all must be, and the keychain is not asked. An error about them names the variable and never prints its value.
 
 ## Tests

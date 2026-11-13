@@ -75,6 +75,21 @@ pub struct PrivateProject {
     pub root: String,
     /// The vault: an absolute path, or one starting with `~/`.
     pub vault: String,
+    /// `[project.sync]`: the bucket the vault is synced through, which the team shares.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync: Option<Bucket>,
+}
+
+/// Where a vault is kept in an S3-compatible bucket: the keys of `[sync]` that say where, without
+/// the ones about this machine. A different bucket or prefix is a different backup, with a key of
+/// its own.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct Bucket {
+    pub endpoint: Option<String>,
+    pub region: Option<String>,
+    pub bucket: Option<String>,
+    pub prefix: Option<String>,
 }
 
 /// `[sync]`: where the personal vault is backed up, an S3-compatible bucket (AWS S3, Cloudflare R2,
@@ -104,6 +119,18 @@ pub struct SyncConfig {
 }
 
 impl SyncConfig {
+    /// These settings for another bucket: a private project vault syncs like the personal one
+    /// on this machine (its name, automatic sync, ephemeral), to where the team keeps it.
+    fn at(&self, bucket: &Bucket) -> SyncConfig {
+        SyncConfig {
+            endpoint: bucket.endpoint.clone(),
+            region: bucket.region.clone(),
+            bucket: bucket.bucket.clone(),
+            prefix: bucket.prefix.clone(),
+            ..self.clone()
+        }
+    }
+
     /// A bucket is configured and automatic sync is not turned off.
     pub fn auto_sync(&self) -> bool {
         self.bucket.is_some() && self.auto.unwrap_or(true)
@@ -383,6 +410,24 @@ pub(crate) fn sync_config_at(path: &Path) -> Result<SyncConfig> {
     Ok(gf.sync)
 }
 
+/// How the private vault of the project at `root` is synced: through its own bucket
+/// (`[project.sync]`), with this machine's `[sync]` settings for the rest. `None`: the user's
+/// config names no bucket for it.
+pub fn project_sync(root: &Path) -> Result<Option<SyncConfig>> {
+    let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
+    Ok(project_sync_in(&gf, root))
+}
+
+fn project_sync_in(gf: &GlobalFile, root: &Path) -> Option<SyncConfig> {
+    let real_root = resolved(root);
+    gf.projects
+        .iter()
+        .find(|p| resolved(Path::new(&p.root)) == real_root)
+        .and_then(|p| p.sync.as_ref())
+        .filter(|bucket| bucket.bucket.is_some())
+        .map(|bucket| gf.sync.at(bucket))
+}
+
 pub(crate) fn global_vault_from(configured: Option<String>) -> PathBuf {
     std::env::var("OBMEM_GLOBAL_VAULT")
         .ok()
@@ -655,6 +700,7 @@ mod tests {
             projects: vec![PrivateProject {
                 root: root.display().to_string(),
                 vault: vault.display().to_string(),
+                sync: None,
             }],
             ..Default::default()
         }
@@ -681,6 +727,42 @@ mod tests {
         .unwrap();
         assert_eq!(c.project_vault, other.join(DEFAULT_VAULT));
         assert!(!c.vault_is_private());
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn a_private_vault_syncs_through_its_own_bucket() {
+        let (root, vault, personal) = private_setup("bucket");
+        let text = format!(
+            "[sync]\nbucket = \"mine\"\ndevice = \"work-mac\"\nauto = false\n\n\
+             [[project]]\nroot = '{}'\nvault = '{}'\n\n\
+             [project.sync]\nendpoint = \"https://team.example\"\nbucket = \"team\"\nprefix = \"acme\"\n\n\
+             [[project]]\nroot = '{}'\nvault = '{}'\n",
+            root.display(),
+            vault.display(),
+            root.with_file_name("other").display(),
+            personal.with_file_name("other-memory").display(),
+        );
+        let gf: GlobalFile = toml::from_str(&text).unwrap();
+        let sync = project_sync_in(&gf, &root).unwrap();
+        assert_eq!(
+            (
+                sync.endpoint.as_deref(),
+                sync.bucket.as_deref(),
+                sync.prefix.as_deref()
+            ),
+            (Some("https://team.example"), Some("team"), Some("acme")),
+            "the team's bucket"
+        );
+        assert_eq!(
+            sync.device.as_deref(),
+            Some("work-mac"),
+            "this machine's name"
+        );
+        assert!(!sync.auto_sync(), "and its choice about automatic sync");
+        // A private vault without a bucket is not synced, and neither is a vault in the repo.
+        assert_eq!(project_sync_in(&gf, &root.with_file_name("other")), None);
+        assert_eq!(project_sync_in(&gf, &root.with_file_name("third")), None);
         let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
 

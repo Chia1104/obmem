@@ -100,22 +100,35 @@ pub fn is_set_up(cfg: &SyncConfig) -> Result<bool> {
     }
 }
 
+/// The keys for the personal vault's bucket: the environment's when it has them, else the
+/// keychain's.
 pub fn load(cfg: &SyncConfig) -> Result<(Credentials, VaultKey)> {
     if let Some(found) = from_env(process_env)? {
         return Ok(found);
     }
+    stored(cfg, "obmem sync setup")
+}
+
+/// Whether the environment holds sync credentials ([`ENV_VARS`]). They are the personal vault's.
+pub(crate) fn in_environment() -> bool {
+    from_env(process_env).is_ok_and(|found| found.is_some())
+}
+
+/// The keys this device's keychain holds for `cfg`'s bucket. `setup` is the command that puts
+/// them there.
+pub fn stored(cfg: &SyncConfig, setup: &str) -> Result<(Credentials, VaultKey)> {
     let json = match entry(cfg)?.get_password() {
         Ok(s) => s,
         Err(keyring::Error::NoEntry) => {
             return Err(anyhow!(
-                "this device is not set up for {}: run `obmem sync setup`",
+                "this device is not set up for {}: run `{setup}`",
                 location(cfg)
             ));
         }
         Err(e) => return Err(anyhow::Error::from(e).context(without_a_keychain())),
     };
     let s: Stored = serde_json::from_str(&json)
-        .context("the keychain entry for obmem-sync is damaged; run `obmem sync setup`")?;
+        .with_context(|| format!("the keychain entry for obmem-sync is damaged; run `{setup}`"))?;
     let key = VaultKey::parse(&s.vault_key)?;
     Ok((
         Credentials {
@@ -124,13 +137,6 @@ pub fn load(cfg: &SyncConfig) -> Result<(Credentials, VaultKey)> {
         },
         key,
     ))
-}
-
-/// This device's vault key as text, for `OBMEM_SYNC_VAULT_KEY` on a machine without a keychain.
-/// Whoever holds it and can read the bucket can read the whole backup.
-pub fn vault_key_text(cfg: &SyncConfig) -> Result<String> {
-    let (_, key) = load(cfg)?;
-    Ok(key.to_secret().expose_secret().to_string())
 }
 
 #[cfg(test)]

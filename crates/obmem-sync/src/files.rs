@@ -7,6 +7,17 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
+/// How much of a vault's `.obsidian/` folder a sync carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppFiles {
+    /// None of it. A project vault is a team's, and the app's settings are each person's own.
+    None,
+    /// Settings, themes and snippets.
+    Settings,
+    /// Community plugins too.
+    WithPlugins,
+}
+
 pub struct Scan {
     /// Backup name → file on disk, sorted by name.
     pub files: Vec<(String, PathBuf)>,
@@ -17,7 +28,7 @@ pub struct Scan {
 /// Walk the vault. Dot-folders and dot-files are left out (`.git`, `.trash`, editor folders,
 /// obmem's temp files), except the parts of `.obsidian/` that are settings rather than state.
 /// Symlinks are never followed.
-pub fn scan(vault: &Path, community_plugins: bool) -> Result<Scan> {
+pub fn scan(vault: &Path, app: AppFiles) -> Result<Scan> {
     let mut files = Vec::new();
     let mut skipped = Vec::new();
     let walk = walkdir::WalkDir::new(vault)
@@ -44,7 +55,7 @@ pub fn scan(vault: &Path, community_plugins: bool) -> Result<Scan> {
             ));
             continue;
         };
-        if !included(&name, community_plugins) {
+        if !included(&name, app) {
             continue;
         }
         if entry.file_type().is_symlink() {
@@ -63,9 +74,9 @@ pub fn scan(vault: &Path, community_plugins: bool) -> Result<Scan> {
 
 /// Whether this device syncs `name`. Names it does not sync are left alone on both sides, so a
 /// device without community plugins neither downloads nor deletes another device's plugins.
-pub fn included(name: &str, community_plugins: bool) -> bool {
+pub fn included(name: &str, app: AppFiles) -> bool {
     match name.strip_prefix(".obsidian/") {
-        Some(rest) => obsidian_setting(rest, community_plugins),
+        Some(rest) => obsidian_setting(rest, app),
         None => !name.split('/').any(|part| part.starts_with('.')),
     }
 }
@@ -85,7 +96,11 @@ fn name_of(rel: &Path) -> Option<String> {
 /// The parts of `.obsidian/` worth carrying to another device, modeled on what Obsidian Sync
 /// syncs: settings, themes and snippets. The workspace layout changes with every click and
 /// would only conflict; community plugins are code and come along only when the user asks.
-fn obsidian_setting(rest: &str, community_plugins: bool) -> bool {
+fn obsidian_setting(rest: &str, app: AppFiles) -> bool {
+    if app == AppFiles::None {
+        return false;
+    }
+    let community_plugins = app == AppFiles::WithPlugins;
     match rest.split_once('/') {
         None => {
             rest.ends_with(".json")
@@ -187,7 +202,7 @@ mod tests {
         ] {
             put(&dir, rel);
         }
-        let s = scan(&dir, false).unwrap();
+        let s = scan(&dir, AppFiles::Settings).unwrap();
         assert_eq!(
             names(&s),
             [
@@ -198,7 +213,12 @@ mod tests {
                 "_system/secret-allowlist.toml"
             ]
         );
-        let with_plugins = scan(&dir, true).unwrap();
+        // A team's vault carries none of the app's settings.
+        assert_eq!(
+            names(&scan(&dir, AppFiles::None).unwrap()),
+            ["Global/a.md", "_system/secret-allowlist.toml"]
+        );
+        let with_plugins = scan(&dir, AppFiles::WithPlugins).unwrap();
         assert!(names(&with_plugins).contains(&".obsidian/plugins/x/main.js"));
         assert!(names(&with_plugins).contains(&".obsidian/community-plugins.json"));
     }
@@ -210,7 +230,7 @@ mod tests {
         put(&dir, "Global/ok.md");
         put(&dir, "Global/what?.md");
         std::os::unix::fs::symlink("/etc/hosts", dir.join("Global/link.md")).unwrap();
-        let s = scan(&dir, false).unwrap();
+        let s = scan(&dir, AppFiles::Settings).unwrap();
         assert_eq!(names(&s), ["Global/ok.md"]);
         let skipped: Vec<&str> = s.skipped.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(skipped.len(), 2, "{skipped:?}");
@@ -221,7 +241,7 @@ mod tests {
         let dir = tempdir();
         // "é" as e + combining acute (NFD), the way HFS+ stores it.
         put(&dir, "Global/caf\u{0065}\u{0301}.md");
-        let s = scan(&dir, false).unwrap();
+        let s = scan(&dir, AppFiles::Settings).unwrap();
         assert_eq!(names(&s), ["Global/caf\u{00e9}.md"]);
     }
 

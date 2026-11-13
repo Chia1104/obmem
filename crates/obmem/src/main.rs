@@ -1,6 +1,7 @@
 use obmem_agents::{hooks, setup};
 use obmem_core::{audit, config, context, import, init, note, projects, settings, status, store};
 use obmem_mcp as server;
+use obmem_sync::Target;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -133,8 +134,13 @@ enum Cmd {
         check: bool,
     },
     /// Sync the personal vault with an S3-compatible bucket, encrypted (`[sync]` in
-    /// ~/.config/obmem/config.toml). Without a subcommand: sync now; every sync is also a snapshot.
+    /// ~/.config/obmem/config.toml), and this project's vault when it is private and has a bucket
+    /// of its own (`[project.sync]`). Without a subcommand: sync now; every sync is also a snapshot.
     Sync {
+        /// The vault a subcommand is about (default: personal). Without a subcommand: sync only
+        /// this one, instead of both.
+        #[arg(long, value_enum, global = true)]
+        vault: Option<SyncVault>,
         /// Go ahead even if the sync would delete more than half of the vault.
         #[arg(long)]
         allow_deletes: bool,
@@ -145,6 +151,30 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<SyncCmd>,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, clap::ValueEnum)]
+enum SyncVault {
+    Personal,
+    /// The current project's private vault.
+    Project,
+}
+
+impl SyncVault {
+    fn of(target: &Target) -> Self {
+        if target.is_project() {
+            SyncVault::Project
+        } else {
+            SyncVault::Personal
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            SyncVault::Personal => "personal",
+            SyncVault::Project => "project",
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -167,8 +197,8 @@ enum SyncCmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Restore a snapshot into an empty folder. Default: the latest snapshot, into the personal
-    /// vault, which must then be empty or missing (a new device).
+    /// Restore a snapshot into an empty folder. Default: the latest snapshot, into the vault,
+    /// which must then be empty or missing (a new device).
     Restore {
         #[arg(long)]
         snapshot: Option<u64>,
@@ -228,10 +258,11 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
     let dir = project
         .map(PathBuf::from)
         .or_else(|| input.project_dir().map(PathBuf::from));
-    // Automatic sync, when it is on; and the same when this machine does not outlive the session.
-    let sync = config::sync_config().ok().filter(|c| c.auto_sync());
-    let ephemeral = sync.as_ref().filter(|c| c.is_ephemeral());
-    // The hook's answer, and whether to sync the personal vault after it.
+    // What automatic sync carries, when it is on; and whether this machine does not outlive the
+    // session.
+    let targets = auto_targets(dir.as_deref());
+    let ephemeral = targets.iter().any(|t| t.cfg.is_ephemeral());
+    // The hook's answer, and whether to sync after it.
     let out = (|| -> Result<(String, bool)> {
         let cfg = config::Config::load(dir.as_deref())?;
         // Like every hook, a no-op outside obmem projects: hooks installed user-wide stay harmless.
@@ -244,15 +275,15 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
                 if let Err(e) = projects::record(&cfg.project_root) {
                     eprintln!("obmem: could not record the project: {e:#}");
                 }
-                // An ephemeral machine starts without the vault: fetch it before reading the
-                // context from it. Nothing is left to send afterwards.
-                if let Some(sync) = ephemeral {
-                    sync_and_wait(sync);
+                // An ephemeral machine starts without its vaults: fetch them before reading the
+                // context from them. Nothing is left to send afterwards.
+                if ephemeral {
+                    targets.iter().for_each(sync_and_wait);
                 }
                 let mut store = store::Store::open(cfg)?;
                 (
                     hooks::session_start(&mut store, &input, agent, *max_chars, now)?,
-                    ephemeral.is_none(),
+                    !ephemeral,
                 )
             }
             HookCmd::Stop { .. } => {
@@ -278,10 +309,11 @@ fn run_hook(which: &HookCmd, project: Option<&std::path::Path>, session: Option<
             }
         }
     }
-    if sync_after && sync.is_some() {
-        match ephemeral {
-            Some(sync) => sync_and_wait(sync),
-            None => spawn_background_sync(),
+    if sync_after && !targets.is_empty() {
+        if ephemeral {
+            targets.iter().for_each(sync_and_wait);
+        } else {
+            spawn_background_sync(dir.as_deref());
         }
     }
 }
@@ -311,19 +343,25 @@ fn main() -> Result<()> {
         return Ok(());
     }
     if let Cmd::Sync {
+        vault,
         action,
         allow_deletes,
         background,
     } = &cli.cmd
     {
-        // Only the personal vault and the user's config are involved: no project to load.
+        // Sync works outside a project too: then only the personal vault is involved.
         if *background {
-            if let Ok(cfg) = config::sync_config() {
-                let _ = obmem_sync::run(&cfg, false, obmem_sync::HOOK_WAIT);
+            for target in auto_targets(cli.project.as_deref()) {
+                let _ = obmem_sync::run(&target, false, obmem_sync::HOOK_WAIT);
             }
             return Ok(());
         }
-        return run_sync(action.as_ref(), *allow_deletes);
+        return run_sync(
+            action.as_ref(),
+            *allow_deletes,
+            *vault,
+            cli.project.as_deref(),
+        );
     }
     if let Cmd::Update { check } = &cli.cmd {
         return run_update(*check);
@@ -579,7 +617,8 @@ fn main() -> Result<()> {
             unreachable!("handled before loading config")
         }
         Cmd::Status => {
-            let st = status::status(&store::Store::open(cfg)?);
+            let store = store::Store::open(cfg)?;
+            let st = status::status(&store);
             print_binary();
             println!("project root:   {}", st.project_root.display());
             println!("project name:   {}", st.project_name);
@@ -628,7 +667,23 @@ fn main() -> Result<()> {
                 st.known_secrets
             );
             println!("secret mode:    {:?}", st.secret_mode);
-            println!("sync:           {}", sync_status_line());
+            println!(
+                "sync:           {}",
+                sync_status_line(
+                    personal_target(),
+                    "not set up (add [sync] to your config, then `obmem sync setup`)"
+                )
+            );
+            if st.private {
+                println!(
+                    "project sync:   {}",
+                    sync_status_line(
+                        Target::project(store.config()),
+                        "not set up (add [project.sync] after this project's [[project]] in \
+                         your config, then `obmem sync setup --vault project`)"
+                    )
+                );
+            }
         }
     }
     Ok(())
@@ -677,25 +732,81 @@ fn run_update(check: bool) -> Result<()> {
     Ok(())
 }
 
-fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
-    use obmem_sync as sync;
+/// The personal vault as a sync target, when `[sync]` names a bucket.
+fn personal_target() -> Result<Option<Target>> {
     let cfg = config::sync_config()?;
     if cfg.bucket.is_none() {
-        anyhow::bail!(
-            "no backup bucket configured: add a [sync] table with `bucket` (and `endpoint` for R2 or MinIO) to {}",
-            config::global_config_path().display()
-        );
+        return Ok(None);
     }
+    Target::personal(cfg).map(Some)
+}
+
+/// The project's vault as a sync target, when it is private and has a bucket of its own.
+fn project_target(project: Option<&std::path::Path>) -> Result<Option<Target>> {
+    Target::project(&config::Config::load(project)?)
+}
+
+/// What a hook syncs: every vault that has a bucket, unless `[sync] auto` is off. A project that
+/// does not load is for the hook itself to report.
+fn auto_targets(project: Option<&std::path::Path>) -> Vec<Target> {
+    [personal_target(), project_target(project)]
+        .into_iter()
+        .filter_map(|target| target.ok().flatten())
+        .filter(|target| target.cfg.auto_sync())
+        .collect()
+}
+
+/// The one vault a command is about, or what is missing to sync it.
+fn sync_target(which: SyncVault, project: Option<&std::path::Path>) -> Result<Target> {
+    let file = config::global_config_path();
+    match which {
+        SyncVault::Personal => personal_target()?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "no backup bucket configured: add a [sync] table with `bucket` (and `endpoint` for R2 or MinIO) to {}",
+                file.display()
+            )
+        }),
+        SyncVault::Project => {
+            let cfg = config::Config::load(project)?;
+            if !cfg.vault_is_private() {
+                anyhow::bail!(
+                    "{} is in the repo, where git carries it. Only a private vault is synced: `obmem init --private <folder>`",
+                    cfg.project_vault.display()
+                );
+            }
+            Target::project(&cfg)?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no bucket configured for this project's vault: add a [project.sync] table with `bucket` (and `endpoint` for R2 or MinIO) after its [[project]] in {}",
+                    file.display()
+                )
+            })
+        }
+    }
+}
+
+fn run_sync(
+    action: Option<&SyncCmd>,
+    allow_deletes: bool,
+    which: Option<SyncVault>,
+    project: Option<&std::path::Path>,
+) -> Result<()> {
+    use obmem_sync as sync;
     let Some(action) = action else {
-        return sync_now(&cfg, allow_deletes);
+        let Some(which) = which else {
+            return sync_all(project, allow_deletes);
+        };
+        return sync_now(&sync_target(which, project)?, allow_deletes);
     };
+    let target = sync_target(which.unwrap_or(SyncVault::Personal), project)?;
+    let cfg = &target.cfg;
+    let vault = SyncVault::of(&target).name();
     match action {
         SyncCmd::Setup => {
             let creds = sync::Credentials {
                 access_key_id: prompt("Access key ID: ")?,
                 secret_access_key: rpassword::prompt_password("Secret access key: ")?,
             };
-            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let remote = sync::Remote::s3(cfg, &creds)?;
             let passphrase = if sync::has_key(&remote)? {
                 rpassword::prompt_password("Backup passphrase: ")?
             } else {
@@ -714,7 +825,7 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
                 }
                 first
             };
-            let created = sync::connect(&cfg, creds, &passphrase.into())?;
+            let created = sync::connect(&target, creds, &passphrase.into())?;
             println!(
                 "{} the backup in {}; the access key and backup key are in this device's keychain",
                 if created { "created" } else { "unlocked" },
@@ -722,15 +833,15 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             );
         }
         SyncCmd::Key => {
-            let key = sync::keychain::vault_key_text(&cfg)?;
+            let key = target.key_text()?;
             eprintln!(
-                "This key reads your whole backup. Keep it in a secret store, never in a file in a repository."
+                "This key reads the whole backup of the {vault} vault. Keep it in a secret store, never in a file in a repository."
             );
             println!("{key}");
         }
         SyncCmd::List => {
-            let (creds, key) = sync::keychain::load(&cfg)?;
-            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let (creds, key) = target.keys()?;
+            let remote = sync::Remote::s3(cfg, &creds)?;
             let seqs = sync::snapshot_seqs(&remote)?;
             if seqs.is_empty() {
                 println!("no snapshots yet: run `obmem sync`");
@@ -746,8 +857,8 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             }
         }
         SyncCmd::Prune { dry_run } => {
-            let (creds, key) = sync::keychain::load(&cfg)?;
-            let remote = sync::Remote::s3(&cfg, &creds)?;
+            let (creds, key) = target.keys()?;
+            let remote = sync::Remote::s3(cfg, &creds)?;
             let r = sync::prune(&remote, &key, chrono::Utc::now(), *dry_run)?;
             let verb = if *dry_run { "would remove" } else { "removed" };
             let list: Vec<String> = r.deleted_snapshots.iter().map(u64::to_string).collect();
@@ -765,29 +876,56 @@ fn run_sync(action: Option<&SyncCmd>, allow_deletes: bool) -> Result<()> {
             );
         }
         SyncCmd::Restore { snapshot, to } => {
-            let (creds, key) = sync::keychain::load(&cfg)?;
-            let remote = sync::Remote::s3(&cfg, &creds)?;
-            let target = match to {
-                Some(p) => p.clone(),
-                None => config::global_vault()?,
-            };
-            let r = sync::restore(&remote, &key, *snapshot, &target)?;
+            let (creds, key) = target.keys()?;
+            let remote = sync::Remote::s3(cfg, &creds)?;
+            let folder = to.as_ref().unwrap_or(&target.vault);
+            let r = sync::restore(&remote, &key, *snapshot, folder)?;
             println!(
                 "restored snapshot {} ({} files) into {}",
                 r.seq,
                 r.files,
-                target.display()
+                folder.display()
             );
             println!(
-                "next: open the folder in Obsidian (\"Open folder as vault\"); if it is the personal vault, `obmem sync` keeps it in sync from now on"
+                "next: open the folder in Obsidian (\"Open folder as vault\"); if it is the {vault} vault, `obmem sync` keeps it in sync from now on"
             );
         }
     }
     Ok(())
 }
 
-fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
-    let Some(r) = obmem_sync::run(cfg, allow_mass_delete, std::time::Duration::ZERO)? else {
+/// `obmem sync`: the personal vault, and the project's when it is private, each one that has a
+/// bucket. One that fails does not stop the other.
+fn sync_all(project: Option<&std::path::Path>, allow_mass_delete: bool) -> Result<()> {
+    let mut targets: Vec<Target> = personal_target()?.into_iter().collect();
+    match project_target(project) {
+        Ok(target) => targets.extend(target),
+        // The personal vault syncs anywhere, also beside a project that does not load.
+        Err(e) => eprintln!("obmem: the project vault is not synced: {e:#}"),
+    }
+    match targets.as_slice() {
+        [] => sync_target(SyncVault::Personal, project).map(|_| ()),
+        [only] => sync_now(only, allow_mass_delete),
+        several => {
+            let mut failed = Vec::new();
+            for target in several {
+                let vault = SyncVault::of(target).name();
+                println!("{vault} vault:");
+                if let Err(e) = sync_now(target, allow_mass_delete) {
+                    eprintln!("obmem: the {vault} vault did not sync: {e:#}");
+                    failed.push(vault);
+                }
+            }
+            if !failed.is_empty() {
+                anyhow::bail!("not synced: the {} vault", failed.join(" and the "));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn sync_now(target: &Target, allow_mass_delete: bool) -> Result<()> {
+    let Some(r) = obmem_sync::run(target, allow_mass_delete, std::time::Duration::ZERO)? else {
         return Ok(());
     };
     for (name, why) in &r.skipped {
@@ -816,12 +954,14 @@ fn sync_now(cfg: &config::SyncConfig, allow_mass_delete: bool) -> Result<()> {
     Ok(())
 }
 
-fn sync_status_line() -> String {
-    let cfg = match config::sync_config() {
-        Ok(c) if c.bucket.is_some() => c,
-        Ok(_) => return "not set up (add [sync] to your config, then `obmem sync setup`)".into(),
-        Err(e) => return format!("config unreadable: {e:#}"),
+/// A vault's sync for `obmem status`. `not_set_up` is what to say when it has no bucket.
+fn sync_status_line(target: Result<Option<Target>>, not_set_up: &str) -> String {
+    let target = match target {
+        Ok(Some(target)) => target,
+        Ok(None) => return not_set_up.into(),
+        Err(e) => return format!("config problem: {e:#}"),
     };
+    let cfg = &target.cfg;
     let auto = if !cfg.auto_sync() {
         " (automatic sync off)"
     } else if cfg.is_ephemeral() {
@@ -829,7 +969,7 @@ fn sync_status_line() -> String {
     } else {
         ""
     };
-    match obmem_sync::last_status(&cfg) {
+    match obmem_sync::last_status(&target) {
         None => format!("not run on this device yet{auto}"),
         Some(s) => match s.outcome {
             obmem_sync::Outcome::Failed(why) => format!("FAILED at {}: {why}{auto}", s.at),
@@ -841,19 +981,23 @@ fn sync_status_line() -> String {
 /// On a machine that does not outlive the session, the hook itself syncs and waits: the machine
 /// could be gone before a background sync ends. A failure never fails the hook: it goes to
 /// stderr and to the sync status.
-fn sync_and_wait(cfg: &config::SyncConfig) {
-    if let Err(e) = obmem_sync::run(cfg, false, obmem_sync::HOOK_WAIT) {
+fn sync_and_wait(target: &Target) {
+    if let Err(e) = obmem_sync::run(target, false, obmem_sync::HOOK_WAIT) {
         eprintln!("obmem: the sync failed: {e:#}");
     }
 }
 
-/// After a session starts or a turn ends, sync the personal vault in a process of its own, so the
-/// agent never waits on the network. Errors go to the sync status, never to the agent.
-fn spawn_background_sync() {
+/// After a session starts or a turn ends, sync in a process of its own, so the agent never waits
+/// on the network: the personal vault, and the vault of `project` when it is private. Errors go
+/// to the sync status, never to the agent.
+fn spawn_background_sync(project: Option<&std::path::Path>) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
     let mut cmd = std::process::Command::new(exe);
+    if let Some(project) = project {
+        cmd.arg("--project").arg(project);
+    }
     cmd.args(["sync", "--background"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

@@ -23,7 +23,7 @@ obmem init --private ~/Obsidian/acme-memory
 
 - Your own config records the folder, under `[[project]]` in `~/.config/obmem/config.toml`. `.obmem.toml` only says `private = true`, so the repo never says where the notes are.
 - Each person runs the command once on each machine, with the folder that holds their copy of the vault. Until then obmem refuses the project there, and writes no note into the repo.
-- obmem does not carry a private vault between machines yet: share the folder your own way, for example as a private git repository. `obmem sync` covers the personal vault only.
+- Give the vault a bucket and obmem syncs it between the team's machines: see [Syncing a private project vault](#syncing-a-private-project-vault). Without one, share the folder your own way, for example as a private git repository.
 - On a project that already has `docs/kb`, the command switches it to the private vault and leaves the old notes where they are. Move them yourself, and take the folder out of git.
 
 ## Requirements
@@ -202,6 +202,35 @@ Once a device is set up, obmem syncs on its own: when an agent session starts in
 `setup` keeps the access key and the unlocked vault key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the bucket cannot be read.**
 
 On a new machine, run `obmem sync setup` and then `obmem sync`. What the machine already has is merged in, not replaced.
+
+### Syncing a private project vault
+
+A [private project vault](#a-private-project-vault) syncs the same way, through a bucket of its own that the team shares. Name it after the project's `[[project]]` in your config:
+
+```toml
+# ~/.config/obmem/config.toml
+[[project]]
+root = "/Users/me/code/acme"
+vault = "~/Obsidian/acme-memory"
+
+[project.sync]
+endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+bucket = "acme-memory"
+# region and prefix as in [sync]
+```
+
+```sh
+obmem sync setup --vault project  # in the project: access key, then the team's passphrase
+obmem sync                        # the personal vault and this project's
+obmem sync --vault project        # only the project's
+```
+
+- `list`, `restore` and `prune` take `--vault project` too. Without it they are about the personal vault.
+- The hooks sync the project's vault along with the personal one. `device`, `auto` and `ephemeral` come from `[sync]`, for every vault on the machine.
+- A project vault has a backup of its own, with its own passphrase. obmem refuses a `[project.sync]` that names the personal vault's bucket and prefix.
+- Its `.obsidian/` folder is not synced: those settings are each person's own.
+- Two people who change the same note both keep their version: the other one arrives as a `sync-conflict` copy, which the audit reports.
+- On a machine without a keychain a project vault is not synced yet. The `OBMEM_SYNC_*` variables hold the personal vault's keys only.
 
 ### On a server or in a cloud sandbox
 

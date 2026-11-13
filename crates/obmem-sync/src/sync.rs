@@ -35,7 +35,8 @@ pub(crate) const MIN_INTERVAL: std::time::Duration = std::time::Duration::from_s
 
 pub struct SyncOptions<'a> {
     pub device: &'a str,
-    pub community_plugins: bool,
+    /// How much of `.obsidian/` this device syncs.
+    pub app_files: files::AppFiles,
     /// Go ahead even when the sync would delete many files (see [`too_many_deletions`]).
     pub allow_mass_delete: bool,
     /// How long to wait for a sync already running on this machine. Zero: fail at once. While
@@ -135,7 +136,7 @@ fn attempt(
     state: &Option<State>,
     opts: &SyncOptions,
 ) -> Result<Option<SyncReport>> {
-    let mut scan = files::scan(vault, opts.community_plugins)?;
+    let mut scan = files::scan(vault, opts.app_files)?;
     // Both names would be one file on macOS and Windows: keep the first.
     for (kept, dropped) in files::case_collisions(scan.files.iter().map(|(n, _)| n.as_str())) {
         scan.files.retain(|(n, _)| *n != dropped);
@@ -175,7 +176,7 @@ fn attempt(
                 .push((name.clone(), format!("from the bucket: {why}")));
         }
     }
-    let included = |n: &str| files::included(n, opts.community_plugins) && !excluded.contains(n);
+    let included = |n: &str| files::included(n, opts.app_files) && !excluded.contains(n);
     let empty = BTreeMap::new();
     let base = match (state, latest) {
         (Some(s), Some(l)) if s.key_check == key.blob_id(b"") && s.seq <= l => &s.files,
@@ -576,14 +577,14 @@ pub(crate) mod tests {
         pub vault: PathBuf,
         state: PathBuf,
         name: &'static str,
-        pub plugins: bool,
+        pub app_files: files::AppFiles,
     }
 
     impl Device<'_> {
         pub fn sync(&self) -> Result<SyncReport> {
             let opts = SyncOptions {
                 device: self.name,
-                community_plugins: self.plugins,
+                app_files: self.app_files,
                 allow_mass_delete: false,
                 wait: Default::default(),
                 spacing: Default::default(),
@@ -602,7 +603,7 @@ pub(crate) mod tests {
             vault: dir.join("vault"),
             state: dir.join("state.json"),
             name,
-            plugins: false,
+            app_files: files::AppFiles::Settings,
         }
     }
 
@@ -716,7 +717,7 @@ pub(crate) mod tests {
     fn files_one_device_does_not_sync_are_left_alone() {
         let remote = remote::in_memory();
         let (mut mac, win) = (device(&remote, "mac"), device(&remote, "win"));
-        mac.plugins = true;
+        mac.app_files = files::AppFiles::WithPlugins;
         put(&mac.vault, ".obsidian/plugins/x/main.js", "code");
         put(&mac.vault, "Global/a.md", "a");
         mac.sync().unwrap();
@@ -739,15 +740,41 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_team_vault_leaves_each_members_app_settings_alone() {
+        let remote = remote::in_memory();
+        let (mut ann, mut bo) = (device(&remote, "ann"), device(&remote, "bo"));
+        ann.app_files = files::AppFiles::None;
+        bo.app_files = files::AppFiles::None;
+        put(&ann.vault, "Decisions/a.md", "a");
+        put(&ann.vault, ".obsidian/app.json", "ann's");
+        put(&bo.vault, ".obsidian/app.json", "bo's");
+        ann.sync().unwrap();
+        bo.sync().unwrap();
+        ann.sync().unwrap();
+        assert_eq!(read(&bo.vault, "Decisions/a.md").as_deref(), Some("a"));
+        assert_eq!(
+            read(&ann.vault, ".obsidian/app.json").as_deref(),
+            Some("ann's")
+        );
+        assert_eq!(
+            read(&bo.vault, ".obsidian/app.json").as_deref(),
+            Some("bo's")
+        );
+        let latest = *snapshot_seqs(&remote).unwrap().last().unwrap();
+        let m = load_snapshot(&remote, &ann.key, latest).unwrap();
+        assert_eq!(m.files.keys().collect::<Vec<_>>(), ["Decisions/a.md"]);
+    }
+
+    #[test]
     fn turning_plugins_on_later_downloads_them_instead_of_deleting_them() {
         let remote = remote::in_memory();
         let (mut mac, mut win) = (device(&remote, "mac"), device(&remote, "win"));
-        mac.plugins = true;
+        mac.app_files = files::AppFiles::WithPlugins;
         put(&mac.vault, ".obsidian/plugins/x/main.js", "code");
         mac.sync().unwrap();
         win.sync().unwrap();
 
-        win.plugins = true;
+        win.app_files = files::AppFiles::WithPlugins;
         let r = win.sync().unwrap();
         assert!(r.deleted_remote.is_empty(), "{r:?}");
         assert_eq!(
@@ -825,7 +852,7 @@ pub(crate) mod tests {
 
         let opts = SyncOptions {
             device: "mac",
-            community_plugins: false,
+            app_files: files::AppFiles::Settings,
             allow_mass_delete: true,
             wait: Default::default(),
             spacing: Default::default(),
@@ -846,7 +873,7 @@ pub(crate) mod tests {
         let (key, _) = unlock_or_create(&fresh, &pass("other")).unwrap();
         let opts = SyncOptions {
             device: "mac",
-            community_plugins: false,
+            app_files: files::AppFiles::Settings,
             allow_mass_delete: false,
             wait: Default::default(),
             spacing: Default::default(),
@@ -870,7 +897,7 @@ pub(crate) mod tests {
         // Waiting: the first waiter queues, a second one leaves it to the first.
         let opts = |wait| SyncOptions {
             device: "mac",
-            community_plugins: false,
+            app_files: files::AppFiles::Settings,
             allow_mass_delete: false,
             wait,
             spacing: MIN_INTERVAL,
@@ -918,7 +945,7 @@ pub(crate) mod tests {
         mac.sync().unwrap(); // just started one
         let opts = SyncOptions {
             device: "mac",
-            community_plugins: false,
+            app_files: files::AppFiles::Settings,
             allow_mass_delete: false,
             wait: std::time::Duration::from_secs(1),
             spacing: MIN_INTERVAL,

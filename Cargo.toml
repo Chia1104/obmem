@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
-# The GUI pulls in Native Shell and the platform toolkits: build it with `-p obmem-gui` or `nsh`.
+# The GUI pulls in Native Shell and the platform toolkits: build it with `--workspace` or `nsh`
+# (`-p obmem-gui` builds Native Shell a second time under other feature hashes).
 default-members = ["crates/*"]
 
 [workspace.package]

@@ -52,7 +52,6 @@ Each outcome has one place, and a new action picks by this list:
 
 - After a failed save, do not reload the data the form was built from: the region rebuilds the form from the file and the user loses what they typed.
 - A region re-renders whenever a signal it read changes. So each part of the state has its own signal, and a region that holds a form reads only what the form is built from. If it also read the notice, a failed save would rebuild the form and lose what the user typed. Seed a form's signals with untracked reads (`get_untracked`) for the same reason.
-
 - A motion plays when it is made, so `.rises()` and `.fades_in()` play each time their element is built. Put them where a `dynamic` runs only when the element comes. A `dynamic` that reads what the element shows runs again with every change: read a `computed` of whether to show it instead, and let the element follow the rest itself (`widgets::problem_line`).
 - `animate_layout` leaves a text of several lines at its old height when the change gives it more lines (a sidebar opening beside it): the text stays cut off. Do not animate a change that re-wraps text; the sidebar and the breakpoints change at once for this reason.
 - A task started with `spawn` ends with its owner, and the button that starts one is usually re-rendered away when the task updates the page. Start tasks through `state::run_task` / `in_background`, which run them under the window's owner.

@@ -5,22 +5,19 @@ status: active
 author: agent
 confidence: high
 created: 2026-11-10
-updated: 2026-11-10
-verified_commit: 38a6b4e
+updated: 2026-11-14
+verified_commit: 8f6a67d
 code_refs:
 - .github/workflows/release.yml
 - apps/obmem-gui/nsh.json
+- .agents/skills/release/SKILL.md
 tags:
 - release
 - procedure
-approved_at: 2026-11-10
+approved_at: 2026-11-14
 approved_by: auto-approve
 ---
-# Releasing a version: bump last, then tag the merged commit
-
-# Releasing a version: bump last, then tag the merged commit
-
-The root `AGENTS.md` says what a release is. These are the steps and the two mistakes made on 2026-11-10 with v0.1.0 and v0.1.1.
+The `release` skill (`.agents/skills/release/SKILL.md`) says what a release is and what the workflow does. These are the steps and the two mistakes made on 2026-11-10 with v0.1.0 and v0.1.1.
 
 ## Steps
 1. Merge everything the release should contain.

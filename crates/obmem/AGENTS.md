@@ -1,6 +1,6 @@
 # obmem (binary)
 
-The `obmem` CLI. It parses arguments with clap, calls obmem-core, obmem-mcp and obmem-agents, and prints the results. Any logic another front end could need (the MCP server, a future GUI) belongs in a library crate. This crate keeps only argument parsing, the calls and the output.
+The `obmem` CLI. It parses arguments with clap, calls obmem-core, obmem-mcp, obmem-agents, obmem-sync and obmem-update, and prints the results. Any logic another front end could need (the MCP server, the desktop app) belongs in a library crate. This crate keeps only argument parsing, the calls and the output.
 
 - This crate turns on the `clap` feature of obmem-core and obmem-agents.
 - `obmem update` and the `binary:` line of `obmem status` come from obmem-update. `update` runs before any project config is loaded, like `hook` and `sync`: it works anywhere.

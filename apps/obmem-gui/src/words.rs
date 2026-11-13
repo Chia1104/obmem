@@ -129,7 +129,9 @@ pub(crate) fn manual(step: &ManualStep) -> String {
 /// Why a Claude Code memory was not imported.
 pub(crate) fn skip(why: &Skip) -> String {
     match why {
-        Skip::Exists(target) => t!("claude_memory.exists", target = target.display()),
+        Skip::Imported(target) => t!("claude_memory.exists", target = target.display()),
+        Skip::NameTaken(target) => t!("claude_memory.name_taken", target = target.display()),
+        Skip::Similar { id, title } => t!("claude_memory.similar", id = id, title = title),
         Skip::Failed(e) => e.clone(),
     }
 }

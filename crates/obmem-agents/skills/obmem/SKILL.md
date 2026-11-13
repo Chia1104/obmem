@@ -42,6 +42,7 @@ Record what a future session could not learn from the code or the git history. O
 | `feedback`, `preference` | how the user wants agents to work | personal |
 
 - Search before you write. When a note on the idea exists, replace it with `update_id`.
+- Feedback and preferences are the user's guidance in every project. When one holds in this project only (a convention of this repo, how its branches, reviews or releases work), pass `this_project_only: true`: it is then listed in this project's sessions and in no other. What the user wants everywhere, such as the language of replies, goes without it. When you cannot tell, pass it: the user widens a note, and an agent does not.
 - Give a note about code its `code_refs`, as `path#symbol`. The audit uses them to notice when the code moved on. Name the symbol: a whole-file ref is flagged by every commit to that file.
 - Date an observation that can expire: "Checked on 2026-11-10 with Obsidian 1.14".
 - A note a person wrote is read-only. To disagree with it, write a `finding` that names it.

@@ -20,6 +20,8 @@ fn write(store: &mut Store, title: &str, ty: NoteType, scope: Scope) -> String {
         force_new: false,
         author: "agent:test".into(),
         file_stem: None,
+        needs_review: false,
+        this_project_only: false,
     };
     match store.write(req).unwrap() {
         WriteOutcome::Written { id, .. } => id,

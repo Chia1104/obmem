@@ -17,6 +17,7 @@ author: human
 ## Key decisions
 - [[agent-guidance-is-a-short-always-loaded-guide-plus-skills-that-setup-installs]]: what agents are always told, and what is in the skills.
 - [[detect-unlogged-work-from-git-for-agents-other-than-claude-code]]: how the stop hook decides that a session did work.
+- [[personal-feedback-can-be-for-one-project-by-a-tag-and-claude-code-imports-arrive]]: feedback for one project (`project/<name>` tag), and what a Claude Code import does.
 - [[obmem-gui-scope-control-panel-for-macos-and-windows-notes-stay-in-obsidian]]: what the desktop app does and does not do.
 - [[the-desktop-app-translates-in-the-window-and-libraries-report-typed-values-with-]]: the desktop app's two languages, and why libraries report typed values.
 - [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]]: encrypted sync of the personal vault.

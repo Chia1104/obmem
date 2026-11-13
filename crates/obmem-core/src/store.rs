@@ -35,6 +35,13 @@ pub struct WriteRequest {
     /// Filename (link target) to use instead of one derived from the title (imports keep
     /// their original names so existing [[links]] still resolve).
     pub file_stem: Option<String>,
+    /// A new note stays a draft even when the user's config approves what agents write: an
+    /// import was not written under obmem's rules, so a person reads it first.
+    pub needs_review: bool,
+    /// A note for the global vault holds in this project only: it gets the project's tag
+    /// (`Config::project_tag`), and the session start lists it here and nowhere else. A note in
+    /// the project vault is this project's already, and gets no tag.
+    pub this_project_only: bool,
 }
 
 /// What happened to a finding. Only humans may reject (a rejection silences the audit rule
@@ -550,10 +557,54 @@ impl Store {
         )
     }
 
+    /// The notes a new one with this title would duplicate: same type and scope, similar title.
+    /// As (id, title, similarity), the most similar first. Reads the catalog as of the last sync.
+    fn similar_titles(
+        &self,
+        note_type: NoteType,
+        scope: Scope,
+        title: &str,
+    ) -> Result<Vec<(String, String, f64)>> {
+        let mut candidates: Vec<(String, String, f64)> = self
+            .index
+            .titles(note_type.as_str(), scope.as_str())?
+            .into_iter()
+            .map(|(id, t, _)| {
+                let s = title_similarity(&t, title);
+                (id, t, s)
+            })
+            .filter(|(_, _, s)| *s >= 0.5)
+            .collect();
+        candidates.sort_by(|a, b| b.2.total_cmp(&a.2));
+        candidates.truncate(5);
+        Ok(candidates)
+    }
+
+    /// The note a new one with this title would most duplicate, as (id, title): what `write`
+    /// refuses a new note for. For a caller that asks before it writes. It reads the catalog as
+    /// of the last `sync`.
+    pub fn duplicate_of(
+        &self,
+        note_type: NoteType,
+        scope: Scope,
+        title: &str,
+    ) -> Result<Option<(String, String)>> {
+        Ok(self
+            .similar_titles(note_type, scope, title)?
+            .into_iter()
+            .next()
+            .map(|(id, title, _)| (id, title)))
+    }
+
     pub fn write(&mut self, req: WriteRequest) -> Result<WriteOutcome> {
         self.sync()?;
         let scope = req.scope.unwrap_or_else(|| req.note_type.default_scope());
         if scope == Scope::Project && !self.project_ready() {
+            bail!("{}", self.not_in_project());
+        }
+        let here =
+            (req.this_project_only && scope == Scope::Global).then(|| self.cfg.project_tag());
+        if here.is_some() && !self.project_ready() {
             bail!("{}", self.not_in_project());
         }
         let (body, mut redactions) = self.police(&req.body)?;
@@ -575,7 +626,7 @@ impl Store {
                     })
                     .collect()
             };
-        let tags = police_all(req.tags, &mut redactions)?;
+        let mut tags = police_all(req.tags, &mut redactions)?;
         let code_refs = police_all(req.code_refs, &mut redactions)?;
         let confidence = match req.confidence {
             Some(c) => Some(police_all(vec![c], &mut redactions)?.remove(0)),
@@ -628,7 +679,29 @@ impl Store {
             note.fm.title = Some(title);
             note.fm.updated = Some(today);
             let status = note.fm.status.clone().unwrap_or_default();
+            // Where a note holds is the user's to change. An edit keeps the note's project tags
+            // whatever tags it names, so it can neither hide the note from a project nor make it
+            // guidance everywhere.
+            let held: Vec<String> = note
+                .fm
+                .tags
+                .iter()
+                .filter(|t| crate::config::is_project_tag(t))
+                .cloned()
+                .collect();
+            if let Some(tag) = &here
+                && !crate::catalog::holds_in(&held, tag)
+            {
+                bail!(
+                    "'{id}' holds in other projects ({}), and an edit does not change that. \
+                     The user changes where a note holds, by its `project/…` tags in Obsidian. \
+                     Retry without this_project_only.",
+                    held.join(", ")
+                );
+            }
             if !tags.is_empty() {
+                tags.retain(|t| !crate::config::is_project_tag(t));
+                tags.extend(held);
                 note.fm.tags = tags;
             }
             if !code_refs.is_empty() {
@@ -652,25 +725,18 @@ impl Store {
             });
         }
 
-        // Duplicate check: same type + scope, similar title.
         if !req.force_new {
-            let mut candidates: Vec<(String, String, f64)> = self
-                .index
-                .titles(req.note_type.as_str(), scope.as_str())?
-                .into_iter()
-                .map(|(id, t, _)| {
-                    let s = title_similarity(&t, &title);
-                    (id, t, s)
-                })
-                .filter(|(_, _, s)| *s >= 0.5)
-                .collect();
+            let candidates = self.similar_titles(req.note_type, scope, &title)?;
             if !candidates.is_empty() {
-                candidates.sort_by(|a, b| b.2.total_cmp(&a.2));
-                candidates.truncate(5);
                 return Ok(WriteOutcome::Duplicate { candidates });
             }
         }
 
+        if let Some(tag) = here
+            && !tags.contains(&tag)
+        {
+            tags.push(tag);
+        }
         let root = self.vault_for(scope).to_path_buf();
         let dir = root.join(req.note_type.folder());
         crate::config::ensure_within(&root, &dir)?;
@@ -702,7 +768,7 @@ impl Store {
             tags,
             extra: Default::default(),
         };
-        if self.cfg.auto_approve && req.note_type != NoteType::Finding {
+        if self.cfg.auto_approve && req.note_type != NoteType::Finding && !req.needs_review {
             mark_approved(&mut fm, AUTO_APPROVER, &today);
         }
         let status = fm.status.clone().unwrap_or_default();
@@ -769,7 +835,7 @@ impl Store {
                     status: Some("active".into()),
                     author: Some(author.to_string()),
                     created: Some(date.clone()),
-                    tags: vec![format!("project/{}", slugify(&self.cfg.project_name))],
+                    tags: vec![self.cfg.project_tag()],
                     ..Default::default()
                 };
                 let text = Note {
@@ -1028,7 +1094,7 @@ impl Store {
         // Only approved guidance is listed as the user's. A draft preference is listed with the
         // other drafts below, as unreviewed: any agent can write one into the personal vault, and
         // this context goes to every project.
-        let prefs = self.index.global_guidance()?;
+        let prefs = self.index.global_guidance(&self.cfg.project_tag())?;
         if !prefs.is_empty() {
             out.push_str("\n## Global feedback & preferences\n");
             for (id, title) in prefs.iter().take(30) {
@@ -1203,6 +1269,8 @@ mod tests {
             force_new: false,
             author: "agent:test".into(),
             file_stem: None,
+            needs_review: false,
+            this_project_only: false,
         }
     }
 
@@ -1585,6 +1653,132 @@ mod tests {
             panic!("finding")
         };
         assert_eq!(status, "open");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn guidance_tagged_for_another_project_is_not_listed() {
+        let dir = std::env::temp_dir().join(format!("obmem-guidance-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        let cfg = Config {
+            project_root: dir.clone(),
+            project_name: "My App".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: true,
+            device: "test".into(),
+        };
+        assert_eq!(cfg.project_tag(), "project/my-app");
+        let mut store = Store::open(cfg).unwrap();
+        for (title, tags) in [
+            ("Answer briefly", vec![]),
+            ("Commit generated route types", vec!["project/My-App"]),
+            ("Open pull requests into develop", vec!["project/other"]),
+            (
+                "Squash before merging",
+                vec!["project/other", "project/my-app"],
+            ),
+        ] {
+            let fb = WriteRequest {
+                note_type: NoteType::Feedback,
+                title: title.into(),
+                tags: tags.into_iter().map(String::from).collect(),
+                scope: None,
+                ..req(Scope::Global)
+            };
+            assert!(matches!(store.write(fb), Ok(WriteOutcome::Written { .. })));
+        }
+        let ctx = store.session_context(100_000).unwrap();
+        let listed = |title: &str| ctx.lines().any(|l| l.ends_with(&format!("]] {title}")));
+        assert!(listed("Answer briefly"), "{ctx}");
+        assert!(listed("Commit generated route types"), "{ctx}");
+        assert!(listed("Squash before merging"), "{ctx}");
+        assert!(!ctx.contains("Open pull requests into develop"), "{ctx}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_note_for_this_project_gets_its_tag_and_an_edit_keeps_it() {
+        let dir = std::env::temp_dir().join(format!("obmem-here-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        let cfg = Config {
+            project_root: dir.clone(),
+            project_name: "p".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: false,
+            device: "test".into(),
+        };
+        let mut store = Store::open(cfg).unwrap();
+        let tags_of = |path: &Path| {
+            Note::parse(&std::fs::read_to_string(path).unwrap())
+                .unwrap()
+                .fm
+                .tags
+        };
+        let feedback = |title: &str| WriteRequest {
+            note_type: NoteType::Feedback,
+            title: title.into(),
+            scope: None,
+            this_project_only: true,
+            ..req(Scope::Global)
+        };
+
+        let Ok(WriteOutcome::Written { id, path, .. }) = store.write(WriteRequest {
+            tags: vec!["git".into()],
+            ..feedback("Open pull requests into develop")
+        }) else {
+            panic!("write")
+        };
+        assert_eq!(tags_of(&path), ["git", "project/p"]);
+
+        // An edit names its own tags, a project tag among them: where the note holds stays.
+        let edit = WriteRequest {
+            tags: vec!["branches".into(), "project/elsewhere".into()],
+            update_id: Some(id.clone()),
+            this_project_only: false,
+            ..feedback("Open pull requests into develop")
+        };
+        assert!(matches!(
+            store.write(edit),
+            Ok(WriteOutcome::Written { .. })
+        ));
+        assert_eq!(tags_of(&path), ["branches", "project/p"]);
+
+        // A note of another project is not made this project's by an edit.
+        let theirs = dir.join("global/Global/Feedback/theirs.md");
+        std::fs::write(
+            &theirs,
+            "---\ntype: feedback\ntitle: Squash before merging\nstatus: active\nauthor: agent:test\ntags:\n- Project/Other\n---\n",
+        )
+        .unwrap();
+        let err = store
+            .write(WriteRequest {
+                update_id: Some("theirs".into()),
+                ..feedback("Squash before merging")
+            })
+            .err()
+            .expect("refused")
+            .to_string();
+        assert!(err.contains("Project/Other"), "{err}");
+        assert_eq!(tags_of(&theirs), ["Project/Other"]);
+
+        // A note in the project vault is this project's without a tag.
+        let Ok(WriteOutcome::Written { path, .. }) = store.write(WriteRequest {
+            this_project_only: true,
+            ..req(Scope::Project)
+        }) else {
+            panic!("write")
+        };
+        assert!(tags_of(&path).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

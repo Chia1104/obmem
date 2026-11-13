@@ -148,6 +148,8 @@ mod tests {
             force_new: false,
             author: "agent:test".into(),
             file_stem: None,
+            needs_review: false,
+            this_project_only: false,
         };
         assert!(matches!(store.write(req), Ok(WriteOutcome::Written { .. })));
 

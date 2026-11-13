@@ -102,7 +102,7 @@ The skills tell the agent how to use the memory, and it loads one when it needs 
 The skill files are obmem's. `setup` rewrites them when a new version of obmem brings a new text, so put a project's own guidance in a skill of its own. Commit them with the rest of the config.
 
 Once set up:
-- At session start, the agent gets the vault index, where the last session left off, the feedback and preferences you approved, open findings, and unreviewed drafts.
+- At session start, the agent gets the vault index, where the last session left off, the feedback and preferences you approved (those tagged for another project are left out), open findings, and unreviewed drafts.
 - When a session ends after real work that has not been logged, the agent is asked once to log it.
 - Before the context is compacted, obmem writes a session-log entry.
 
@@ -131,7 +131,7 @@ Every note an agent writes waits as a `draft` until you approve it. To skip that
 auto_approve = true
 ```
 
-Agent notes are then written `active`, with `approved_by: auto-approve`, and so are agent edits and Claude Code imports. Findings still start `open`. A project's `.obmem.toml` can turn auto-approve off for that project with the same `[review]` setting set to `false`, but it cannot turn it on: a cloned repo must not decide that what agents write skips your review.
+Agent notes are then written `active`, with `approved_by: auto-approve`, and so are agent edits. Findings still start `open`, and Claude Code imports stay drafts. A project's `.obmem.toml` can turn auto-approve off for that project with the same `[review]` setting set to `false`, but it cannot turn it on: a cloned repo must not decide that what agents write skips your review.
 
 ## Audit
 
@@ -344,7 +344,17 @@ In a repository you share, the bucket is yours and not the team's: take `endpoin
 
 ## Import Claude Code memory
 
-`obmem import-claude` imports `~/.claude/projects/<project>/memory/*.md` as draft notes (active with auto-approve). User and feedback memories go to the global vault, project and reference memories to the project vault. Files that already exist are skipped.
+`obmem import-claude` imports `~/.claude/projects/<project>/memory/*.md` as draft notes. They wait for your review even with auto-approve on, because Claude Code wrote them under its own rules. `--dry-run` shows what would happen and writes nothing.
+
+- Project and reference memories go to the project vault. User and feedback memories go to the global vault.
+- Claude Code keeps one memory folder per project, so a feedback memory is imported with this project's tag (`project/<name>`) and is guidance in this project only. Remove the tag from feedback that holds everywhere.
+- A memory is skipped when it was imported before, when another note has its name, and when a note of the same kind has nearly the same title. The import names that note.
+
+### Feedback for one project
+
+A feedback or preference note in the global vault is guidance in every project. Tag it `project/<name>` and the session start lists it in that project only. `<name>` is the project's name in lower case, with a `-` for anything that is not a letter or a digit: `project/my-app` for `My App`. A note can carry several project tags.
+
+An agent that records feedback about one project gives it that project's tag itself (`this_project_only` in `memory_write`). An agent's edit keeps a note's project tags: only you change where a note holds, by its tags in Obsidian.
 
 ## Desktop app
 

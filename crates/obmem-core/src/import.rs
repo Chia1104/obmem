@@ -5,6 +5,11 @@
 //! project | reference) and link each other with `[[name]]`; the note keeps `name` as its
 //! filename so those links still resolve, and uses `description` as the title.
 //!
+//! Claude Code keeps one memory folder per project, so a `feedback` memory is what the user said
+//! while working in that project. It goes to the global vault as a note for this project only
+//! (`WriteRequest::this_project_only`); the person who reviews it removes the project's tag from
+//! what holds everywhere. Every imported note is a draft, whatever `[review] auto_approve` says.
+//!
 //! An agent writes those files by hand, so a value is not always the YAML it looks like:
 //! `description: Moved to v2 (2026-10-15): see PR #169` is a parse error at the second colon,
 //! and without it the value would still end at ` #`, which starts a comment. `quote_values`
@@ -37,6 +42,8 @@ pub struct Planned {
     pub name: String,
     pub note_type: NoteType,
     pub scope: Scope,
+    /// It holds in the project it is imported into, and not in the user's other projects.
+    pub this_project_only: bool,
     pub title: String,
     pub tags: Vec<String>,
     pub body: String,
@@ -98,14 +105,17 @@ pub fn plan(dir: &Path) -> Result<Vec<Planned>> {
                 .or(note.fm.title.clone())
                 .unwrap_or_else(|| name.clone()),
             body: format!(
-                "{}\n\n> Imported from Claude Code memory (`{}`, type `{ty}`).\n",
+                "{}\n\n> Imported from Claude Code memory ({}, type `{ty}`).\n",
                 note.body.trim(),
-                p.display()
+                origin(&p)
             ),
             source: p,
             name,
             note_type,
             scope,
+            // Who the user is (`user`) does not change with the project. What they said while
+            // working in one (`feedback`) may.
+            this_project_only: note_type == NoteType::Feedback,
             tags,
         });
     }
@@ -160,7 +170,12 @@ fn is_misread(value: &str) -> bool {
     plain && (value.contains(": ") || value.contains(" #") || value.ends_with(':'))
 }
 
-/// Where an import would write the note. An existing file there means it is skipped.
+/// How an imported note names the memory file it came from.
+fn origin(source: &Path) -> String {
+    format!("`{}`", source.display())
+}
+
+/// Where an import would write the note.
 pub fn target(store: &Store, it: &Planned) -> PathBuf {
     store
         .vault_for(it.scope)
@@ -176,8 +191,12 @@ pub enum ImportResult {
 /// Why a memory was not imported.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Skip {
-    /// A note is already where it would go.
-    Exists(PathBuf),
+    /// It was imported before: the note it became.
+    Imported(PathBuf),
+    /// Another note has its name: that note.
+    NameTaken(PathBuf),
+    /// A note of the same kind has a similar title: that note's id and title.
+    Similar { id: String, title: String },
     /// Writing it failed: the error.
     Failed(String),
 }
@@ -185,20 +204,54 @@ pub enum Skip {
 impl std::fmt::Display for Skip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Skip::Exists(target) => write!(f, "{} already exists", target.display()),
+            Skip::Imported(target) => write!(f, "already imported as {}", target.display()),
+            Skip::NameTaken(target) => write!(
+                f,
+                "{} is another note with this name. Rename the memory to import it.",
+                target.display()
+            ),
+            Skip::Similar { id, title } => write!(
+                f,
+                "[[{id}]] says nearly the same ({title}). Add what is new to that note."
+            ),
             Skip::Failed(e) => f.write_str(e),
         }
     }
 }
 
-/// Write the planned notes. Existing notes with the same filename are left alone, so running
-/// it again is safe.
+/// What keeps a memory out before anything is written, if anything does. A front end asks this
+/// to show what an import would do, and `run` asks it for each memory.
+///
+/// Names and titles are compared across the whole vault the note goes to. For feedback that is
+/// the global vault, so a memory that repeats another project's feedback is found here. Titles
+/// are the store's as of its last `sync`: sync before asking.
+pub fn standing(store: &Store, it: &Planned) -> Result<Option<Skip>> {
+    let target = target(store, it);
+    if let Ok(there) = std::fs::read_to_string(&target) {
+        // An imported note names its memory file. Without that line it is some other note.
+        return Ok(Some(if there.contains(&origin(&it.source)) {
+            Skip::Imported(target)
+        } else {
+            Skip::NameTaken(target)
+        }));
+    }
+    if target.exists() {
+        return Ok(Some(Skip::NameTaken(target)));
+    }
+    Ok(store
+        .duplicate_of(it.note_type, it.scope, &it.title)?
+        .map(|(id, title)| Skip::Similar { id, title }))
+}
+
+/// Write the planned notes as drafts. A memory that `standing` keeps out is left alone, so
+/// running it again is safe.
 pub fn run(store: &mut Store, items: Vec<Planned>) -> Result<Vec<(PathBuf, ImportResult)>> {
     let mut out = Vec::new();
+    // `write` syncs after each note, so a memory is also compared with the ones before it.
+    store.sync()?;
     for it in items {
-        let target = target(store, &it);
-        if target.exists() {
-            out.push((it.source, ImportResult::Skipped(Skip::Exists(target))));
+        if let Some(why) = standing(store, &it)? {
+            out.push((it.source, ImportResult::Skipped(why)));
             continue;
         }
         let req = WriteRequest {
@@ -210,9 +263,12 @@ pub fn run(store: &mut Store, items: Vec<Planned>) -> Result<Vec<(PathBuf, Impor
             code_refs: vec![],
             confidence: Some("medium".into()),
             update_id: None,
+            // `standing` asked already.
             force_new: true,
             author: IMPORT_AUTHOR.into(),
             file_stem: Some(it.name),
+            needs_review: true,
+            this_project_only: it.this_project_only,
         };
         let r = match store.write(req) {
             Ok(WriteOutcome::Written { path, .. }) => {
@@ -249,6 +305,8 @@ mod tests {
             ("prefer-x", NoteType::Feedback, Scope::Global)
         );
         assert_eq!(p[0].title, "Prefer X over Y");
+        // Feedback is the project's until a person says it holds everywhere.
+        assert!(p[0].this_project_only && !p[1].this_project_only);
         assert!(p[0].body.contains("[[setup]]"));
         assert_eq!(
             (p[1].note_type, p[1].scope),
@@ -305,6 +363,89 @@ mod tests {
             quote_values("---\ndescription: ends with a colon:\n---\n"),
             "---\ndescription: \"ends with a colon:\"\n---\n"
         );
+    }
+
+    fn memory(dir: &Path, name: &str, description: &str, body: &str) {
+        std::fs::write(
+            dir.join(format!("{name}.md")),
+            format!("---\nname: {name}\ndescription: {description}\nmetadata:\n  type: feedback\n---\n{body}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn imports_drafts_and_says_what_keeps_a_memory_out() {
+        let dir = memory_dir("standing");
+        let cfg = crate::config::Config {
+            project_root: dir.clone(),
+            project_name: "p".into(),
+            project_vault: dir.join("docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            // The user approves what agents write, and an import is still theirs to read first.
+            auto_approve: true,
+            device: "test".into(),
+        };
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        let mut store = Store::open_with(cfg, crate::obsidian::Backend::Headless).unwrap();
+        let skips = |store: &mut Store, from: &Path| -> Vec<Option<Skip>> {
+            run(store, plan(from).unwrap())
+                .unwrap()
+                .into_iter()
+                .map(|(_, r)| match r {
+                    ImportResult::Imported(_) => None,
+                    ImportResult::Skipped(why) => Some(why),
+                })
+                .collect()
+        };
+
+        let first = dir.join("first");
+        std::fs::create_dir_all(&first).unwrap();
+        memory(
+            &first,
+            "reply-in-chinese",
+            "Reply to the user in Traditional Chinese",
+            "Reply in zh-TW.",
+        );
+        assert_eq!(skips(&mut store, &first), [None]);
+        let note = dir.join("global/Global/Feedback/reply-in-chinese.md");
+        let fm = Note::parse(&std::fs::read_to_string(&note).unwrap())
+            .unwrap()
+            .fm;
+        assert_eq!(fm.status.as_deref(), Some("draft"));
+        assert_eq!(fm.tags, ["imported/claude-code", "project/p"]);
+        assert_eq!(
+            skips(&mut store, &first),
+            [Some(Skip::Imported(note.clone()))]
+        );
+
+        // Another project's memory folder: one memory has the name, one says the same.
+        let second = dir.join("second");
+        std::fs::create_dir_all(&second).unwrap();
+        memory(
+            &second,
+            "reply-in-chinese",
+            "Mandarin for chat, English for code",
+            "Other text.",
+        );
+        memory(
+            &second,
+            "reply-in-traditional-chinese",
+            "Always reply to the user in Traditional Chinese",
+            "繁體中文。",
+        );
+        assert_eq!(
+            skips(&mut store, &second),
+            [
+                Some(Skip::NameTaken(note)),
+                Some(Skip::Similar {
+                    id: "reply-in-chinese".into(),
+                    title: "Reply to the user in Traditional Chinese".into(),
+                }),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

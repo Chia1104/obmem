@@ -573,16 +573,26 @@ fn main() -> Result<()> {
         Cmd::ImportClaude { dir, dry_run } => {
             let dir = dir.unwrap_or_else(|| import::default_dir(&cfg.project_root));
             let items = import::plan(&dir)?;
+            let mut store = store::Store::open(cfg)?;
             if dry_run {
+                store.sync()?;
                 for i in &items {
-                    println!(
-                        "{} → {}/{} [[{}]] {}",
-                        i.source.display(),
-                        i.scope.as_str(),
-                        i.note_type.as_str(),
-                        i.name,
-                        i.title
-                    );
+                    match import::standing(&store, i)? {
+                        None => println!(
+                            "{} → {}/{}{} [[{}]] {}",
+                            i.source.display(),
+                            i.scope.as_str(),
+                            i.note_type.as_str(),
+                            if i.this_project_only {
+                                " (this project only)"
+                            } else {
+                                ""
+                            },
+                            i.name,
+                            i.title
+                        ),
+                        Some(why) => println!("skipped  {}: {why}", i.source.display()),
+                    }
                 }
                 println!(
                     "{} memories in {} (dry run, nothing written)",
@@ -590,7 +600,6 @@ fn main() -> Result<()> {
                     dir.display()
                 );
             } else {
-                let mut store = store::Store::open(cfg)?;
                 for (src, r) in import::run(&mut store, items)? {
                     match r {
                         import::ImportResult::Imported(p) => {

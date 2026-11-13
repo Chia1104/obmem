@@ -254,8 +254,14 @@ claude_memory:
     en: "Skipped %{name}: %{why}"
     zh: "已略過 %{name}：%{why}"
   exists:
-    en: "%{target} already exists"
-    zh: "%{target} 已經存在"
+    en: "already imported as %{target}"
+    zh: "已匯入為 %{target}"
+  name_taken:
+    en: "%{target} is another note with this name. Rename the memory to import it."
+    zh: "%{target} 是另一則同名的筆記。請將這筆記憶改名後再匯入。"
+  similar:
+    en: "[[%{id}]] says nearly the same (%{title}). Add what is new to that note."
+    zh: "[[%{id}]] 的內容幾乎相同（%{title}）。請把新的部分加進那則筆記。"
 
 agent_view:
   task:

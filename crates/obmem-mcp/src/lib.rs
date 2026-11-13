@@ -92,6 +92,12 @@ pub struct WriteArgs {
     /// Create a new note even though similar titles exist.
     #[serde(default)]
     pub force_new: bool,
+    /// For feedback and preferences: true when it holds in this project only (a convention of
+    /// this repo, how its branches or reviews work). It is then the user's guidance at session
+    /// start in this project and in no other. False for what the user wants everywhere, such as
+    /// the language of replies. When you cannot tell, pass true.
+    #[serde(default)]
+    pub this_project_only: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -383,7 +389,9 @@ impl MemoryServer {
         code or docs). New notes start as status=draft for human review, or active if the user turned on \
         auto-approve. Refuses near-duplicates (update \
         the existing note via update_id instead), edits to human-authored notes (write a finding instead), \
-        and content containing secrets. Do not record things derivable from the code or git history."
+        and content containing secrets. Feedback and preferences are the user's guidance in every \
+        project unless this_project_only is true. Do not record things derivable from the code or git \
+        history."
     )]
     async fn memory_write(
         &self,
@@ -407,6 +415,8 @@ impl MemoryServer {
             force_new: a.force_new,
             author: self.author.clone(),
             file_stem: None,
+            needs_review: false,
+            this_project_only: a.this_project_only,
         };
         match s.write(req) {
             Ok(WriteOutcome::Written {

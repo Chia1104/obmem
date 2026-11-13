@@ -758,6 +758,31 @@ ignored:
     en: "The scanner would ignore \"%{entry}\": it is too generic."
     zh: "掃描器會忽略「%{entry}」：它太常見了。"
 
+project_sync:
+  title:
+    en: "Sync"
+    zh: "同步"
+  about:
+    en: "Keep this vault the same on every teammate's computer through an S3-compatible bucket the team shares. Everything in the bucket is encrypted, and only the team's passphrase unlocks it."
+    zh: "透過團隊共用的 S3 相容儲存貯體，讓每位成員電腦上的這個儲存庫保持一致。儲存貯體裡的內容全部加密，只有團隊的通關密語能解開。"
+  off:
+    en: "Off: no bucket yet. Without one, share the folder your own way."
+    zh: "未啟用：還沒有儲存貯體。沒有的話，請用你自己的方式共用這個資料夾。"
+  unusable:
+    en: "This bucket cannot be used"
+    zh: "無法使用這個儲存貯體"
+  not_connected_about:
+    en: "Connect it with the bucket's access key and the team's passphrase."
+    zh: "用儲存貯體的存取金鑰和團隊的通關密語連線。"
+  connect_about:
+    en: "The access key stays in this device's keychain. The first person's passphrase starts the vault in the bucket; everyone else unlocks it with the same one. If it is lost, the bucket cannot be read."
+    zh: "存取金鑰會留在這台裝置的鑰匙圈。第一個人選的通關密語會在儲存貯體裡建立儲存庫，其他人都用同一組解鎖。遺失的話，儲存貯體就無法讀取。"
+  bucket_help:
+    en: "Empty: this vault is not synced."
+    zh: "留空：不同步這個儲存庫。"
+  prefix_help:
+    en: "Where in the bucket the vault goes. Empty: obmem. In the bucket your personal vault uses, give it a prefix of its own."
+    zh: "儲存庫在儲存貯體裡的位置。留空：obmem。如果和你的個人儲存庫用同一個儲存貯體，請給它自己的前綴。"
 private:
   row:
     en: "Private vault"
@@ -808,8 +833,8 @@ private:
     en: "This project keeps its memory in a private vault"
     zh: "這個專案的記憶放在私有儲存庫"
   no_vault_here_about:
-    en: "The vault is outside the repo, and this computer does not know where its copy is. Choose the folder that holds it, or an empty folder to start one."
-    zh: "儲存庫在 repo 之外，這台電腦還不知道它的副本在哪裡。請選擇存放它的資料夾，或選一個空資料夾來建立。"
+    en: "The vault is outside the repo, and this computer does not know where its copy is. Choose the folder that holds it. If the team syncs it through a bucket, choose an empty folder, then set up the sync in Settings: the first sync fetches the notes."
+    zh: "儲存庫在 repo 之外，這台電腦還不知道它的副本在哪裡。請選擇存放它的資料夾。如果團隊透過儲存貯體同步，請選一個空資料夾，再到 Settings 設定同步：第一次同步會取回筆記。"
 rule:
   vault_inside_project:
     en: "The vault must be a relative path inside the project, without `..` or `~`."

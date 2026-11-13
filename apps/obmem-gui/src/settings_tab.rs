@@ -1,17 +1,19 @@
 //! A project's settings: `.obmem.toml`, and whether Codex may run obmem's tools without asking.
 
-use crate::data::Detail;
+use crate::data::{Detail, Vault};
 use crate::form::{Problems, said};
-use crate::private_vault;
 use crate::state::{self, Work};
 use crate::widgets::{
     FirstRow, Level, Marked, card, check, checked_field, choice, field, heading, input_field,
     muted, primary, switch_control, text_box,
 };
 use crate::words::tr;
+use crate::{private_vault, sync_card};
 use nsh_core::prelude::*;
 use obmem_core::config::SecretMode;
-use obmem_core::settings::{ProjectField, ProjectSettings, default_env_files};
+use obmem_core::settings::{
+    ProjectField, ProjectSettings, SyncField, SyncSettings, default_env_files,
+};
 
 pub(crate) fn settings_tab(d: &Detail) -> View {
     let form = match &d.settings {
@@ -22,7 +24,87 @@ pub(crate) fn settings_tab(d: &Detail) -> View {
             e.clone(),
         )),
     };
-    view().gap_4().child(form).child(codex(d))
+    view().gap_4().child(form).children(sync(d)).child(codex(d))
+}
+
+/// A private vault's sync: how it stands, then the bucket it goes through. A vault in the repo
+/// has none, because git carries it.
+fn sync(d: &Detail) -> Vec<AnyElement> {
+    match &d.sync {
+        None => vec![],
+        Some(Err(e)) => vec![
+            card()
+                .test_id("project-sync")
+                .child(check(Level::Error, tr!("sync.unreadable"), e.clone()))
+                .into_element(),
+        ],
+        Some(Ok(info)) => vec![
+            sync_card::status(info, Vault::Project).into_element(),
+            card()
+                .test_id("project-sync")
+                .child(heading(tr!("sync.settings")))
+                .child(bucket_form(&info.settings))
+                .into_element(),
+        ],
+    }
+}
+
+/// The bucket's four settings. What is about the machine (its name, automatic sync) is on the
+/// settings' Sync page, for every vault.
+fn bucket_form(s: &SyncSettings) -> View {
+    let endpoint = signal(s.endpoint.clone());
+    let bucket = signal(s.bucket.clone());
+    let region = signal(s.region.clone());
+    let prefix = signal(s.prefix.clone());
+    let draft = move || SyncSettings {
+        endpoint: endpoint.get(),
+        region: region.get(),
+        bucket: bucket.get(),
+        prefix: prefix.get(),
+        ..Default::default()
+    };
+    let problems = Problems::of(move || said(draft().problems()));
+    let save = move || {
+        if problems.none() {
+            state::save_project_sync(untracked(draft));
+        }
+    };
+    view()
+        .gap_1()
+        .child(
+            checked_field(
+                tr!("sync.endpoint"),
+                tr!("sync.endpoint_help"),
+                text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com")
+                    .marked(problems.marks(SyncField::Endpoint))
+                    .test_id("project-sync-endpoint"),
+                problems.at(SyncField::Endpoint),
+            )
+            .first_row(),
+        )
+        .child(checked_field(
+            tr!("sync.bucket"),
+            tr!("project_sync.bucket_help"),
+            text_box(bucket, "acme-memory")
+                .marked(problems.marks(SyncField::Bucket))
+                .test_id("project-sync-bucket"),
+            problems.at(SyncField::Bucket),
+        ))
+        .child(input_field(
+            tr!("sync.region"),
+            tr!("sync.region_help"),
+            text_box(region, "auto"),
+        ))
+        .child(input_field(
+            tr!("sync.prefix"),
+            tr!("project_sync.prefix_help"),
+            text_box(prefix, "obmem").test_id("project-sync-prefix"),
+        ))
+        .child(
+            view().flex_row().pt_2().child(
+                primary(tr!("common.save"), save).busy(state::running(Work::SaveProjectSync)),
+            ),
+        )
 }
 
 /// `vault_path` is where the project vault is now, which a private project shows in place of

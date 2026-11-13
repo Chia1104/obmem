@@ -410,7 +410,7 @@ fn main() -> Result<()> {
                 None => None,
             };
             let created = match joined {
-                Some(obmem_sync::Joined::Fetched { .. }) => init::run_beside_fetched_vault(&cfg)?,
+                Some(obmem_sync::Joined::Fetched { .. }) => init::run_beside_existing_vault(&cfg)?,
                 _ => init::run(&cfg)?,
             };
             projects::record(&cfg.project_root)?;

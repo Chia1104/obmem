@@ -131,10 +131,10 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
     Ok(created)
 }
 
-/// [`run`] for a project vault that came from the team's bucket. Its files are the team's: a
-/// first file added here would come back to them as a note they deleted, or meet theirs as a
-/// conflict.
-pub fn run_beside_fetched_vault(cfg: &Config) -> Result<Vec<String>> {
+/// [`run`] for a project vault that exists already: fetched from the team's bucket, or a private
+/// one this machine is only told the folder of. Its files are the team's: a first file added
+/// here would come back to them as a note they deleted, or meet theirs as a conflict.
+pub fn run_beside_existing_vault(cfg: &Config) -> Result<Vec<String>> {
     let mut created = Vec::new();
     config_files(cfg, &mut created)?;
     personal_vault(cfg, &mut created)?;

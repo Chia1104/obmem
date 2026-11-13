@@ -41,6 +41,8 @@ pub struct Detail {
     pub allowlist: Result<Allowlist, String>,
     /// Claude Code's memory for this project, to import.
     pub claude_memory: Result<ClaudeMemory, String>,
+    /// How the project's vault is synced, when it is private: one in the repo travels with git.
+    pub sync: Option<Result<SyncInfo, String>>,
 }
 
 /// Why a project's page has nothing to show.
@@ -78,10 +80,14 @@ pub struct Personal {
     pub sync: Result<SyncInfo, String>,
 }
 
-/// Sync of the personal vault: the settings, whether this device is connected, the last outcome.
+/// Sync of a vault: the settings, whether this device is connected, the last outcome. For a
+/// project's vault the settings are its bucket's four; the rest is the machine's, in `[sync]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyncInfo {
     pub settings: SyncSettings,
+    /// Why the bucket the settings name cannot be used (a project vault's that is the personal
+    /// vault's too).
+    pub problem: Option<String>,
     /// The keychain holds this device's access key and vault key for the configured bucket.
     pub connected: Result<bool, String>,
     pub last: Option<obmem_sync::Status>,
@@ -179,20 +185,34 @@ pub fn detail(path: &Path) -> Result<Detail, Unreadable> {
         codex_auto_approve: setup::codex_auto_approve(&cfg).map_err(text),
         allowlist: allowlist::read(&cfg.project_vault).map_err(text),
         claude_memory: claude_memory(&store, root),
+        sync: cfg.vault_is_private().then(|| project_sync_info(&cfg)),
     })
 }
 
-/// `obmem init --private <folder>`: the project's vault is `folder` from now on, outside the
-/// repo, and gets a vault's first files where it has none. `Ok(Err(rule))`: the folder breaks a
-/// rule, and nothing was written. It works on a project that does not load for want of a vault.
+/// The project's vault is `folder` from now on, outside the repo. `Ok(Err(rule))`: the folder
+/// breaks a rule, and nothing was written. It works on a project that does not load for want of
+/// a vault.
+///
+/// A project whose vault was in the repo starts a private vault: the folder gets a vault's first
+/// files. A project that was private already only tells this machine where its vault is, and the
+/// folder is left as it is, empty or not: the vault is the team's, and first files written here
+/// would meet theirs as conflicts in the first sync.
 pub fn make_private(path: &Path, folder: &str) -> Result<Result<MadePrivate, Rule>, String> {
     let root = config::project_root(Some(path)).map_err(text)?;
     if let Some(rule) = settings::private_vault_rule(&root, folder).map_err(text)? {
         return Ok(Err(rule));
     }
+    let was_private = settings::read_project(&root).map_err(text)?.private;
     let left_in_repo = settings::make_private(&root, folder, None).map_err(text)?;
     let cfg = Config::load(Some(&root)).map_err(text)?;
-    init::run(&cfg).map_err(text)?;
+    if was_private {
+        // A sync needs the folder to be there.
+        std::fs::create_dir_all(&cfg.project_vault)
+            .map_err(|e| format!("creating {}: {e}", cfg.project_vault.display()))?;
+        init::run_beside_existing_vault(&cfg).map_err(text)?;
+    } else {
+        init::run(&cfg).map_err(text)?;
+    }
     projects::record(&cfg.project_root).map_err(text)?;
     Ok(Ok(MadePrivate {
         vault: cfg.project_vault,
@@ -273,7 +293,50 @@ fn sync_info() -> Result<SyncInfo, String> {
         },
         last: target.as_ref().and_then(obmem_sync::last_status),
         settings,
+        problem: None,
     })
+}
+
+fn project_sync_info(cfg: &Config) -> Result<SyncInfo, String> {
+    let settings = settings::read_project_sync(&cfg.project_root).map_err(text)?;
+    let (target, problem) = match obmem_sync::Target::project(cfg) {
+        Ok(target) => (target, None),
+        Err(e) => (None, Some(text(e))),
+    };
+    Ok(SyncInfo {
+        connected: match &target {
+            Some(target) => target.is_set_up().map_err(text),
+            None => Ok(false),
+        },
+        last: target.as_ref().and_then(obmem_sync::last_status),
+        settings,
+        problem,
+    })
+}
+
+/// The bucket a private project's vault is synced through (`[project.sync]`).
+pub fn save_project_sync(path: &Path, s: &SyncSettings) -> Result<(), String> {
+    let root = config::project_root(Some(path)).map_err(text)?;
+    settings::save_project_sync(&root, s).map_err(text)
+}
+
+/// What a sync of `vault` carries. `path` is the shown project; it is not needed for the
+/// personal vault.
+fn sync_target(vault: Vault, path: &Path) -> Result<obmem_sync::Target, String> {
+    let target = match vault {
+        Vault::Personal => {
+            let cfg = config::sync_config().map_err(text)?;
+            match cfg.bucket {
+                Some(_) => Some(obmem_sync::Target::personal(cfg).map_err(text)?),
+                None => None,
+            }
+        }
+        Vault::Project => {
+            let cfg = Config::load(Some(path)).map_err(text)?;
+            obmem_sync::Target::project(&cfg).map_err(text)?
+        }
+    };
+    target.ok_or_else(|| "Save a bucket first.".to_string())
 }
 
 pub fn save_sync(s: &SyncSettings) -> Result<(), String> {
@@ -319,15 +382,17 @@ pub struct Connected {
     pub created: bool,
 }
 
-/// Connect this device to the bucket the saved settings name.
+/// Connect this device to the bucket the saved settings name for `vault`.
 pub fn connect_sync(
+    vault: Vault,
+    path: &Path,
     access_key_id: String,
     secret_access_key: String,
     passphrase: String,
     repeat: String,
 ) -> Result<Connected, String> {
-    let cfg = config::sync_config().map_err(text)?;
-    let bucket = cfg.bucket.clone().ok_or("Save a bucket first.")?;
+    let target = sync_target(vault, path)?;
+    let bucket = target.cfg.bucket.clone().unwrap_or_default();
     // The form checks this before it sends, and says which field.
     if !connect_problems(&access_key_id, &secret_access_key, &passphrase, &repeat).is_empty() {
         return Err("The access key and the passphrase are needed, the passphrase twice.".into());
@@ -336,16 +401,14 @@ pub fn connect_sync(
         access_key_id: access_key_id.trim().to_string(),
         secret_access_key,
     };
-    let target = obmem_sync::Target::personal(cfg).map_err(text)?;
     let created = obmem_sync::connect(&target, creds, &passphrase.into()).map_err(text)?;
     Ok(Connected { bucket, created })
 }
 
 /// One sync, now; the outcome also goes to the status the page shows. `None`: a sync is already
 /// queued, and takes these changes too.
-pub fn sync_now() -> Result<Option<obmem_sync::Summary>, String> {
-    let target =
-        obmem_sync::Target::personal(config::sync_config().map_err(text)?).map_err(text)?;
+pub fn sync_now(vault: Vault, path: &Path) -> Result<Option<obmem_sync::Summary>, String> {
+    let target = sync_target(vault, path)?;
     Ok(obmem_sync::run(&target, false, std::time::Duration::ZERO)
         .map_err(text)?
         .map(|r| (&r).into()))

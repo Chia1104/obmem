@@ -205,7 +205,16 @@ On a new machine, run `obmem sync setup` and then `obmem sync`. What the machine
 
 ### Syncing a private project vault
 
-A [private project vault](#a-private-project-vault) syncs the same way, through a bucket of its own that the team shares. Name it after the project's `[[project]]` in your config:
+A [private project vault](#a-private-project-vault) syncs the same way, through a bucket of its own that the team shares. One command sets a machine up, for the first member and for everyone who joins:
+
+```sh
+obmem init --private ~/Obsidian/acme-memory \
+  --bucket acme-memory --endpoint https://<account-id>.r2.cloudflarestorage.com
+```
+
+It asks for the bucket's access key and the vault's passphrase. The first member chooses the passphrase, and their vault is the first in the bucket. For everyone after, the command fetches the team's vault into the folder, which must be empty. Add `--region` and `--prefix` when the bucket needs them.
+
+The command writes this to your config, which you can also edit by hand:
 
 ```toml
 # ~/.config/obmem/config.toml
@@ -220,17 +229,22 @@ bucket = "acme-memory"
 ```
 
 ```sh
-obmem sync setup --vault project  # in the project: access key, then the team's passphrase
 obmem sync                        # the personal vault and this project's
 obmem sync --vault project        # only the project's
+obmem sync setup --vault project  # connect a folder that already has notes; the next sync merges them
 ```
+
+What a team shares:
+
+- **The bucket and prefix**, and **one passphrase**. Whoever has both and an access key can read every note.
+- **An access key for each member**, so that one can be withdrawn. Withdrawing it stops that member's reads and writes from then on. What they copied stays readable to them, and so does the passphrase: to shut someone out for good, start a new prefix with a new passphrase and sync the vault there.
 
 - `list`, `restore` and `prune` take `--vault project` too. Without it they are about the personal vault.
 - The hooks sync the project's vault along with the personal one. `device`, `auto` and `ephemeral` come from `[sync]`, for every vault on the machine.
 - A project vault has a backup of its own, with its own passphrase. obmem refuses a `[project.sync]` that names the personal vault's bucket and prefix.
 - Its `.obsidian/` folder is not synced: those settings are each person's own.
 - Two people who change the same note both keep their version: the other one arrives as a `sync-conflict` copy, which the audit reports.
-- On a machine without a keychain a project vault is not synced yet. The `OBMEM_SYNC_*` variables hold the personal vault's keys only.
+- On a machine without a keychain, a project vault's keys come from variables of their own (see below). The personal vault's are never used for it.
 
 ### On a server or in a cloud sandbox
 
@@ -243,6 +257,19 @@ A machine without a keychain takes its credentials from the environment instead 
 | `OBMEM_SYNC_VAULT_KEY` | the backup key. `obmem sync key` prints it on a machine that is already set up |
 
 Set all three: when any of them is set, obmem does not ask the keychain. Keep them in the platform's secret store. The backup key reads your whole personal vault, and what an agent writes on that machine syncs to all your machines.
+
+A private project vault has three variables of its own: `OBMEM_SYNC_PROJECT_ACCESS_KEY_ID`, `OBMEM_SYNC_PROJECT_SECRET_ACCESS_KEY` and `OBMEM_SYNC_PROJECT_VAULT_KEY` (`obmem sync key --vault project` prints the last one). They are one project's keys, so such a machine's config names a bucket for one project only. The config also names the project and its vault, since `obmem init --private` asks questions a setup script cannot answer:
+
+```toml
+# ~/.config/obmem/config.toml
+[[project]]
+root = "/workspace/acme"
+vault = "~/acme-memory"
+
+[project.sync]
+endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+bucket = "acme-memory"
+```
 
 For a machine that is thrown away after a session, such as a cloud agent's sandbox, install obmem (`npm install -g @chia1104/obmem`) and write a config with `ephemeral = true` in its setup script:
 

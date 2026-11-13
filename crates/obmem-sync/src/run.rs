@@ -4,8 +4,8 @@
 use crate::files::AppFiles;
 use crate::remote::location;
 use crate::sync::{MIN_INTERVAL, Queued, SyncOptions, SyncReport, state_path, sync};
-use crate::{Credentials, Remote, VaultKey, keychain};
-use age::secrecy::ExposeSecret;
+use crate::{Credentials, Remote, VaultKey, keychain, restore, snapshot_seqs, unlock_or_create};
+use age::secrecy::{ExposeSecret, SecretString};
 use anyhow::{Context, Result, bail};
 use obmem_core::config::{self, Config, SyncConfig};
 use serde::{Deserialize, Serialize};
@@ -62,35 +62,45 @@ impl Target {
         self.kind == Kind::Project
     }
 
-    /// The command that sets this device up for the target.
-    pub fn setup_command(&self) -> &'static str {
+    /// Whose keys the target's are: a project vault has its own environment variables, so the
+    /// personal vault's keys are never used on a team's bucket.
+    fn holder(&self) -> &'static keychain::Holder {
         match self.kind {
-            Kind::Personal => "obmem sync setup",
-            Kind::Project => "obmem sync setup --vault project",
+            Kind::Personal => &keychain::PERSONAL,
+            Kind::Project => &keychain::PROJECT,
         }
     }
 
-    /// This device's access key and vault key for the target. The environment's credentials are
-    /// the personal vault's: a project vault's come from the keychain only, or its notes would be
-    /// written to the team's bucket under the wrong key.
+    /// This device's access key and vault key for the target.
     pub fn keys(&self) -> Result<(Credentials, VaultKey)> {
-        match self.kind {
-            Kind::Personal => keychain::load(&self.cfg),
-            Kind::Project => {
-                let stored = keychain::stored(&self.cfg, self.setup_command());
-                if keychain::in_environment() {
-                    return stored.context(
-                        "a project vault's keys come from this device's keychain: the \
-                         OBMEM_SYNC_* variables hold the personal vault's",
-                    );
-                }
-                stored
-            }
+        let who = self.holder();
+        // One set of variables is one project's keys. On another project's bucket, a first sync
+        // would write under a key that project's team does not have.
+        if self.kind == Kind::Project
+            && keychain::in_environment(who)?
+            && config::synced_projects()? > 1
+        {
+            bail!(
+                "the {} variables hold one project's keys, and this machine's config names a \
+                 bucket for more than one project: a machine with several needs a keychain",
+                keychain::PROJECT_ENV_VARS.join(", ")
+            );
         }
+        keychain::load(&self.cfg, who)
     }
 
-    /// The vault key as text. For the personal vault it goes in `OBMEM_SYNC_VAULT_KEY` on a
-    /// machine without a keychain. Whoever holds it and can read the bucket can read the backup.
+    /// Whether this device has the target's keys.
+    pub fn is_set_up(&self) -> Result<bool> {
+        keychain::is_set_up(&self.cfg, self.holder())
+    }
+
+    /// The variable that holds the vault key on a machine without a keychain.
+    pub fn key_variable(&self) -> &'static str {
+        self.holder().env[2]
+    }
+
+    /// The vault key as text, for [`Target::key_variable`] on a machine without a keychain.
+    /// Whoever holds it and can read the bucket can read the backup.
     pub fn key_text(&self) -> Result<String> {
         let (_, key) = self.keys()?;
         Ok(key.to_secret().expose_secret().to_string())
@@ -354,14 +364,64 @@ pub fn connect(
     creds: crate::Credentials,
     passphrase: &age::secrecy::SecretString,
 ) -> Result<bool> {
+    let remote = Remote::s3(&target.cfg, &creds)?;
+    let (key, created) = unlock_or_create(&remote, passphrase)?;
+    keep(target, &creds, &key)?;
+    Ok(created)
+}
+
+/// The keys go to the keychain, and the device gets its name.
+fn keep(target: &Target, creds: &Credentials, key: &VaultKey) -> Result<()> {
     let cfg = &target.cfg;
-    let remote = Remote::s3(cfg, &creds)?;
-    let (key, created) = crate::unlock_or_create(&remote, passphrase)?;
-    keychain::save(cfg, &creds, &key)?;
+    keychain::save(cfg, target.holder(), creds, key)?;
     if cfg.device.as_deref().is_none_or(|d| d.trim().is_empty()) {
         obmem_core::settings::set_sync_device(&config::new_device_name())?;
     }
-    Ok(created)
+    Ok(())
+}
+
+/// What a device found in the bucket when it joined.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Joined {
+    /// Nothing: this device made the backup's key, and its vault is the first to go there.
+    Created,
+    /// A key and no snapshot yet: the vault here is still the first to go there.
+    Empty,
+    /// The vault, which is now in the target's folder.
+    Fetched { seq: u64, files: usize },
+}
+
+/// Connect this device ([`connect`]) and bring the vault here when the bucket already holds it:
+/// the latest snapshot is written into the target's folder, which must be empty or missing. So a
+/// device that joins starts from the team's notes, and its first sync has nothing to merge.
+pub fn join(target: &Target, creds: Credentials, passphrase: &SecretString) -> Result<Joined> {
+    let remote = Remote::s3(&target.cfg, &creds)?;
+    let (key, joined) = fetch(&remote, &target.vault, passphrase).with_context(|| {
+        format!(
+            "joining the vault in {}. To merge a folder that has notes with what the bucket \
+             holds, run `{}` and then `obmem sync`",
+            location(&target.cfg),
+            target.holder().setup
+        )
+    })?;
+    keep(target, &creds, &key)?;
+    Ok(joined)
+}
+
+fn fetch(remote: &Remote, vault: &Path, passphrase: &SecretString) -> Result<(VaultKey, Joined)> {
+    let (key, created) = unlock_or_create(remote, passphrase)?;
+    let joined = if created {
+        Joined::Created
+    } else if snapshot_seqs(remote)?.is_empty() {
+        Joined::Empty
+    } else {
+        let r = restore(remote, &key, None, vault)?;
+        Joined::Fetched {
+            seq: r.seq,
+            files: r.files,
+        }
+    };
+    Ok((key, joined))
 }
 
 /// The last sync's outcome for the target, if there was one.
@@ -404,6 +464,47 @@ mod tests {
         create_new_vault(&vault, &state).unwrap();
         assert!(!vault.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_device_that_joins_starts_from_the_teams_notes() {
+        use crate::sync::tests::{device, pass, put};
+        let remote = crate::remote::in_memory();
+        let dir = crate::tempdir();
+
+        // The first member finds nothing, and sends what they have.
+        let (_, joined) = fetch(&remote, &dir.join("ann"), &pass("pw")).unwrap();
+        assert_eq!(joined, Joined::Created);
+        assert!(!dir.join("ann").exists(), "an empty bucket writes nothing");
+        // Before anyone has synced there is a key and no notes.
+        let (_, joined) = fetch(&remote, &dir.join("early"), &pass("pw")).unwrap();
+        assert_eq!(joined, Joined::Empty);
+        let ann = device(&remote, "ann");
+        put(&ann.vault, "Index.md", "the team's index");
+        put(&ann.vault, "Decisions/a.md", "a");
+        ann.sync().unwrap();
+
+        // The next one gets the notes, and their first sync has nothing to merge.
+        let bo = device(&remote, "bo");
+        let (_, joined) = fetch(&remote, &bo.vault, &pass("pw")).unwrap();
+        assert_eq!(joined, Joined::Fetched { seq: 1, files: 2 });
+        let r = bo.sync().unwrap();
+        assert!(!r.created && r.conflicts.is_empty(), "{r:?}");
+        assert_eq!(
+            std::fs::read_to_string(bo.vault.join("Index.md")).unwrap(),
+            "the team's index"
+        );
+
+        // A folder that has notes is not written into, and the wrong passphrase opens nothing.
+        let cy = device(&remote, "cy");
+        put(&cy.vault, "Index.md", "a new vault's index");
+        assert!(fetch(&remote, &cy.vault, &pass("pw")).is_err());
+        assert_eq!(
+            std::fs::read_to_string(cy.vault.join("Index.md")).unwrap(),
+            "a new vault's index"
+        );
+        assert!(fetch(&remote, &dir.join("di"), &pass("wrong")).is_err());
+        assert!(!dir.join("di").exists());
     }
 
     #[test]

@@ -125,23 +125,42 @@ fn project_file(cfg: &Config) -> String {
 
 pub fn run(cfg: &Config) -> Result<Vec<String>> {
     let mut created = Vec::new();
-    let pv = &cfg.project_vault;
+    config_files(cfg, &mut created)?;
+    project_vault(cfg, &mut created)?;
+    personal_vault(cfg, &mut created)?;
+    Ok(created)
+}
+
+/// [`run`] for a project vault that came from the team's bucket. Its files are the team's: a
+/// first file added here would come back to them as a note they deleted, or meet theirs as a
+/// conflict.
+pub fn run_beside_fetched_vault(cfg: &Config) -> Result<Vec<String>> {
+    let mut created = Vec::new();
+    config_files(cfg, &mut created)?;
+    personal_vault(cfg, &mut created)?;
+    Ok(created)
+}
+
+fn config_files(cfg: &Config, created: &mut Vec<String>) -> Result<()> {
     let gv = &cfg.global_vault;
 
     put(
         Some(&cfg.project_root),
         &cfg.project_root.join(PROJECT_CONFIG_FILE),
         &project_file(cfg),
-        &mut created,
+        created,
     )?;
     put(
         None,
         &global_config_path(),
         &format!("# obmem global config\nvault = \"{}\"\n", gv.display()),
-        &mut created,
-    )?;
+        created,
+    )
+}
 
-    // Project vault (shared with the team: in the repo, or a private folder outside it)
+/// Project vault (shared with the team: in the repo, or a private folder outside it)
+fn project_vault(cfg: &Config, created: &mut Vec<String>) -> Result<()> {
+    let pv = &cfg.project_vault;
     put(
         Some(pv),
         &pv.join("Index.md"),
@@ -151,7 +170,7 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
              ## Architecture\n- \n\n## Key decisions\n- \n\n## Conventions & gotchas\n- \n\n## Runbooks\n- \n",
             name = cfg.project_name
         ),
-        &mut created,
+        created,
     )?;
     for d in [
         "Architecture",
@@ -162,44 +181,44 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
         "Inbox",
         "Archive",
     ] {
-        put(Some(pv), &pv.join(d).join(".gitkeep"), "", &mut created)?;
+        put(Some(pv), &pv.join(d).join(".gitkeep"), "", created)?;
     }
     // Obsidian's own app state (workspace layout, plugin caches) is per person, not team knowledge.
     put(
         Some(pv),
         &pv.join(".gitignore"),
         "# Obsidian app state is per person\n.obsidian/\n",
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join("_system/secret-allowlist.toml"),
         ALLOWLIST,
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join("_system/secret-rules.toml"),
         RULES,
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join("_system/Review.base"),
         REVIEW_BASE,
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join("_system/Findings.base"),
         FINDINGS_BASE,
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join(crate::audit::SUPPRESSIONS_FILE),
         crate::audit::SUPPRESSIONS_TEMPLATE,
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
@@ -208,50 +227,55 @@ pub fn run(cfg: &Config) -> Result<Vec<String>> {
             "decision",
             "## Context\n\n## Decision\n\n## Alternatives considered\n\n## Consequences\n",
         ),
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join("Templates/fact.md"),
         &template("fact", ""),
-        &mut created,
+        created,
     )?;
     put(
         Some(pv),
         &pv.join("Templates/procedure.md"),
         &template("procedure", "## Steps\n1. \n"),
-        &mut created,
+        created,
     )?;
 
-    // Global vault (personal)
+    Ok(())
+}
+
+/// Global vault (personal)
+fn personal_vault(cfg: &Config, created: &mut Vec<String>) -> Result<()> {
+    let gv = &cfg.global_vault;
     for d in ["Global/Feedback", "Global/Preferences"] {
-        put(Some(gv), &gv.join(d).join(".gitkeep"), "", &mut created)?;
+        put(Some(gv), &gv.join(d).join(".gitkeep"), "", created)?;
     }
     put(
         Some(gv),
         &gv.join("_system/secret-allowlist.toml"),
         ALLOWLIST,
-        &mut created,
+        created,
     )?;
     put(
         Some(gv),
         &gv.join("_system/Findings.base"),
         FINDINGS_BASE,
-        &mut created,
+        created,
     )?;
     put(
         Some(gv),
         &gv.join(crate::audit::SUPPRESSIONS_FILE),
         crate::audit::SUPPRESSIONS_TEMPLATE,
-        &mut created,
+        created,
     )?;
     put(
         Some(gv),
         &cfg.global_project_dir().join("Sessions/.gitkeep"),
         "",
-        &mut created,
+        created,
     )?;
-    Ok(created)
+    Ok(())
 }
 
 pub fn setup_snippets(bin: &str, cfg: &Config) -> String {

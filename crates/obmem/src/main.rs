@@ -32,6 +32,20 @@ enum Cmd {
         /// is private. Also how another machine says where its copy of the vault is.
         #[arg(long, value_name = "FOLDER")]
         private: Option<PathBuf>,
+        /// With --private: the bucket the team syncs the vault through. Asks for the bucket's
+        /// access key and the vault's passphrase. When the bucket already holds the vault, it is
+        /// fetched into the folder, which must be empty; else the vault here is the first there.
+        #[arg(long, requires = "private")]
+        bucket: Option<String>,
+        /// The bucket's S3 endpoint, for R2 or MinIO (leave out for AWS S3).
+        #[arg(long, requires = "bucket")]
+        endpoint: Option<String>,
+        /// The bucket's region (AWS needs it; R2 uses "auto", the default).
+        #[arg(long, requires = "bucket")]
+        region: Option<String>,
+        /// The key prefix inside the bucket (default: obmem).
+        #[arg(long, requires = "bucket")]
+        prefix: Option<String>,
     },
     /// Run the MCP server on stdio.
     Serve,
@@ -370,6 +384,10 @@ fn main() -> Result<()> {
     let mut left_in_repo = None;
     if let Cmd::Init {
         private: Some(folder),
+        bucket,
+        endpoint,
+        region,
+        prefix,
     } = &cli.cmd
     {
         let root = config::project_root(cli.project.as_deref())?;
@@ -378,13 +396,27 @@ fn main() -> Result<()> {
             .ok()
             .filter(|c| !c.vault_is_private() && c.project_vault.is_dir())
             .map(|c| c.project_vault);
-        settings::make_private(&root, &folder.to_string_lossy())?;
+        let bucket = bucket.as_ref().map(|name| config::Bucket {
+            endpoint: endpoint.clone(),
+            region: region.clone(),
+            bucket: Some(name.clone()),
+            prefix: prefix.clone(),
+        });
+        settings::make_private(&root, &folder.to_string_lossy(), bucket.as_ref())?;
     }
     let cfg = config::Config::load(cli.project.as_deref())?;
 
     match cli.cmd {
-        Cmd::Init { .. } => {
-            let created = init::run(&cfg)?;
+        Cmd::Init { bucket, .. } => {
+            // Before the vault's first files: a vault the team already has is fetched, not started.
+            let joined = match bucket {
+                Some(_) => Some(join_project_vault(&cfg)?),
+                None => None,
+            };
+            let created = match joined {
+                Some(obmem_sync::Joined::Fetched { .. }) => init::run_beside_fetched_vault(&cfg)?,
+                _ => init::run(&cfg)?,
+            };
             projects::record(&cfg.project_root)?;
             println!(
                 "Project vault: {}\nGlobal vault:  {}",
@@ -398,6 +430,17 @@ fn main() -> Result<()> {
                 for c in created {
                     println!("  {c}");
                 }
+            }
+            match joined {
+                Some(obmem_sync::Joined::Fetched { seq, files }) => println!(
+                    "\nFetched the team's vault: snapshot {seq}, {files} files. `obmem sync` and \
+                     agent sessions keep it in sync from now on."
+                ),
+                Some(_) => println!(
+                    "\nThe bucket holds no notes yet: `obmem sync` sends this vault there. Give \
+                     teammates the bucket, an access key and the passphrase."
+                ),
+                None => {}
             }
             if let Some(old) = left_in_repo {
                 println!(
@@ -802,29 +845,7 @@ fn run_sync(
     let vault = SyncVault::of(&target).name();
     match action {
         SyncCmd::Setup => {
-            let creds = sync::Credentials {
-                access_key_id: prompt("Access key ID: ")?,
-                secret_access_key: rpassword::prompt_password("Secret access key: ")?,
-            };
-            let remote = sync::Remote::s3(cfg, &creds)?;
-            let passphrase = if sync::has_key(&remote)? {
-                rpassword::prompt_password("Backup passphrase: ")?
-            } else {
-                eprintln!(
-                    "This bucket holds no backup yet. Choose a passphrase: it encrypts the backup,"
-                );
-                eprintln!(
-                    "and every other device unlocks it with the same one. Without it the backup cannot be read."
-                );
-                let first = rpassword::prompt_password("New backup passphrase: ")?;
-                if first.is_empty() {
-                    anyhow::bail!("the passphrase cannot be empty");
-                }
-                if rpassword::prompt_password("Repeat it: ")? != first {
-                    anyhow::bail!("the passphrases differ");
-                }
-                first
-            };
+            let (creds, passphrase) = ask_keys(&target)?;
             let created = sync::connect(&target, creds, &passphrase.into())?;
             println!(
                 "{} the backup in {}; the access key and backup key are in this device's keychain",
@@ -835,7 +856,8 @@ fn run_sync(
         SyncCmd::Key => {
             let key = target.key_text()?;
             eprintln!(
-                "This key reads the whole backup of the {vault} vault. Keep it in a secret store, never in a file in a repository."
+                "This key reads the whole backup of the {vault} vault. Keep it in a secret store, never in a file in a repository. On a machine without a keychain it goes in {}.",
+                target.key_variable()
             );
             println!("{key}");
         }
@@ -892,6 +914,43 @@ fn run_sync(
         }
     }
     Ok(())
+}
+
+/// Ask for the bucket's access key, and for the passphrase: the one that unlocks the backup the
+/// bucket holds, or a new one when it holds none.
+fn ask_keys(target: &Target) -> Result<(obmem_sync::Credentials, String)> {
+    use obmem_sync as sync;
+    let creds = sync::Credentials {
+        access_key_id: prompt("Access key ID: ")?,
+        secret_access_key: rpassword::prompt_password("Secret access key: ")?,
+    };
+    let remote = sync::Remote::s3(&target.cfg, &creds)?;
+    let passphrase = if sync::has_key(&remote)? {
+        rpassword::prompt_password("Backup passphrase: ")?
+    } else {
+        eprintln!("This bucket holds no backup yet. Choose a passphrase: it encrypts the backup,");
+        eprintln!(
+            "and every other device unlocks it with the same one. Without it the backup cannot be read."
+        );
+        let first = rpassword::prompt_password("New backup passphrase: ")?;
+        if first.is_empty() {
+            anyhow::bail!("the passphrase cannot be empty");
+        }
+        if rpassword::prompt_password("Repeat it: ")? != first {
+            anyhow::bail!("the passphrases differ");
+        }
+        first
+    };
+    Ok((creds, passphrase))
+}
+
+/// `obmem init --private <folder> --bucket <name>`: connect this device to the project vault's
+/// bucket, and fetch the vault when the team already has one.
+fn join_project_vault(cfg: &config::Config) -> Result<obmem_sync::Joined> {
+    let target = Target::project(cfg)?
+        .ok_or_else(|| anyhow::anyhow!("the project's vault has no bucket in your config"))?;
+    let (creds, passphrase) = ask_keys(&target)?;
+    obmem_sync::join(&target, creds, &passphrase.into())
 }
 
 /// `obmem sync`: the personal vault, and the project's when it is private, each one that has a

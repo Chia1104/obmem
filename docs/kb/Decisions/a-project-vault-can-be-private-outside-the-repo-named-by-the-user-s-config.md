@@ -12,7 +12,7 @@ code_refs:
 - crates/obmem-core/src/config.rs#Config::vault_is_private
 - crates/obmem-core/src/config.rs#project_sync
 - crates/obmem-core/src/settings.rs#make_private
-- crates/obmem-core/src/init.rs#run_beside_fetched_vault
+- crates/obmem-core/src/init.rs#run_beside_existing_vault
 - crates/obmem-sync/src/run.rs#Target
 - crates/obmem-sync/src/run.rs#join
 - crates/obmem-sync/src/keychain.rs#PROJECT_ENV_VARS
@@ -51,7 +51,7 @@ How it travels (layer 2, CHI-105, PR #30):
 - `obmem sync` syncs every target; a subcommand is about one, chosen with `--vault personal|project`.
 
 How a machine joins (layer 3, CHI-106):
-- `obmem init --private <folder> --bucket <name>` records `[project.sync]`, asks for the keys and calls `obmem_sync::join`. When the bucket already holds snapshots, the latest is restored into the folder, which must be empty, before `init` writes anything; `init::run_beside_fetched_vault` then adds no file to the vault. Otherwise `Index.md` would exist on both sides and the team's version would arrive as a conflict copy.
+- `obmem init --private <folder> --bucket <name>` records `[project.sync]`, asks for the keys and calls `obmem_sync::join`. When the bucket already holds snapshots, the latest is restored into the folder, which must be empty, before `init` writes anything; `init::run_beside_existing_vault` then adds no file to the vault. Otherwise `Index.md` would exist on both sides and the team's version would arrive as a conflict copy.
 - The same command serves the first member: an empty bucket gets a new key, and the vault here is the first to go there.
 - A machine without a keychain takes a project vault's keys from `OBMEM_SYNC_PROJECT_*`, a second set of three variables. The personal vault's variables are never used for a project: with them, a first sync would write the team's bucket under a key no teammate has. The set is one project's, so `Target::keys` refuses it when the config names a bucket for more than one project. I chose this over variables named per project because a machine without a keychain is a sandbox made for one repo; the user has not reviewed that choice.
 
@@ -66,5 +66,6 @@ How a machine joins (layer 3, CHI-106):
 - Without a `[project.sync]`, a team shares the folder its own way, for example as a private git repository.
 - A team shares one bucket prefix and one passphrase, with an S3 token per member. Withdrawing a token stops that member from then on; the passphrase cannot be taken back, so shutting someone out for good needs a new prefix and passphrase.
 - The merge keeps both versions as a `sync-conflict` copy when two people edit one note, which a team will hit more often than one person's two machines. See [[personal-vault-backup-and-sync-are-built-into-obmem-over-user-provided-s3-r2]].
-- The desktop app makes a project's vault private and changes its folder from the project's Settings, and asks for the folder on the page of a private project that this computer has no vault for (CHI-107). It finds that case by the type of `Config::load`'s error, `config::NoVaultHere`. It does not set up or show a project vault's sync: that still needs `obmem init --private <folder> --bucket …` in a terminal.
+- The desktop app makes a project's vault private and changes its folder from the project's Settings, and asks for the folder on the page of a private project that this computer has no vault for (CHI-107). It finds that case by the type of `Config::load`'s error, `config::NoVaultHere`. On the same tab it shows a private vault's sync, saves its bucket (`[project.sync]`), connects the device and syncs now, with the views the personal vault's sync has (`sync_card.rs`).
+- The app writes a new vault's first files only when it makes a repo's vault private. A project that was private already is only told where its vault is, and the folder is left as it is: a teammate picks an empty folder, connects, and the first sync fetches the notes with nothing to merge. The CLI's `init --private <folder>` without `--bucket` still fills the folder with what is missing.
 - Not checked against a real bucket as of 2026-11-14: project targets and `join` were tested with the in-memory store and by the CLI's messages, not with a keychain and two machines on one bucket. The session could not start a local S3 server.

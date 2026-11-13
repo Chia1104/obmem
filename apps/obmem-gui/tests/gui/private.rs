@@ -19,6 +19,8 @@ fn a_projects_vault_is_made_private_from_its_settings() {
     app.press("role:tab[Settings]").unwrap();
     app.wait_for_within("id:settings-make-private", SLOW)
         .unwrap();
+    // A vault in the repo travels with git: it has no sync of its own to set up.
+    assert!(!app.screen().shows("Sync settings"));
     app.press("id:settings-make-private >> role:button[Make private…]")
         .unwrap();
     app.wait_for_within("id:private-vault", SLOW).unwrap();
@@ -94,4 +96,79 @@ fn a_private_project_without_a_vault_here_asks_for_its_folder() {
     app.wait_for_within("role:tab[Settings]", SLOW).unwrap();
     let cfg = Config::load(Some(&repo)).unwrap();
     assert!(cfg.vault_is_private() && cfg.project_vault.ends_with("team-memory"));
+    // The vault is the team's: the folder is there for a sync to fill, and holds no first files
+    // that would meet the team's as conflicts.
+    assert!(cfg.project_vault.is_dir());
+    assert_eq!(std::fs::read_dir(&cfg.project_vault).unwrap().count(), 0);
+
+    // Its sync is set up from Settings.
+    app.press("role:tab[Settings]").unwrap();
+    app.wait_for_within("id:project-sync-status", SLOW).unwrap();
+}
+
+#[test]
+fn a_private_vaults_bucket_is_saved_and_asks_to_connect() {
+    let Some(dir) = sandbox("project-sync") else {
+        return;
+    };
+    let repo = project(&dir, "team-repo");
+    let vault = dir.join("team-memory").display().to_string();
+    settings::make_private(&repo, &vault, None).unwrap();
+    init::run(&Config::load(Some(&repo)).unwrap()).unwrap();
+
+    let mut app = start();
+    app.wait_for_within("role:tab[Settings]", SLOW).unwrap();
+    app.press("role:tab[Settings]").unwrap();
+    app.wait_for_within("id:project-sync-status", SLOW).unwrap();
+    assert!(
+        app.screen()
+            .shows("Off: no bucket yet. Without one, share the folder your own way.")
+    );
+
+    // A value that breaks a rule is not saved, and its field says why.
+    const ENDPOINT_RULE: &str = "The endpoint must be a URL starting with https://.";
+    const SAVE: &str = "id:project-sync >> role:button[Save]";
+    app.type_text("id:project-sync-endpoint", "team.example")
+        .unwrap();
+    app.type_text("id:project-sync-bucket", "team-vault")
+        .unwrap();
+    app.press(SAVE).unwrap();
+    app.wait_for_within(ENDPOINT_RULE, SLOW).unwrap();
+    assert_eq!(settings::read_project_sync(&repo).unwrap().bucket, "");
+
+    // Saved, the bucket is in the user's config under the project, and the device is asked to
+    // connect with the team's passphrase.
+    app.clear("id:project-sync-endpoint").unwrap();
+    app.type_text("id:project-sync-endpoint", "http://127.0.0.1:9")
+        .unwrap();
+    app.type_text("id:project-sync-prefix", "acme").unwrap();
+    app.press(SAVE).unwrap();
+    app.wait_for_within("Sync settings saved.", SLOW).unwrap();
+    app.wait_for_within("This device is not connected", SLOW)
+        .unwrap();
+    assert!(
+        app.screen()
+            .shows("Connect it with the bucket's access key and the team's passphrase.")
+    );
+    let saved = settings::read_project_sync(&repo).unwrap();
+    assert_eq!(
+        (
+            saved.endpoint.as_str(),
+            saved.bucket.as_str(),
+            saved.prefix.as_str()
+        ),
+        ("http://127.0.0.1:9", "team-vault", "acme")
+    );
+    // The personal vault's own sync is untouched.
+    assert_eq!(settings::read_sync().unwrap().bucket, "");
+
+    // The connect dialog is the one the personal vault has, with the team's words.
+    app.press("id:project-sync-status >> role:button[Connect this device]")
+        .unwrap();
+    app.wait_for_within("id:sync-connect", SLOW).unwrap();
+    assert!(app.screen().shows(
+        "The access key stays in this device's keychain. The first person's passphrase starts \
+         the vault in the bucket; everyone else unlocks it with the same one. If it is lost, the \
+         bucket cannot be read."
+    ));
 }

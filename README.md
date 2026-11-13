@@ -214,6 +214,8 @@ obmem init --private ~/Obsidian/acme-memory \
 
 It asks for the bucket's access key and the vault's passphrase. The first member chooses the passphrase, and their vault is the first in the bucket. For everyone after, the command fetches the team's vault into the folder, which must be empty. Add `--region` and `--prefix` when the bucket needs them.
 
+The desktop app does the same from the project's Settings: a teammate chooses an empty folder for the vault, saves the bucket, connects the device, and the first sync fetches the team's notes.
+
 The command writes this to your config, which you can also edit by hand:
 
 ```toml
@@ -351,7 +353,7 @@ In a repository you share, the bucket is yours and not the team's: take `endpoin
 - **Overview:** each project's health, setting up agents with one click, and importing the project's Claude Code memory (pick which).
 - **Agent view:** what the session-start hook gives an agent, and what `memory_context` returns for a task you type.
 - **Sessions:** the project's session logs, newest first.
-- **Settings:** `.obmem.toml`, making the project's vault [private](#a-private-project-vault) or changing its folder, and whether Codex runs obmem's tools without asking. A private project that this computer has no vault for asks for the folder when you open it.
+- **Settings:** `.obmem.toml`, making the project's vault [private](#a-private-project-vault) or changing its folder, a private vault's sync (its bucket, connecting this device, the last sync, and syncing now), and whether Codex runs obmem's tools without asking. A private project that this computer has no vault for asks for the folder when you open it.
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
 - **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.
 - **Settings**, for every project, in four pages:

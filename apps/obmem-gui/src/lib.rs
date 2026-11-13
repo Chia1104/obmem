@@ -19,6 +19,7 @@ mod sessions_tab;
 mod settings_tab;
 mod sidebar;
 mod state;
+mod sync_card;
 mod toasts;
 mod widgets;
 mod words;

@@ -378,13 +378,7 @@ fn make_private_at(
             config.display()
         )
     };
-    let real_root = resolved(&root);
-    let known = list.iter_mut().find(|t| {
-        t.get("root")
-            .and_then(Item::as_str)
-            .is_some_and(|r| resolved(Path::new(r)) == real_root)
-    });
-    let entry = match known {
+    let entry = match entry_of(list, &root) {
         Some(entry) => entry,
         None => {
             let mut entry = Table::new();
@@ -414,6 +408,79 @@ fn make_private_at(
         atomic_write(&root, &path, &doc.to_string())?;
     }
     Ok(in_repo)
+}
+
+/// The `[[project]]` entry for the project at `root`.
+fn entry_of<'a>(list: &'a mut ArrayOfTables, root: &Path) -> Option<&'a mut Table> {
+    let real_root = resolved(root);
+    list.iter_mut().find(|t| {
+        t.get("root")
+            .and_then(Item::as_str)
+            .is_some_and(|r| resolved(Path::new(r)) == real_root)
+    })
+}
+
+/// Where the private vault of the project at `root` is synced (`[project.sync]`), as the user's
+/// config states it: the bucket's four settings, and nothing of the machine's, which `[sync]`
+/// has for every vault. Empty strings stand for unset keys.
+pub fn read_project_sync(root: &Path) -> Result<SyncSettings> {
+    read_project_sync_at(&global_config_path(), root)
+}
+
+fn read_project_sync_at(config: &Path, root: &Path) -> Result<SyncSettings> {
+    let file: GlobalFile = toml::from_str(&read_doc(config)?.to_string())?;
+    let real_root = resolved(&std::path::absolute(root)?);
+    let bucket = file
+        .projects
+        .into_iter()
+        .find(|p| resolved(Path::new(&p.root)) == real_root)
+        .and_then(|p| p.sync)
+        .unwrap_or_default();
+    Ok(SyncSettings {
+        endpoint: bucket.endpoint.unwrap_or_default(),
+        region: bucket.region.unwrap_or_default(),
+        bucket: bucket.bucket.unwrap_or_default(),
+        prefix: bucket.prefix.unwrap_or_default(),
+        ..Default::default()
+    })
+}
+
+/// Names the bucket the private vault of the project at `root` is synced through: `s`'s
+/// endpoint, region, bucket and prefix. An empty bucket: none, and the vault is not synced. The
+/// project's vault must be private already ([`make_private`]).
+pub fn save_project_sync(root: &Path, s: &SyncSettings) -> Result<()> {
+    save_project_sync_at(&global_config_path(), root, s)
+}
+
+fn save_project_sync_at(config: &Path, root: &Path, s: &SyncSettings) -> Result<()> {
+    refuse(s.problems())?;
+    let root = std::path::absolute(root)?;
+    let mut doc = read_doc(config)?;
+    let entry = doc
+        .get_mut("project")
+        .and_then(Item::as_array_of_tables_mut)
+        .and_then(|list| entry_of(list, &root));
+    let Some(entry) = entry else {
+        bail!(
+            "{} has no private vault in {}: only a private vault is synced",
+            root.display(),
+            config.display()
+        )
+    };
+    if s.bucket.trim().is_empty() {
+        entry.remove("sync");
+    } else {
+        let text = |v: &String| Some(v.clone()).filter(|v| !v.trim().is_empty());
+        let bucket = Bucket {
+            endpoint: text(&s.endpoint),
+            region: text(&s.region),
+            bucket: text(&s.bucket),
+            prefix: text(&s.prefix),
+        };
+        entry.insert("sync", Item::Table(sync_table(&bucket)?));
+    }
+    let dir = config.parent().context("config path has no parent")?;
+    atomic_write(dir, config, &doc.to_string())
 }
 
 /// `[project.sync]` for `bucket`, checked by the rules `[sync]` has.
@@ -829,6 +896,37 @@ mod tests {
             ..team.clone()
         });
         assert_eq!(projects()[0].sync, named);
+        // A settings screen reads the bucket as four fields, and saves them back.
+        let mut form = read_project_sync_at(&config, &root).unwrap();
+        assert_eq!(
+            (
+                form.endpoint.as_str(),
+                form.bucket.as_str(),
+                form.prefix.as_str()
+            ),
+            ("https://team.example", "team", "acme")
+        );
+        form.region = "eu-west-1".into();
+        form.prefix.clear();
+        save_project_sync_at(&config, &root, &form).unwrap();
+        assert_eq!(read_project_sync_at(&config, &root).unwrap(), form);
+        assert_eq!(projects()[0].sync.as_ref().unwrap().prefix, None);
+        // A rule a field breaks refuses the save, and an empty bucket turns the sync off.
+        let bad = SyncSettings {
+            endpoint: "team.example".into(),
+            ..form.clone()
+        };
+        assert!(save_project_sync_at(&config, &root, &bad).is_err());
+        assert_eq!(read_project_sync_at(&config, &root).unwrap(), form);
+        let off = SyncSettings {
+            bucket: String::new(),
+            ..form.clone()
+        };
+        save_project_sync_at(&config, &root, &off).unwrap();
+        assert_eq!(projects()[0].sync, None);
+        // A project whose vault is in its repo has nothing to sync this way.
+        assert!(save_project_sync_at(&config, &dir.join("other"), &form).is_err());
+        make_private_at(&config, &root, &moved.display().to_string(), Some(&team)).unwrap();
         make_private_at(&config, &root, &moved.display().to_string(), None).unwrap();
         let list = projects();
         assert_eq!((list.len(), &list[0].sync), (1, &named));

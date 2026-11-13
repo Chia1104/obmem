@@ -67,8 +67,9 @@ pub(crate) enum Work {
     Disallow(Vault, Kind, String),
     SavePersonal,
     SaveSync,
-    ConnectSync,
-    Sync,
+    SaveProjectSync,
+    ConnectSync(Vault),
+    Sync(Vault),
     /// Reading the review list again.
     LoadReview,
     Audit(PathBuf),
@@ -766,38 +767,71 @@ pub(crate) fn save_sync(s: SyncSettings) {
     );
 }
 
+/// The bucket the shown project's private vault is synced through.
+pub(crate) fn save_project_sync(s: SyncSettings) {
+    let Some(path) = selected() else { return };
+    let again = path.clone();
+    in_background_as(
+        Work::SaveProjectSync,
+        move || data::save_project_sync(&path, &s),
+        move |r| match r {
+            Ok(()) => {
+                done(t!("sync.saved"));
+                reload(again);
+            }
+            // Reloading would rebuild the form from the file and lose what the user typed.
+            Err(e) => fail(e),
+        },
+    );
+}
+
+/// Reads what shows `vault`'s sync again: the personal settings, or the shown project.
+fn after_sync(vault: Vault) {
+    match vault {
+        Vault::Personal => load_personal(),
+        Vault::Project => refresh(),
+    }
+}
+
 pub(crate) fn connect_sync(
+    vault: Vault,
     access_key_id: String,
     secret: String,
     passphrase: String,
     repeat: String,
 ) {
+    let path = selected().unwrap_or_default();
     in_background_as(
-        Work::ConnectSync,
-        move || data::connect_sync(access_key_id, secret, passphrase, repeat),
-        |r| match r {
+        Work::ConnectSync(vault),
+        move || data::connect_sync(vault, &path, access_key_id, secret, passphrase, repeat),
+        move |r| match r {
             Ok(connected) => {
                 done(if connected.created {
                     t!("sync.started_vault", bucket = connected.bucket)
                 } else {
                     t!("sync.connected_to", bucket = connected.bucket)
                 });
-                load_personal();
+                after_sync(vault);
             }
             Err(e) => fail(e),
         },
     );
 }
 
-pub(crate) fn sync_now() {
-    in_background_as(Work::Sync, data::sync_now, |r| {
-        match r {
-            Ok(Some(summary)) => done(t!("sync.synced", summary = words::summary(&summary))),
-            Ok(None) => done(t!("sync.queued")),
-            Err(e) => fail(e),
-        }
-        load_personal();
-    });
+pub(crate) fn sync_now(vault: Vault) {
+    let path = selected().unwrap_or_default();
+    in_background_as(
+        Work::Sync(vault),
+        move || data::sync_now(vault, &path),
+        move |r| {
+            match r {
+                Ok(Some(summary)) => done(t!("sync.synced", summary = words::summary(&summary))),
+                Ok(None) => done(t!("sync.queued")),
+                Err(e) => fail(e),
+            }
+            after_sync(vault);
+        },
+    );
 }
 
 // --- Review ------------------------------------------------------------------

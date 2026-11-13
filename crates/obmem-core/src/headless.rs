@@ -11,7 +11,7 @@
 
 use crate::links::Names;
 use crate::note::{Note, links_in};
-use crate::obsidian::{Api, SearchHit, Unresolved};
+use crate::obsidian::{Api, Link, SearchHit, Unresolved};
 use crate::query;
 use anyhow::Result;
 use std::collections::{BTreeMap, HashSet};
@@ -99,6 +99,27 @@ impl Api for Headless {
             }
         }
         Ok(hits)
+    }
+
+    fn links(&self, vault: &Path, rel: &str) -> Result<Vec<Link>> {
+        let mut out = Vec::new();
+        for (source, text, target) in graph(vault).links {
+            if source != rel {
+                continue;
+            }
+            let link = target.map_or(Link::Unresolved(text), Link::File);
+            if !out.contains(&link) {
+                out.push(link);
+            }
+        }
+        // the order Obsidian lists them in
+        out.sort_by(|a, b| {
+            let name = |l: &Link| match l {
+                Link::File(s) | Link::Unresolved(s) => s.clone(),
+            };
+            name(a).cmp(&name(b))
+        });
+        Ok(out)
     }
 
     fn backlinks(&self, vault: &Path, rel: &str) -> Result<Vec<String>> {
@@ -193,6 +214,23 @@ mod tests {
             h.backlinks(&dir, "Knowledge/refresh tokens.md").unwrap(),
             vec!["Decisions/jwt-rotation.md"]
         );
+        // each place once, by name; a link to itself is left out
+        assert_eq!(
+            h.links(&dir, "Decisions/jwt-rotation.md").unwrap(),
+            vec![
+                Link::File("Decisions/legacy-token.md".into()),
+                Link::File("Knowledge/refresh tokens.md".into()),
+                Link::Unresolved("gone".into()),
+            ]
+        );
+        assert_eq!(
+            h.links(&dir, "Index.md").unwrap(),
+            vec![
+                Link::File("Decisions/jwt-rotation.md".into()),
+                Link::File("assets/flow.png".into()),
+            ]
+        );
+        assert!(h.links(&dir, "Knowledge/lonely.md").unwrap().is_empty());
         let unresolved = h.unresolved(&dir).unwrap();
         assert_eq!(unresolved.len(), 1, "{unresolved:?}");
         assert_eq!(unresolved[0].link, "gone");

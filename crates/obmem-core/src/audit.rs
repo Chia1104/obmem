@@ -1222,6 +1222,9 @@ mod tests {
         fn search(&self, _: &Path, _: &str, _: usize) -> Result<Vec<SearchHit>> {
             Ok(vec![])
         }
+        fn links(&self, _: &Path, _: &str) -> Result<Vec<obsidian::Link>> {
+            Ok(vec![])
+        }
         fn backlinks(&self, _: &Path, _: &str) -> Result<Vec<String>> {
             Ok(vec![])
         }

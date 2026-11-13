@@ -112,7 +112,7 @@ Once set up:
 |---|---|
 | `memory_context` | The notes most relevant to a task description, in any language |
 | `memory_search` | Obsidian search across both vaults, with the same syntax as the app's search box |
-| `memory_get` | One note, with its backlinks |
+| `memory_get` | One note, with the notes it links to and its backlinks |
 | `memory_write` | Create or update a note. New notes start as `draft` (or `active`, with [auto-approve](#auto-approve)), notes written by people are read-only for agents, and near-duplicates and secrets are refused |
 | `memory_log` | Append to today's session log |
 | `memory_audit` | Run the audit, optionally writing finding notes |

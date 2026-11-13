@@ -12,6 +12,7 @@ author: human
 - [[split-obmem-into-a-cargo-workspace-so-a-gui-can-reuse-the-core]]: which crate owns what, and why the GUI is a workspace member.
 - [[use-the-obsidian-cli-for-search-and-link-checks-instead-of-an-own-index]]: search and link checks come from Obsidian. There is no index.
 - [[a-headless-backend-answers-for-obsidian-where-the-app-is-not-installed]]: the built-in search for machines without Obsidian.
+- [[the-calling-agent-is-the-retrieval-loop-memory-tools-say-where-to-search-next-an]]: how recall improves without a model or an index, and how it is measured.
 
 ## Key decisions
 - [[agent-guidance-is-a-short-always-loaded-guide-plus-skills-that-setup-installs]]: what agents are always told, and what is in the skills.

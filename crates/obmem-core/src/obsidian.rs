@@ -1,4 +1,5 @@
-//! Obsidian itself does search, backlinks, unresolved links and orphans (official CLI, 1.12+).
+//! Obsidian itself does search, links, backlinks, unresolved links and orphans (official CLI,
+//! 1.12+).
 //! obmem only maps vault folders to Obsidian vault ids and parses the output. On a machine
 //! without the CLI, [`crate::headless`] answers the same questions from the files
 //! ([`Backend`]).
@@ -35,10 +36,22 @@ pub struct Unresolved {
     pub sources: Vec<String>,
 }
 
+/// Where one of a note's links leads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Link {
+    /// The vault-relative path of the file it opens.
+    File(String),
+    /// The link's text, when no file has that name.
+    Unresolved(String),
+}
+
 /// What obmem needs from Obsidian. [`Cli`] asks the app; [`crate::headless::Headless`] reads
 /// the files where there is no app.
 pub trait Api: Send {
     fn search(&self, vault: &Path, query: &str, limit: usize) -> Result<Vec<SearchHit>>;
+    /// Where the links of the note at `rel` lead: each place once, by name, and never the note
+    /// itself.
+    fn links(&self, vault: &Path, rel: &str) -> Result<Vec<Link>>;
     fn backlinks(&self, vault: &Path, rel: &str) -> Result<Vec<String>>;
     fn unresolved(&self, vault: &Path) -> Result<Vec<Unresolved>>;
     fn orphans(&self, vault: &Path) -> Result<Vec<String>>;
@@ -325,6 +338,22 @@ pub fn parse_search(out: &str) -> Result<Vec<SearchHit>> {
         .collect())
 }
 
+/// `obsidian links`: one target per line, a file by its path and a link that opens nothing as
+/// `<link text> (unresolved)`.
+pub fn parse_links(out: &str) -> Vec<Link> {
+    if is_empty_result(out) {
+        return vec![];
+    }
+    out.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| match l.strip_suffix(" (unresolved)") {
+            Some(text) => Link::Unresolved(text.to_string()),
+            None => Link::File(l.to_string()),
+        })
+        .collect()
+}
+
 pub fn parse_backlinks(out: &str) -> Result<Vec<String>> {
     if is_empty_result(out) {
         return Ok(vec![]);
@@ -381,6 +410,14 @@ impl Api for Cli {
         parse_search(&self.run(vault, &["search:context", &q, &l, "format=json"])?)
     }
 
+    fn links(&self, vault: &Path, rel: &str) -> Result<Vec<Link>> {
+        let p = format!("path={rel}");
+        let mut links = parse_links(&self.run(vault, &["links", &p])?);
+        // Obsidian lists a note's link to itself
+        links.retain(|l| !matches!(l, Link::File(f) if f == rel));
+        Ok(links)
+    }
+
     fn backlinks(&self, vault: &Path, rel: &str) -> Result<Vec<String>> {
         let p = format!("path={rel}");
         parse_backlinks(&self.run(vault, &["backlinks", &p, "format=json"])?)
@@ -421,6 +458,16 @@ mod tests {
             vec!["Decisions/a.md"]
         );
         assert!(parse_backlinks("No backlinks found.").unwrap().is_empty());
+        assert_eq!(
+            parse_links("Index.md\nno-such-note (unresolved)\n未命名.canvas\n歡迎.md"),
+            vec![
+                Link::File("Index.md".into()),
+                Link::Unresolved("no-such-note".into()),
+                Link::File("未命名.canvas".into()),
+                Link::File("歡迎.md".into()),
+            ]
+        );
+        assert!(parse_links("No links found.").is_empty());
         assert_eq!(
             parse_orphans("Knowledge/lonely.md\n歡迎.md"),
             vec!["Knowledge/lonely.md", "歡迎.md"]

@@ -116,6 +116,61 @@ impl std::fmt::Display for Decided {
     }
 }
 
+/// One note as `memory_get` and `obmem get` show it. Written out (`Display`) it is the text
+/// they print: a comment line that says where the note is and what it is linked with, then the
+/// note.
+#[derive(Debug, Clone)]
+pub struct Got {
+    /// `scope:vault-relative path`.
+    pub loc: String,
+    pub content: String,
+    /// Where the note's links lead. The `Err` text when the backend could not be asked.
+    pub links: std::result::Result<Vec<obsidian::Link>, String>,
+    /// The ids of the notes that link to it. The `Err` text when the backend could not be asked.
+    pub backlinks: std::result::Result<Vec<String>, String>,
+}
+
+/// How a link to the file at `rel` is written: a note by its name, another file by its path.
+fn link_name(rel: &str) -> String {
+    match rel.strip_suffix(".md") {
+        Some(note) => note.rsplit('/').next().unwrap_or(note).to_string(),
+        None => rel.to_string(),
+    }
+}
+
+impl std::fmt::Display for Got {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn list(items: std::result::Result<Vec<String>, &String>) -> String {
+            match items {
+                Ok(items) if items.is_empty() => "none".into(),
+                Ok(items) => items.join(", "),
+                Err(e) => format!("unavailable ({e})"),
+            }
+        }
+        let links = self.links.as_ref().map(|links| {
+            links
+                .iter()
+                .map(|l| match l {
+                    obsidian::Link::File(rel) => format!("[[{}]]", link_name(rel)),
+                    obsidian::Link::Unresolved(text) => format!("[[{text}]] (no such note)"),
+                })
+                .collect()
+        });
+        let backlinks = self
+            .backlinks
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| format!("[[{id}]]")).collect());
+        write!(
+            f,
+            "<!-- {} | links: {} | backlinks: {} -->\n{}",
+            self.loc,
+            list(links),
+            list(backlinks),
+            self.content
+        )
+    }
+}
+
 /// How a person's action names a note.
 #[derive(Debug, Clone, Copy)]
 pub enum NoteRef<'a> {
@@ -345,13 +400,9 @@ impl Store {
         Ok((hits, problems))
     }
 
-    /// Full note text plus backlinks from the backend (`Err` text if Obsidian could not be asked;
-    /// reading the note itself never depends on Obsidian).
-    #[allow(clippy::type_complexity)]
-    pub fn get(
-        &mut self,
-        key: &str,
-    ) -> Result<(String, String, std::result::Result<Vec<String>, String>)> {
+    /// One note in full, with its links and backlinks from the backend. Reading the note itself
+    /// never depends on Obsidian.
+    pub fn get(&mut self, key: &str) -> Result<Got> {
         self.sync()?;
         let matches = self.index.resolve(key)?;
         let (path, scope) = match matches.len() {
@@ -367,26 +418,48 @@ impl Store {
         let content = std::fs::read_to_string(&path)?;
         let rel = self.relative(&path);
         let root = if scope == "project" {
-            self.cfg.project_vault.clone()
+            &self.cfg.project_vault
         } else {
-            self.cfg.global_vault.clone()
+            &self.cfg.global_vault
         };
+        let links = self.obs.links(root, &rel).map_err(|e| format!("{e:#}"));
         let backlinks = self
             .obs
-            .backlinks(&root, &rel)
-            .map(|files| {
-                files
-                    .iter()
-                    .map(|f| {
-                        Path::new(f)
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| f.clone())
-                    })
-                    .collect()
-            })
+            .backlinks(root, &rel)
+            .map(|files| files.iter().map(|f| link_name(f)).collect())
             .map_err(|e| format!("{e:#}"));
-        Ok((format!("{scope}:{rel}"), content, backlinks))
+        Ok(Got {
+            loc: format!("{scope}:{rel}"),
+            content,
+            links,
+            backlinks,
+        })
+    }
+
+    /// The notes one link away from the note at `rel`: the ones it links to, then the ones that
+    /// link to it, as vault-relative paths in the same vault.
+    pub fn neighbours(&self, scope: Scope, rel: &str) -> Result<Vec<String>> {
+        let root = self.vault_for(scope);
+        let mut out: Vec<String> = Vec::new();
+        let to = self
+            .obs
+            .links(root, rel)?
+            .into_iter()
+            .filter_map(|l| match l {
+                obsidian::Link::File(f) => Some(f),
+                obsidian::Link::Unresolved(_) => None,
+            });
+        for f in to.chain(self.obs.backlinks(root, rel)?) {
+            if f != rel && !out.contains(&f) {
+                out.push(f);
+            }
+        }
+        Ok(out)
+    }
+
+    /// What the catalog knows about the note at `rel`, as of the last sync.
+    pub fn meta(&self, scope: Scope, rel: &str) -> Option<&crate::catalog::Meta> {
+        self.index.by_rel(scope.as_str(), rel)
     }
 
     /// Resolve a key that a write will act on: it must match exactly one note.
@@ -1242,9 +1315,27 @@ mod tests {
                 .is_none_or(|at| at > first)
         );
 
-        // memory_get backlinks
-        let (_, _, backlinks) = store.get("refresh-tokens").unwrap();
-        assert_eq!(backlinks.unwrap(), ["jwt-rotation"]);
+        // memory_get: links and backlinks
+        let got = store.get("refresh-tokens").unwrap();
+        assert_eq!(got.backlinks.clone().unwrap(), ["jwt-rotation"]);
+        assert!(
+            got.to_string()
+                .starts_with("<!-- project:Knowledge/refresh-tokens.md | links: none | backlinks: [[jwt-rotation]] -->\n---\n"),
+            "{got}"
+        );
+        let got = store.get("jwt-rotation").unwrap();
+        assert!(
+            got.to_string().starts_with(
+                "<!-- project:Decisions/jwt-rotation.md | links: [[refresh-tokens]], [[missing-note]] (no such note) | backlinks: none -->\n"
+            ),
+            "{got}"
+        );
+        assert_eq!(
+            store
+                .neighbours(Scope::Project, "Knowledge/refresh-tokens.md")
+                .unwrap(),
+            ["Decisions/jwt-rotation.md"]
+        );
 
         // the link rules of the audit
         let opts = AuditOptions {

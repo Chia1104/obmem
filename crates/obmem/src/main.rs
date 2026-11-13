@@ -476,11 +476,7 @@ fn main() -> Result<()> {
         }
         Cmd::Get { id } => {
             let mut store = store::Store::open(cfg)?;
-            let (loc, content, bl) = store.get(&id)?;
-            let bl = bl
-                .map(|b| b.join(", "))
-                .unwrap_or_else(|e| format!("unavailable ({e})"));
-            println!("<!-- {loc} | backlinks: {bl} -->\n{content}");
+            println!("{}", store.get(&id)?);
         }
         Cmd::Context { task, limit } => {
             let mut store = store::Store::open(cfg)?;

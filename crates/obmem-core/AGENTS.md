@@ -32,7 +32,7 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 
 ## Obsidian (`obsidian.rs`)
 
-obmem keeps no index of its own. Search, backlinks, unresolved links and orphans all come from the Obsidian CLI, or from `headless.rs` on a machine without it (see below).
+obmem keeps no index of its own. Search, a note's links and backlinks, unresolved links and orphans all come from the Obsidian CLI, or from `headless.rs` on a machine without it (see below).
 - Every call passes `vault=<id>`. The id is looked up by path in Obsidian's `obsidian.json`, because from a folder that is not a registered vault the CLI silently uses whichever vault is active.
 - When the app, the CLI or a vault is unavailable, skip the affected part and say what was skipped. Writes, the session-start context and the file-based audit rules read files directly and keep working.
 - Before changing how obmem calls the CLI, run memory_search `obsidian cli` for the quirks found so far.
@@ -88,6 +88,14 @@ Terms are cut by Unicode script, not by language:
 - Small English and Chinese filler lists drop common words. With more than 16 terms, the longest win.
 
 Each note is ranked by how many distinct terms it contains, with title matches counting double. Matching is literal: there is no stemming and no matching across languages.
+
+The agent that calls `memory_context` can search again, so the answer (`context::Recall`) also says where to go next:
+- Each match lists the terms it contains.
+- `unmatched` is the parts of the task that no note contains, as the task wrote them. It is empty when that is unknown: a vault was not searched, or the search stopped at `CANDIDATES`.
+- `linked` is the notes one link away, in either direction, from the three best matches. The vault's `Index.md` links to every note, so it is never followed or listed.
+- `recall` gives the values and `Recall::render` the text. Put a new signal in the struct first, so the measurement below can read it.
+
+`tests/recall.rs` measures all of this on this repo's `docs/kb`: tasks, and the notes each should find. Run it with `--nocapture` before and after a change to the terms, the ranking or the links, and add a case when a real task finds the wrong notes.
 
 ## Audit and code drift
 

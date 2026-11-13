@@ -2,6 +2,10 @@
 //! `Store::search` does the searching; this only turns free text into an OR query (Obsidian ANDs
 //! words, and many scripts have no spaces) and ranks the hits, which Obsidian search does not.
 //!
+//! The caller is an agent that can search again, so the answer also says where to go next: which
+//! terms each note matched, which terms no note contains, and the notes one link away from the
+//! matches ([`Recall`]).
+//!
 //! Terms are cut by *script*, not by language, so any language gets usable terms without a
 //! per-language word list:
 //! - scripts written with spaces (Latin incl. accents, Cyrillic, Greek, Arabic, Hebrew, Indic,
@@ -15,11 +19,22 @@
 //! inflected form only finds itself.
 
 use crate::catalog::Hit;
-use crate::note::Note;
+use crate::note::{Note, Scope};
 use crate::store::Store;
 use anyhow::Result;
 
 const MAX_TERMS: usize = 16;
+/// How many notes the search hands to the ranking. Obsidian's search does not rank, so a note
+/// it leaves out is lost before it is scored.
+const CANDIDATES: usize = 500;
+/// How many of the best matches have their links followed. A weak match's neighbours are
+/// rarely about the task.
+const FOLLOWED: usize = 3;
+/// How many notes one link away are listed.
+const MAX_LINKED: usize = 5;
+/// The vault's map of content links to every note, so it says nothing about which notes belong
+/// together.
+const INDEX: &str = "Index.md";
 const EN_STOP: &[&str] = &[
     "the", "and", "for", "with", "that", "this", "from", "into", "how", "what", "why", "when",
     "where", "can", "should", "would", "could", "need", "want", "make", "add", "fix", "use",
@@ -157,93 +172,234 @@ pub fn task_terms(task: &str) -> Vec<String> {
     terms
 }
 
-/// Rank hits by how many distinct terms the note contains (title matches count double).
-fn score(store: &Store, hit: &Hit, terms: &[String]) -> usize {
-    let root = store.vault_for(if hit.scope == "project" {
-        crate::note::Scope::Project
+/// One note the task's terms found.
+#[derive(Debug, Clone)]
+pub struct Match {
+    pub hit: Hit,
+    /// The terms the note contains, in the task's order.
+    pub terms: Vec<String>,
+    /// One for each of `terms`, two when the title has it.
+    score: usize,
+}
+
+/// A note one link away from the matches that is not one of them.
+#[derive(Debug, Clone)]
+pub struct Linked {
+    pub id: String,
+    pub scope: Scope,
+    pub note_type: String,
+    pub status: String,
+    pub title: String,
+    /// The ids of the matches it is linked with, best match first.
+    pub via: Vec<String>,
+}
+
+/// What `memory_context` found for a task. [`Recall::render`] is the text the CLI and the MCP
+/// server answer with.
+#[derive(Debug, Clone)]
+pub struct Recall {
+    pub task: String,
+    /// What the task was searched for. Empty when it held nothing to search for.
+    pub terms: Vec<String>,
+    /// The parts of the task no note contains, as the task wrote them ([`unmatched_parts`]). Empty
+    /// too when that is unknown, because a vault could not be searched or the search stopped at
+    /// its limit.
+    pub unmatched: Vec<String>,
+    /// The best matches, best first.
+    pub notes: Vec<Match>,
+    /// Notes linked with the best matches, the one linked with the most of them first.
+    pub linked: Vec<Linked>,
+    /// Open findings about the matches.
+    pub findings: Vec<Hit>,
+    /// What could not be searched or listed.
+    pub problems: Vec<String>,
+}
+
+fn scope_of(hit: &Hit) -> Scope {
+    if hit.scope == "project" {
+        Scope::Project
     } else {
-        crate::note::Scope::Global
-    });
-    let text = std::fs::read_to_string(root.join(&hit.path))
+        Scope::Global
+    }
+}
+
+/// The terms a note contains, and its score: one for each term, two when the title has it.
+fn matched(store: &Store, hit: &Hit, terms: &[String]) -> (Vec<String>, usize) {
+    let text = std::fs::read_to_string(store.vault_for(scope_of(hit)).join(&hit.path))
         .unwrap_or_default()
         .to_lowercase();
     let title = hit.title.to_lowercase();
-    terms
-        .iter()
-        .map(|t| {
-            if title.contains(t.as_str()) {
-                2
-            } else {
-                usize::from(text.contains(t.as_str()))
-            }
-        })
-        .sum()
+    let (mut found, mut score) = (Vec::new(), 0);
+    for t in terms {
+        let points = if title.contains(t.as_str()) {
+            2
+        } else {
+            usize::from(text.contains(t.as_str()))
+        };
+        if points > 0 {
+            found.push(t.clone());
+            score += points;
+        }
+    }
+    (found, score)
 }
 
-pub fn context(store: &mut Store, task: &str, limit: usize, max_chars: usize) -> Result<String> {
-    let terms = task_terms(task);
-    if terms.is_empty() {
-        return Ok(
-            "No searchable terms in the task description; use memory_search with specific words."
-                .into(),
-        );
+/// The parts of a task that no note contains: the terms for which `found` is false, as the
+/// lowercased task wrote them. Bigrams that overlap are one part again (`備份`, `份保`, `保留` →
+/// `備份保留`), and a character that a found term covers is left out, because a bigram across
+/// two words is no word (`搜尋架構` with `搜尋` found → `架構`).
+fn unmatched_parts(task: &str, terms: &[String], found: impl Fn(&String) -> bool) -> Vec<String> {
+    #[derive(Clone, Copy, PartialEq, PartialOrd)]
+    enum In {
+        Nothing,
+        Unmatched,
+        Found,
     }
+    let text: Vec<char> = task.to_lowercase().chars().collect();
+    let mut cover = vec![In::Nothing; text.len()];
+    for term in terms {
+        let t: Vec<char> = term.chars().collect();
+        let kind = if found(term) {
+            In::Found
+        } else {
+            In::Unmatched
+        };
+        for (at, window) in text.windows(t.len().max(1)).enumerate() {
+            if window == t {
+                for c in &mut cover[at..at + t.len()] {
+                    if *c < kind {
+                        *c = kind;
+                    }
+                }
+            }
+        }
+    }
+    let mut parts: Vec<String> = Vec::new();
+    let mut part = String::new();
+    for (c, kind) in text.iter().zip(cover).chain([(&' ', In::Nothing)]) {
+        if kind == In::Unmatched {
+            part.push(*c);
+            continue;
+        }
+        // one character is what a found bigram left of its neighbour
+        if part.chars().count() > 1 && !parts.contains(&part) {
+            parts.push(std::mem::take(&mut part));
+        }
+        part.clear();
+    }
+    parts
+}
+
+/// The notes one link away from the best of `notes` that are not among `notes`. A problem with
+/// the backend is returned as text, with what was found before it.
+fn linked(store: &Store, notes: &[Match]) -> (Vec<Linked>, Option<String>) {
+    let shown = |scope: Scope, rel: &str| {
+        notes
+            .iter()
+            .any(|m| scope_of(&m.hit) == scope && m.hit.path == rel)
+    };
+    let mut out: Vec<(String, Linked)> = Vec::new();
+    let mut problem = None;
+    for m in notes.iter().filter(|m| m.hit.path != INDEX).take(FOLLOWED) {
+        let scope = scope_of(&m.hit);
+        let neighbours = match store.neighbours(scope, &m.hit.path) {
+            Ok(n) => n,
+            Err(e) => {
+                problem = Some(format!("linked notes not listed: {e:#}"));
+                break;
+            }
+        };
+        for rel in neighbours {
+            if rel == INDEX
+                || rel.starts_with("Templates/")
+                || rel.starts_with("_system/")
+                || shown(scope, &rel)
+            {
+                continue;
+            }
+            // a file that is not a note has no entry
+            let Some(meta) = store.meta(scope, &rel) else {
+                continue;
+            };
+            if matches!(meta.status.as_str(), "archived" | "superseded")
+                || meta.note_type == "finding"
+            {
+                continue;
+            }
+            let key = format!("{}:{rel}", scope.as_str());
+            match out.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, l)) => l.via.push(m.hit.id.clone()),
+                None => out.push((
+                    key,
+                    Linked {
+                        id: meta.id.clone(),
+                        scope,
+                        note_type: meta.note_type.clone(),
+                        status: meta.status.clone(),
+                        title: meta.title.clone(),
+                        via: vec![m.hit.id.clone()],
+                    },
+                )),
+            }
+        }
+    }
+    let mut out: Vec<Linked> = out.into_iter().map(|(_, l)| l).collect();
+    // stable: among equals, the one linked with the better match stays first
+    out.sort_by_key(|l| std::cmp::Reverse(l.via.len()));
+    out.truncate(MAX_LINKED);
+    (out, problem)
+}
+
+/// Search both vaults for a task's terms and rank what is found: at most `limit` notes.
+pub fn recall(store: &mut Store, task: &str, limit: usize) -> Result<Recall> {
+    let mut recall = Recall {
+        task: task.trim().to_string(),
+        terms: task_terms(task),
+        unmatched: Vec::new(),
+        notes: Vec::new(),
+        linked: Vec::new(),
+        findings: Vec::new(),
+        problems: Vec::new(),
+    };
+    if recall.terms.is_empty() {
+        return Ok(recall);
+    }
+    let terms = &recall.terms;
     let query = terms
         .iter()
         .map(|t| format!("\"{t}\""))
         .collect::<Vec<_>>()
         .join(" OR ");
-    let (hits, problems) = store.search(&query, None, None, 40)?;
-    let mut ranked: Vec<(usize, Hit)> = hits
+    let (hits, problems) = store.search(&query, None, None, CANDIDATES)?;
+    let complete = problems.is_empty() && hits.len() < CANDIDATES;
+    let mut ranked: Vec<Match> = hits
         .into_iter()
-        .map(|h| (score(store, &h, &terms), h))
+        .map(|hit| {
+            let (terms, score) = matched(store, &hit, terms);
+            Match { hit, terms, score }
+        })
         .collect();
-    ranked.sort_by_key(|a| std::cmp::Reverse(a.0));
-    // findings are listed separately below, against the notes they are about
-    let (findings, notes): (Vec<_>, Vec<_>) = ranked
+    if complete {
+        recall.unmatched =
+            unmatched_parts(task, terms, |t| ranked.iter().any(|m| m.terms.contains(t)));
+    }
+    ranked.sort_by_key(|m| std::cmp::Reverse(m.score));
+    // findings are listed separately, against the notes they are about
+    let (findings, mut notes): (Vec<_>, Vec<_>) = ranked
         .into_iter()
-        .partition(|(_, h)| h.note_type == "finding");
+        .partition(|m| m.hit.note_type == "finding");
+    notes.truncate(limit);
 
-    let mut out = format!(
-        "Memory relevant to: {}\n(terms: {})\n",
-        task.trim(),
-        terms.join(", ")
-    );
-    if notes.is_empty() {
-        out.push_str("\nNo matching notes.\n");
-    }
-    for (s, h) in notes.iter().take(limit) {
-        let trust = if h.status == "draft" {
-            ", draft: unreviewed"
-        } else {
-            ""
-        };
-        let line = format!(
-            "\n- [[{}]] ({}/{}{trust}, score {s}) {}\n  {}\n",
-            h.id, h.scope, h.note_type, h.title, h.snippet
-        );
-        if out.chars().count() + line.chars().count() > max_chars {
-            out.push_str("\n…(more matches; narrow with memory_search)\n");
-            break;
-        }
-        out.push_str(&line);
-    }
     let shown: Vec<String> = notes
         .iter()
-        .take(limit)
-        .map(|(_, h)| format!("{}:{}", h.scope, h.path))
+        .map(|m| format!("{}:{}", m.hit.scope, m.hit.path))
         .collect();
-    let related: Vec<&Hit> = findings
-        .iter()
-        .map(|(_, h)| h)
+    recall.findings = findings
+        .into_iter()
+        .map(|m| m.hit)
         .filter(|h| h.status == "open" || h.status == "accepted")
         .filter(|h| {
-            let root = store.vault_for(if h.scope == "project" {
-                crate::note::Scope::Project
-            } else {
-                crate::note::Scope::Global
-            });
-            let target = std::fs::read_to_string(root.join(&h.path))
+            let target = std::fs::read_to_string(store.vault_for(scope_of(h)).join(&h.path))
                 .ok()
                 .and_then(|s| Note::parse(&s).ok())
                 .and_then(|n| {
@@ -255,16 +411,95 @@ pub fn context(store: &mut Store, task: &str, limit: usize, max_chars: usize) ->
             target.is_some_and(|t| shown.contains(&t))
         })
         .collect();
-    if !related.is_empty() {
-        out.push_str("\nOpen findings on these notes (check before trusting them):\n");
-        for h in related {
-            out.push_str(&format!("- [[{}]] {}\n", h.id, h.title));
+    let (linked, problem) = linked(store, &notes);
+    recall.linked = linked;
+    recall.notes = notes;
+    recall.problems = problems;
+    recall.problems.extend(problem);
+    Ok(recall)
+}
+
+impl Recall {
+    /// The answer as text, cut to about `max_chars`.
+    pub fn render(&self, max_chars: usize) -> String {
+        if self.terms.is_empty() {
+            return "No searchable terms in the task description; use memory_search with specific words."
+                .into();
         }
+        let mut out = format!(
+            "Memory relevant to: {}\n(terms: {})\n",
+            self.task,
+            self.terms.join(", ")
+        );
+        if !self.unmatched.is_empty() {
+            out.push_str(&format!(
+                "(no note contains: {}. If they matter, search again with other words or in \
+                 another language.)\n",
+                self.unmatched.join(", ")
+            ));
+        }
+        if self.notes.is_empty() {
+            out.push_str("\nNo matching notes.\n");
+        }
+        let fits = |out: &str, line: &str| out.chars().count() + line.chars().count() <= max_chars;
+        let unreviewed = |status: &str| {
+            if status == "draft" {
+                ", draft: unreviewed"
+            } else {
+                ""
+            }
+        };
+        for m in &self.notes {
+            let h = &m.hit;
+            let line = format!(
+                "\n- [[{}]] ({}/{}{}, matches: {}) {}\n  {}\n",
+                h.id,
+                h.scope,
+                h.note_type,
+                unreviewed(&h.status),
+                m.terms.join(", "),
+                h.title,
+                h.snippet
+            );
+            if !fits(&out, &line) {
+                out.push_str("\n…(more matches; narrow with memory_search)\n");
+                break;
+            }
+            out.push_str(&line);
+        }
+        let mut heading = "\nOne link away from these notes (read with memory_get):\n";
+        for l in &self.linked {
+            let via: Vec<String> = l.via.iter().map(|id| format!("[[{id}]]")).collect();
+            let line = format!(
+                "{heading}- [[{}]] ({}/{}{}) {}, linked with {}\n",
+                l.id,
+                l.scope.as_str(),
+                l.note_type,
+                unreviewed(&l.status),
+                l.title,
+                via.join(", ")
+            );
+            if !fits(&out, &line) {
+                break;
+            }
+            out.push_str(&line);
+            heading = "";
+        }
+        if !self.findings.is_empty() {
+            out.push_str("\nOpen findings on these notes (check before trusting them):\n");
+            for h in &self.findings {
+                out.push_str(&format!("- [[{}]] {}\n", h.id, h.title));
+            }
+        }
+        for p in &self.problems {
+            out.push_str(&format!("\nNote: {p}\n"));
+        }
+        out
     }
-    for p in problems {
-        out.push_str(&format!("\nNote: {p}\n"));
-    }
-    Ok(out)
+}
+
+pub fn context(store: &mut Store, task: &str, limit: usize, max_chars: usize) -> Result<String> {
+    Ok(recall(store, task, limit)?.render(max_chars))
 }
 
 #[cfg(test)]
@@ -330,6 +565,129 @@ mod tests {
             th.iter().all(|x| !x.starts_with(is_sea_mark)),
             "no term starts with a mark: {th:?}"
         );
+    }
+
+    #[test]
+    fn unmatched_parts_read_like_the_task() {
+        let parts = |task: &str, found: &[&str]| {
+            unmatched_parts(task, &task_terms(task), |t| found.contains(&t.as_str()))
+        };
+        // overlapping bigrams are one part again
+        assert_eq!(parts("調整舊備份保留多久", &[]), ["調整舊備份保留多久"]);
+        // a bigram across a found word and the next one is not reported
+        assert_eq!(parts("加強搜尋架構", &["搜尋"]), ["加強", "架構"]);
+        assert_eq!(
+            parts("Agentic RAG retrieval 的搜尋", &["rag", "搜尋"]),
+            ["agentic", "retrieval"]
+        );
+        assert!(parts("rotate the signing key", &["rotate", "signing", "key"]).is_empty());
+        // the same part twice is reported once
+        assert_eq!(parts("備份 和 備份", &[]), ["備份"]);
+    }
+
+    /// A project with these notes in its vault, searched without Obsidian.
+    fn store(name: &str, notes: &[(&str, &str)]) -> (Store, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("obmem-context-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("global")).unwrap();
+        std::fs::write(dir.join(".obmem.toml"), "").unwrap();
+        for (rel, content) in notes {
+            let p = dir.join("kb").join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, content).unwrap();
+        }
+        let cfg = crate::config::Config {
+            project_root: dir.clone(),
+            project_name: "t".into(),
+            project_vault: dir.join("kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: false,
+            device: "test".into(),
+        };
+        let store = Store::open_with(cfg, crate::obsidian::Backend::Headless).unwrap();
+        (store, dir)
+    }
+
+    #[test]
+    fn recall_says_where_to_go_next() {
+        let note = |ty: &str, status: &str, body: &str| {
+            format!("---\ntype: {ty}\nstatus: {status}\n---\n{body}\n")
+        };
+        let (mut store, dir) = store(
+            "next",
+            &[
+                (
+                    "Index.md",
+                    &note(
+                        "concept",
+                        "active",
+                        "[[jwt-rotation]] [[secret-store]] [[billing]]",
+                    ),
+                ),
+                (
+                    "Decisions/jwt-rotation.md",
+                    &note(
+                        "decision",
+                        "active",
+                        "Rotate the signing key. See [[secret-store]], [[old-rotation]] and [[gone]].",
+                    ),
+                ),
+                (
+                    "Knowledge/secret-store.md",
+                    &note("fact", "draft", "Where the secret lives."),
+                ),
+                (
+                    "Knowledge/audit-log.md",
+                    &note(
+                        "fact",
+                        "active",
+                        "Written on every change. See [[jwt-rotation]].",
+                    ),
+                ),
+                (
+                    "Archive/old-rotation.md",
+                    &note("decision", "superseded", "Nothing was changed."),
+                ),
+                (
+                    "Knowledge/billing.md",
+                    &note("fact", "active", "Invoices go out monthly."),
+                ),
+            ],
+        );
+        let r = recall(&mut store, "rotate the signing key 的流程", 8).unwrap();
+        assert!(r.problems.is_empty(), "{:?}", r.problems);
+        let ids: Vec<&str> = r.notes.iter().map(|m| m.hit.id.as_str()).collect();
+        assert_eq!(ids, ["jwt-rotation"]);
+        assert_eq!(r.notes[0].terms, ["rotate", "signing", "key"]);
+        assert_eq!(r.unmatched, ["流程"]);
+        // one link away, in either direction: not the index, a superseded note or a missing one
+        let linked: Vec<(&str, &[String])> = r
+            .linked
+            .iter()
+            .map(|l| (l.id.as_str(), l.via.as_slice()))
+            .collect();
+        assert_eq!(
+            linked,
+            [
+                ("secret-store", &["jwt-rotation".to_string()][..]),
+                ("audit-log", &["jwt-rotation".to_string()][..]),
+            ]
+        );
+        let text = r.render(4000);
+        assert!(
+            text.contains("(no note contains: 流程. ")
+                && text.contains("- [[jwt-rotation]] (project/decision, matches: rotate, signing, key) ")
+                && text.contains(
+                    "- [[secret-store]] (project/fact, draft: unreviewed) secret-store, linked with [[jwt-rotation]]\n"
+                ),
+            "{text}"
+        );
+        // a task with nothing to search for
+        let r = recall(&mut store, "how to do it?", 8).unwrap();
+        assert!(r.render(4000).starts_with("No searchable terms"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

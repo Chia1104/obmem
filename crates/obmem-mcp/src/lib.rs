@@ -336,8 +336,10 @@ impl MemoryServer {
     #[tool(
         description = "Get the memory most relevant to a task before starting it: pass the task \
         description (any language) and receive the best-matching notes, ranked by how many of the task's \
-        terms they contain, plus open findings about them. Use at the start of a non-trivial task; use \
-        memory_search for precise lookups."
+        terms they contain, with the terms each one matched, the notes one link away from the best \
+        ones, and open findings about them. Matching is literal: the answer names the words no note \
+        contains, so that you can search again with other words or in the notes' language. Use at \
+        the start of a non-trivial task; use memory_search for precise lookups."
     )]
     async fn memory_context(
         &self,
@@ -355,7 +357,10 @@ impl MemoryServer {
         }
     }
 
-    #[tool(description = "Read one memory note in full, with its backlinks.")]
+    #[tool(
+        description = "Read one memory note in full. The first line lists the notes it links to and \
+        the notes that link to it: read those with memory_get to follow a topic."
+    )]
     async fn memory_get(
         &self,
         peer: Peer<RoleServer>,
@@ -367,18 +372,7 @@ impl MemoryServer {
         }
         let mut s = self.store.lock().unwrap();
         match s.get(&a.id) {
-            Ok((loc, content, backlinks)) => {
-                let bl = match backlinks {
-                    Ok(b) if b.is_empty() => "none".to_string(),
-                    Ok(b) => b
-                        .iter()
-                        .map(|b| format!("[[{b}]]"))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    Err(e) => format!("unavailable ({e})"),
-                };
-                ok(format!("<!-- {loc} | backlinks: {bl} -->\n{content}"))
-            }
+            Ok(got) => ok(got.to_string()),
             Err(e) => fail(e),
         }
     }

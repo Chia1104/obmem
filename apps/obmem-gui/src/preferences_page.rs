@@ -1,116 +1,155 @@
-//! How the window looks: the mode, the theme each appearance shows, and the user's own theme
-//! files.
+//! The Preferences page of the settings: the window's language, its mode, the theme each
+//! appearance shows (picked in a dialog), and the user's own theme files.
 
 use crate::appearance::{self, Language, Mode, Scheme, ThemeFile};
 use crate::motion::{Eased, pressed};
 use crate::state::{self, Work};
 use crate::widgets::{
-    Level, action, card, check, choice, heading, muted, page, page_header, path_text, select,
+    FirstRow, Level, about, action, card, check, choice, dialog_box, field, heading, muted, page,
+    page_bar, path_text, primary, select,
 };
 use crate::words::tr;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
-pub(crate) fn appearance_page() -> impl IntoElement {
+pub(crate) fn preferences_page() -> impl IntoElement {
+    // The appearance whose theme is being picked, while the dialog is open.
+    let picking = signal(None::<Scheme>);
     page(
-        page_header(
-            tr!("appearance.title"),
-            muted(tr!("appearance.about")),
-            vec![],
-        ),
+        page_bar(tr!("prefs.preferences"), view(), vec![]),
         view()
             .gap_4()
+            .child(about(tr!("prefs.preferences_about")))
             .child(
                 card()
-                    .test_id("appearance-language")
-                    .gap_2()
-                    .child(heading(tr!("language.title")))
-                    .child(muted(tr!("language.about")))
-                    // A language is named in itself, so that its speakers find it.
-                    .child(view().pt_1().child(select(
-                        &[
-                            (Language::System, "language.system"),
-                            (Language::English, "language.english"),
-                            (Language::Chinese, "language.chinese"),
-                        ],
-                        state::language,
-                        state::set_language,
-                        "language.title",
-                    ))),
+                    .child(
+                        field(
+                            tr!("language.title"),
+                            tr!("language.about"),
+                            // A language is named in itself, so that its speakers find it.
+                            select(
+                                &[
+                                    (Language::System, "language.system"),
+                                    (Language::English, "language.english"),
+                                    (Language::Chinese, "language.chinese"),
+                                ],
+                                state::language,
+                                state::set_language,
+                                "language.title",
+                            ),
+                        )
+                        .first_row()
+                        .test_id("appearance-language"),
+                    )
+                    .child(
+                        field(
+                            tr!("appearance.mode"),
+                            tr!("appearance.mode_about"),
+                            choice(
+                                &[
+                                    (Mode::System, "appearance.system"),
+                                    (Mode::Light, "appearance.light"),
+                                    (Mode::Dark, "appearance.dark"),
+                                ],
+                                state::mode,
+                                state::set_mode,
+                            ),
+                        )
+                        .test_id("appearance-mode"),
+                    )
+                    .child(theme_row(Scheme::Light, picking))
+                    .child(theme_row(Scheme::Dark, picking)),
             )
-            .child(
-                card()
-                    .test_id("appearance-mode")
-                    .gap_2()
-                    .child(heading(tr!("appearance.mode")))
-                    .child(muted(tr!("appearance.mode_about")))
-                    .child(view().pt_1().child(choice(
-                        &[
-                            (Mode::System, "appearance.system"),
-                            (Mode::Light, "appearance.light"),
-                            (Mode::Dark, "appearance.dark"),
-                        ],
-                        state::mode,
-                        state::set_mode,
-                    ))),
-            )
-            // Rebuilt when the theme files change, not when one is picked: a pick only moves the
-            // mark, so the keyboard focus stays in the list.
+            // Rebuilt when the theme files change.
+            .child(dynamic(move || own_themes(&state::themes())))
             .child(dynamic(move || {
-                let themes = state::themes();
-                vec![
-                    scheme_card(&themes, Scheme::Light).into_element(),
-                    scheme_card(&themes, Scheme::Dark).into_element(),
-                    own_themes(&themes).into_element(),
-                ]
+                picking
+                    .get()
+                    .map(|scheme| theme_dialog(scheme, move || picking.set(None)))
             })),
     )
 }
 
-/// The themes to pick from for `scheme`, each drawn in its own colors.
-fn scheme_card(themes: &[ThemeFile], scheme: Scheme) -> View {
-    let (title, about) = match scheme {
+/// The translation keys of an appearance's theme: its name and what it is.
+fn scheme_words(scheme: Scheme) -> (&'static str, &'static str) {
+    match scheme {
         Scheme::Light => ("appearance.light_theme", "appearance.light_theme_about"),
         Scheme::Dark => ("appearance.dark_theme", "appearance.dark_theme_about"),
-    };
-    let mut list = nsh_base::radio_group()
-        .flex_row()
-        .flex_wrap()
-        .gap_3()
-        .pt_3();
-    for file in themes.iter().filter(|t| t.tokens.is_ok()) {
-        list = list.child(tile(file, scheme));
     }
-    card()
-        .test_id(&format!("{}-theme", scheme.label()))
-        .child(heading(tr!(title)))
-        .child(muted(tr!(about)))
-        .child(dynamic(move || {
-            let chosen = state::chosen_theme(scheme);
-            (chosen != state::shown_theme(scheme)).then(|| {
-                check(
-                    Level::Warn,
-                    tr!("appearance.theme_gone", theme = chosen),
-                    tr!("appearance.theme_gone_about"),
-                )
-            })
-        }))
-        .child(list)
-        .child(
+}
+
+/// The theme `scheme` shows, by name, and the way to pick another one.
+fn theme_row(scheme: Scheme, picking: Signal<Option<Scheme>>) -> View {
+    let (title, said) = scheme_words(scheme);
+    let name = move || {
+        let id = state::shown_theme(scheme);
+        state::themes()
+            .into_iter()
+            .find(|t| t.id == id)
+            .map(|t| t.name)
+            .unwrap_or(id)
+    };
+    view()
+        .test_id(&format!("{}-theme-row", scheme.label()))
+        .child(field(
+            tr!(title),
+            tr!(said),
             view()
                 .flex_row()
-                .flex_wrap()
                 .items_center()
                 .gap_3()
-                .pt_3()
-                .child(
-                    action(tr!("appearance.duplicate"), move || {
-                        state::duplicate_theme(scheme)
-                    })
-                    .busy(state::running(Work::DuplicateTheme(scheme))),
-                )
-                .child(muted(tr!("appearance.duplicate_about")).text_xs()),
+                .child(text(name).text_sm().font_weight(FontWeight::MEDIUM))
+                .child(action(tr!("prefs.change_theme"), move || {
+                    picking.set(Some(scheme))
+                })),
+        ))
+        .child(dynamic(move || gone(scheme)))
+}
+
+/// Said while the theme chosen for `scheme` cannot be shown.
+fn gone(scheme: Scheme) -> Option<View> {
+    let chosen = state::chosen_theme(scheme);
+    (chosen != state::shown_theme(scheme)).then(|| {
+        check(
+            Level::Warn,
+            tr!("appearance.theme_gone", theme = chosen),
+            tr!("appearance.theme_gone_about"),
         )
+    })
+}
+
+/// The themes to pick from for `scheme`, each drawn in its own colors. A pick shows at once, in
+/// the window behind the dialog.
+fn theme_dialog(scheme: Scheme, close: impl Fn() + Clone + 'static) -> AnyElement {
+    let (title, _) = scheme_words(scheme);
+    // Rebuilt when the theme files change (a copy was made), not when one is picked: a pick only
+    // moves the mark, so the keyboard focus stays in the list.
+    let tiles = dynamic(move || {
+        let mut list = nsh_base::radio_group().flex_row().flex_wrap().gap_3();
+        for file in state::themes().iter().filter(|t| t.tokens.is_ok()) {
+            list = list.child(tile(file, scheme));
+        }
+        list
+    });
+    dialog_box(
+        &format!("{}-theme", scheme.label()),
+        tr!(title),
+        620.0,
+        view()
+            .gap_3()
+            .child(dynamic(move || gone(scheme)))
+            .child(tiles)
+            .child(muted(tr!("appearance.duplicate_about")).text_xs()),
+        vec![
+            action(tr!("appearance.duplicate"), move || {
+                state::duplicate_theme(scheme)
+            })
+            .busy(state::running(Work::DuplicateTheme(scheme)))
+            .into_element(),
+            primary(tr!("common.done"), close.clone()).into_element(),
+        ],
+        close,
+    )
 }
 
 /// A theme to pick: a small window in its colors for `scheme`, and its name.
@@ -214,7 +253,7 @@ fn tile(file: &ThemeFile, scheme: Scheme) -> impl IntoElement {
 }
 
 /// The user's theme files, with what is wrong with the ones that cannot be used.
-fn own_themes(themes: &[ThemeFile]) -> View {
+fn own_themes(themes: &[ThemeFile]) -> AnyElement {
     let mut block = card()
         .test_id("own-themes")
         .child(heading(tr!("appearance.own")))
@@ -233,7 +272,9 @@ fn own_themes(themes: &[ThemeFile]) -> View {
         );
     let own: Vec<&ThemeFile> = themes.iter().filter(|t| t.file.is_some()).collect();
     if own.is_empty() {
-        return block.child(muted(tr!("appearance.own_none")));
+        return block
+            .child(muted(tr!("appearance.own_none")))
+            .into_element();
     }
     for own in own {
         let file = own.file.clone();
@@ -272,5 +313,5 @@ fn own_themes(themes: &[ThemeFile]) -> View {
                 })),
         );
     }
-    block
+    block.into_element()
 }

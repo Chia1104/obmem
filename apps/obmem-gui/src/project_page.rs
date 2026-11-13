@@ -2,10 +2,11 @@
 
 use crate::data::ClaudeMemory;
 use crate::data::{AgentState, Detail};
+use crate::icons::{FOLDER, REFRESH, TRASH};
 use crate::state::{self, Load, Tab, Work};
 use crate::widgets::{
-    Level, action, card, check, checkbox_control, heading, loading, muted, notice_area, page,
-    page_header, path_text, primary, tabs,
+    Level, action, card, check, checkbox_control, heading, icon_button, loading, muted,
+    notice_area, page, page_bar, path_text, primary, tabs,
 };
 use crate::words::tr;
 use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
@@ -22,56 +23,43 @@ pub(crate) const REVEAL: &str = if cfg!(windows) {
 
 pub(crate) fn project_page() -> impl IntoElement {
     page(
-        dynamic(header),
+        dynamic(bar),
         view()
             .gap_4()
-            .child(dynamic(move || {
-                let ready = matches!(state::detail(), Load::Ready(ref d) if d.status.initialized);
-                ready.then(tab_bar)
-            }))
             .child(notice_area())
             .child(view().gap_4().child(dynamic(content))),
     )
 }
 
-/// The project's name and actions; also what shows before it loads or when it cannot.
-fn header() -> Vec<AnyElement> {
-    match state::detail() {
-        Load::Loading if state::selected().is_none() => {
-            vec![muted(tr!("project.none")).into_element()]
-        }
-        Load::Loading => vec![loading(tr!("common.loading")).into_element()],
-        Load::Failed(e) => vec![
-            check(Level::Error, tr!("project.unreadable"), e).into_element(),
-            view()
-                .flex_row()
-                .gap_2()
-                .child(
-                    action(tr!("common.try_again"), state::refresh)
-                        .busy(state::running(Work::Refresh)),
-                )
-                .child(remove_button())
-                .into_element(),
-        ],
-        Load::Ready(d) => {
-            let root = d.status.project_root.clone();
-            let shown = root.display().to_string();
+/// The project's name, its folder and what can be done with it, and its tabs once it is set up.
+/// Before it loads or when it cannot, the bar only says where the user is.
+fn bar() -> Vec<AnyElement> {
+    let Load::Ready(d) = state::detail() else {
+        return vec![page_bar(tr!("sidebar.projects"), view(), vec![]).into_element()];
+    };
+    let root = d.status.project_root.clone();
+    let shown = root.display().to_string();
+    let mut out = vec![
+        page_bar(
+            d.status.project_name.clone(),
+            path_text(shown).number_of_lines(1u32),
             vec![
-                page_header(
-                    d.status.project_name.clone(),
-                    path_text(shown),
-                    vec![
-                        action(tr!("common.refresh"), state::refresh)
-                            .busy(state::running(Work::Refresh))
-                            .into_element(),
-                        action(tr!(REVEAL), move || drop(reveal_path(root.clone()))).into_element(),
-                        remove_button().into_element(),
-                    ],
-                )
-                .into_element(),
-            ]
-        }
+                icon_button(REFRESH, tr!("common.refresh"), state::refresh)
+                    .busy(state::running(Work::Refresh))
+                    .into_element(),
+                icon_button(FOLDER, tr!(REVEAL), move || drop(reveal_path(root.clone())))
+                    .into_element(),
+                icon_button(TRASH, tr!("project.remove"), state::remove_selected)
+                    .busy(state::running(Work::RemoveProject))
+                    .into_element(),
+            ],
+        )
+        .into_element(),
+    ];
+    if d.status.initialized {
+        out.push(tab_bar());
     }
+    out
 }
 
 fn remove_button() -> impl IntoElement {
@@ -93,11 +81,30 @@ fn tab_bar() -> AnyElement {
     .into_element()
 }
 
-/// The shown tab. It re-renders when the project is read again (after a save) or the tab changes,
-/// never for a notice, so a form keeps what the user typed when a save fails.
+/// The shown tab, or why there is none. It re-renders when the project is read again (after a
+/// save) or the tab changes, never for a notice, so a form keeps what the user typed when a save
+/// fails.
 fn content() -> Vec<AnyElement> {
-    let Load::Ready(d) = state::detail() else {
-        return vec![];
+    let d = match state::detail() {
+        Load::Loading if state::selected().is_none() => {
+            return vec![muted(tr!("project.none")).into_element()];
+        }
+        Load::Loading => return vec![loading(tr!("common.loading")).into_element()],
+        Load::Failed(e) => {
+            return vec![
+                check(Level::Error, tr!("project.unreadable"), e).into_element(),
+                view()
+                    .flex_row()
+                    .gap_2()
+                    .child(
+                        action(tr!("common.try_again"), state::refresh)
+                            .busy(state::running(Work::Refresh)),
+                    )
+                    .child(remove_button())
+                    .into_element(),
+            ];
+        }
+        Load::Ready(d) => d,
     };
     if !d.status.initialized {
         return vec![

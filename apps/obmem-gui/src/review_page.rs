@@ -2,10 +2,11 @@
 //! Notes are read in Obsidian; this page decides on them.
 
 use crate::data::ReviewGroup;
+use crate::icons::REFRESH;
 use crate::state::{self, Decision, Load, Work};
 use crate::widgets::{
-    Level, Press, action, card, check, heading, loading, muted, notice_area, page, page_header,
-    primary,
+    Level, Press, about, action, card, check, dialog_box, heading, icon_button, loading, muted,
+    notice_area, page, page_bar, primary,
 };
 use crate::words::{self, tr};
 use nsh_base::theme;
@@ -18,17 +19,18 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn review_page() -> impl IntoElement {
     page(
-        page_header(
+        page_bar(
             tr!("review.title"),
-            muted(tr!("review.about")),
+            view(),
             vec![
-                action(tr!("common.refresh"), state::load_review)
+                icon_button(REFRESH, tr!("common.refresh"), state::load_review)
                     .busy(state::running(Work::LoadReview))
                     .into_element(),
             ],
         ),
         view()
             .gap_4()
+            .child(about(tr!("review.about")))
             .child(notice_area())
             .child(view().gap_4().child(dynamic(move || {
                 match state::review() {
@@ -217,21 +219,28 @@ fn row(root: &Path, vault_id: Option<&str>, item: Item) -> View {
     body.child(actions)
 }
 
-/// Rejecting silences the check for that spot for good, so it asks first.
-fn reject(at: At) -> AnyElement {
+/// Rejecting silences the check for that spot for good, so it asks first, in a dialog.
+fn reject(at: At) -> View {
     let asking = signal(false);
-    dynamic(move || {
-        if !asking.get() {
-            return vec![
-                action(tr!("review.reject_ask"), move || asking.set(true))
-                    .blocked(state::reviewing(at.item.clone()))
-                    .into_element(),
-            ];
-        }
-        vec![
-            muted(tr!("review.reject_about")).into_element(),
-            at.resolves(Verdict::Rejected, true).into_element(),
-            action(tr!("common.cancel"), move || asking.set(false)).into_element(),
-        ]
-    })
+    let close = move || asking.set(false);
+    view()
+        .child(
+            action(tr!("review.reject_ask"), move || asking.set(true))
+                .blocked(state::reviewing(at.item.clone())),
+        )
+        .child(dynamic(move || {
+            asking.get().then(|| {
+                dialog_box(
+                    "reject",
+                    tr!("review.reject_title"),
+                    420.0,
+                    muted(tr!("review.reject_about")),
+                    vec![
+                        action(tr!("common.cancel"), close).into_element(),
+                        at.resolves(Verdict::Rejected, true).into_element(),
+                    ],
+                    close,
+                )
+            })
+        }))
 }

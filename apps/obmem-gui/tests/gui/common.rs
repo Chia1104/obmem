@@ -70,6 +70,21 @@ fn in_child() {
     );
 }
 
+/// Opens the settings from the sidebar that lists the projects, then their page `page`
+/// (`preferences`, `vault`, `sync` or `secrets`).
+pub fn open_settings(app: &mut Headless, page: &str) {
+    app.wait_for_within("id:screen-settings", SLOW).unwrap();
+    app.press("id:screen-settings >> role:button").unwrap();
+    show_settings(app, page);
+}
+
+/// Shows the settings' page `page` from the sidebar that lists them, reading it again.
+pub fn show_settings(app: &mut Headless, page: &str) {
+    let entry = format!("id:settings-{page} >> role:button");
+    app.wait_for_within(&entry, SLOW).unwrap();
+    app.press(&entry).unwrap();
+}
+
 /// A git repo folder, listed in the project list.
 pub fn project(dir: &Path, name: &str) -> PathBuf {
     let p = dir.join(name);

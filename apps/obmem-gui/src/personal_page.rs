@@ -1,12 +1,13 @@
-//! The user's own settings (`~/.config/obmem/config.toml`) and their personal vault's allowlist,
-//! which apply to every project.
+//! The pages of the settings that are about the personal vault, which apply to every project:
+//! the vault itself (`~/.config/obmem/config.toml`), syncing it, and its allowlist.
 
 use crate::data::{self, ConnectField, Personal, SyncInfo, Vault};
 use crate::form::{Problems, said};
 use crate::state::{self, Load, Work};
 use crate::widgets::{
-    Level, Marked, action, card, check, checked_field, field, heading, loading, muted, notice_area,
-    page, page_header, primary, problem_line, switch_control, text_box,
+    FirstRow, Level, Marked, about, action, card, check, checked_field, dialog_box, field, heading,
+    input_field, loading, muted, notice_area, page, page_bar, primary, problem_line,
+    switch_control, text_box,
 };
 use crate::words::{self, tr};
 use nsh_core::prelude::*;
@@ -14,11 +15,37 @@ use obmem_core::allowlist::{self, Allowlist, Kind};
 use obmem_core::settings::{GlobalField, GlobalSettings, SyncField, SyncSettings};
 use obmem_sync::Outcome;
 
-pub(crate) fn personal_page() -> impl IntoElement {
+/// Where the personal vault is, and how agents' notes get into it.
+pub(crate) fn vault_page() -> impl IntoElement {
+    personal("common.personal_vault", "personal.about", |p| {
+        vec![form(p).into_element()]
+    })
+}
+
+/// Syncing the personal vault between devices.
+pub(crate) fn sync_page() -> impl IntoElement {
+    personal("sync.title", "sync.about", sync_blocks)
+}
+
+/// What the secret scanner lets pass in every project.
+pub(crate) fn secrets_page() -> impl IntoElement {
+    personal("prefs.secrets", "allowlist.about", |p| {
+        vec![allowlist(p).into_element()]
+    })
+}
+
+/// A page about the personal vault: `title` and `about` are translation keys, and `blocks` is
+/// what it shows once the settings are read.
+fn personal(
+    title: &'static str,
+    said: &'static str,
+    blocks: fn(&Personal) -> Vec<AnyElement>,
+) -> impl IntoElement {
     page(
-        page_header(tr!("personal.title"), muted(tr!("personal.about")), vec![]),
+        page_bar(tr!(title), view(), vec![]),
         view()
             .gap_4()
+            .child(about(tr!(said)))
             .child(notice_area())
             .child(
                 view()
@@ -28,11 +55,7 @@ pub(crate) fn personal_page() -> impl IntoElement {
                         Load::Failed(e) => {
                             vec![check(Level::Error, tr!("personal.unreadable"), e).into_element()]
                         }
-                        Load::Ready(p) => vec![
-                            form(&p).into_element(),
-                            sync_card(&p).into_element(),
-                            allowlist(&p).into_element(),
-                        ],
+                        Load::Ready(p) => blocks(&p),
                     })),
             ),
     )
@@ -56,15 +79,17 @@ fn form(p: &Personal) -> View {
     let now = p.vault.display().to_string();
     card()
         .test_id("personal-settings")
-        .child(heading(tr!("personal.settings")))
-        .child(checked_field(
-            tr!("common.personal_vault"),
-            tr!("personal.vault_help", now = now),
-            text_box(vault, "~/Obsidian/AgentMemory")
-                .marked(problems.marks(GlobalField::Vault))
-                .test_id("personal-vault"),
-            problems.at(GlobalField::Vault),
-        ))
+        .child(
+            checked_field(
+                tr!("common.personal_vault"),
+                tr!("personal.vault_help", now = now),
+                text_box(vault, "~/Obsidian/AgentMemory")
+                    .marked(problems.marks(GlobalField::Vault))
+                    .test_id("personal-vault"),
+                problems.at(GlobalField::Vault),
+            )
+            .first_row(),
+        )
         .child(field(
             tr!("personal.scan_env"),
             tr!("personal.scan_env_help"),
@@ -91,47 +116,64 @@ fn form(p: &Personal) -> View {
         )
 }
 
-fn sync_card(p: &Personal) -> View {
-    let c = card()
-        .test_id("personal-sync")
-        .child(heading(tr!("sync.title")))
-        .child(muted(tr!("sync.about")));
+/// How the sync stands, with what can be done about it, then its settings.
+fn sync_blocks(p: &Personal) -> Vec<AnyElement> {
     let info = match &p.sync {
         Ok(i) => i.clone(),
         Err(e) => {
-            return c.child(check(Level::Error, tr!("sync.unreadable"), e.clone()));
+            return vec![
+                card()
+                    .test_id("personal-sync")
+                    .child(check(Level::Error, tr!("sync.unreadable"), e.clone()))
+                    .into_element(),
+            ];
         }
     };
-    let c = c
-        .child(sync_status(&info))
-        .child(sync_settings(&info.settings));
-    if info.settings.bucket.is_empty() || info.connected == Ok(true) {
-        return c;
-    }
-    c.child(connect_form())
+    vec![
+        sync_status(&info).into_element(),
+        card()
+            .test_id("personal-sync")
+            .child(heading(tr!("sync.settings")))
+            .child(sync_settings(&info.settings))
+            .into_element(),
+    ]
 }
 
 fn sync_status(info: &SyncInfo) -> View {
-    let row = view().gap_2().pt_2();
+    let block = card().test_id("sync-status").gap_2();
     if info.settings.bucket.is_empty() {
-        return row.child(muted(tr!("sync.off")));
+        return block.child(muted(tr!("sync.off")));
     }
-    match &info.connected {
-        Err(e) => {
-            return row.child(check(
-                Level::Error,
-                tr!("sync.keychain_unreadable"),
-                e.clone(),
-            ));
-        }
-        Ok(false) => {
-            return row.child(check(
-                Level::Warn,
-                tr!("sync.not_connected"),
-                tr!("sync.not_connected_about"),
-            ));
-        }
-        Ok(true) => {}
+    let why = match &info.connected {
+        Ok(true) => None,
+        Ok(false) => Some(check(
+            Level::Warn,
+            tr!("sync.not_connected"),
+            tr!("sync.not_connected_about"),
+        )),
+        Err(e) => Some(check(
+            Level::Error,
+            tr!("sync.keychain_unreadable"),
+            e.clone(),
+        )),
+    };
+    if let Some(why) = why {
+        // Made with the page: the dialog closes when the settings are read again, which a
+        // connection ends with.
+        let connecting = signal(false);
+        let close = move || connecting.set(false);
+        return block
+            .child(why)
+            .child(
+                view()
+                    .flex_row()
+                    .child(primary(tr!("sync.connect_title"), move || {
+                        connecting.set(true)
+                    })),
+            )
+            .child(dynamic(move || {
+                connecting.get().then(|| connect_dialog(close))
+            }));
     }
     let line = match info.last.clone() {
         None => check(
@@ -155,7 +197,7 @@ fn sync_status(info: &SyncInfo) -> View {
             )
         }
     };
-    row.child(line).child(
+    block.child(line).child(
         view()
             .flex_row()
             .child(primary(tr!("sync.now"), state::sync_now).busy(state::running(Work::Sync))),
@@ -187,14 +229,17 @@ fn sync_settings(s: &SyncSettings) -> View {
     };
     view()
         .gap_1()
-        .child(checked_field(
-            tr!("sync.endpoint"),
-            tr!("sync.endpoint_help"),
-            text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com")
-                .marked(problems.marks(SyncField::Endpoint))
-                .test_id("sync-endpoint"),
-            problems.at(SyncField::Endpoint),
-        ))
+        .child(
+            checked_field(
+                tr!("sync.endpoint"),
+                tr!("sync.endpoint_help"),
+                text_box(endpoint, "https://<account-id>.r2.cloudflarestorage.com")
+                    .marked(problems.marks(SyncField::Endpoint))
+                    .test_id("sync-endpoint"),
+                problems.at(SyncField::Endpoint),
+            )
+            .first_row(),
+        )
         .child(checked_field(
             tr!("sync.bucket"),
             tr!("sync.bucket_help"),
@@ -203,17 +248,17 @@ fn sync_settings(s: &SyncSettings) -> View {
                 .test_id("sync-bucket"),
             problems.at(SyncField::Bucket),
         ))
-        .child(field(
+        .child(input_field(
             tr!("sync.region"),
             tr!("sync.region_help"),
             text_box(region, "auto"),
         ))
-        .child(field(
+        .child(input_field(
             tr!("sync.prefix"),
             tr!("sync.prefix_help"),
             text_box(prefix, "obmem"),
         ))
-        .child(field(
+        .child(input_field(
             tr!("sync.device"),
             tr!("sync.device_help"),
             text_box(device, "work-mac").test_id("sync-device"),
@@ -240,7 +285,9 @@ fn sync_settings(s: &SyncSettings) -> View {
         )
 }
 
-fn connect_form() -> View {
+/// Connecting this device: the bucket's access key and the vault's passphrase, asked in a
+/// dialog. What is typed is gone when it closes.
+fn connect_dialog(close: impl Fn() + Clone + 'static) -> AnyElement {
     let key_id = signal(String::new());
     let secret = signal(String::new());
     let passphrase = signal(String::new());
@@ -274,27 +321,25 @@ fn connect_form() -> View {
             )
         }
     };
-    // `label` is a translation key.
+    // `label` is a translation key. A dialog is narrow: the label goes above its box.
     let row = move |field: ConnectField,
                     label: &'static str,
                     value: Signal<String>,
                     masked: bool,
                     id: &str| {
-        checked_field(
-            tr!(label),
-            "",
-            text_box(value, tr!(label))
-                .marked(problems.marks(field))
-                .masked(masked)
-                .test_id(id),
-            problems.at(field),
-        )
+        view()
+            .gap_1()
+            .child(text(tr!(label)).text_sm().font_weight(FontWeight::MEDIUM))
+            .child(
+                text_box(value, "")
+                    .marked(problems.marks(field))
+                    .masked(masked)
+                    .test_id(id),
+            )
+            .child(problem_line(problems.at(field)))
     };
-    view()
-        .test_id("sync-connect")
-        .gap_1()
-        .pt_3()
-        .child(text(tr!("sync.connect_title")).font_weight(FontWeight::MEDIUM))
+    let fields = view()
+        .gap_3()
         .child(muted(tr!("sync.connect_about")))
         .child(row(
             ConnectField::KeyId,
@@ -323,19 +368,26 @@ fn connect_form() -> View {
             repeat,
             true,
             "connect-repeat",
-        ))
-        .child(
-            view().flex_row().pt_2().child(
-                primary(tr!("sync.connect"), connect).busy(state::running(Work::ConnectSync)),
-            ),
-        )
+        ));
+    dialog_box(
+        "sync-connect",
+        tr!("sync.connect_title"),
+        460.0,
+        fields,
+        vec![
+            action(tr!("common.cancel"), close.clone()).into_element(),
+            primary(tr!("sync.connect"), connect)
+                .busy(state::running(Work::ConnectSync))
+                .into_element(),
+        ],
+        close,
+    )
 }
 
 fn allowlist(p: &Personal) -> View {
     let mut c = card()
         .test_id("personal-allowlist")
-        .child(heading(tr!("allowlist.title")))
-        .child(muted(tr!("allowlist.about")));
+        .child(heading(tr!("allowlist.title")));
     let a = match &p.allowlist {
         Ok(a) => a.clone(),
         Err(e) => {

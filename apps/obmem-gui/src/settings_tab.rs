@@ -4,8 +4,8 @@ use crate::data::Detail;
 use crate::form::{Problems, said};
 use crate::state::{self, Work};
 use crate::widgets::{
-    Level, Marked, card, check, checked_field, choice, field, heading, muted, primary,
-    switch_control, text_box,
+    FirstRow, Level, Marked, card, check, checked_field, choice, field, heading, input_field,
+    muted, primary, switch_control, text_box,
 };
 use crate::words::tr;
 use nsh_core::prelude::*;
@@ -82,11 +82,14 @@ fn project_form(s: ProjectSettings) -> View {
         .test_id("project-settings")
         .child(heading(tr!("settings.title")))
         .child(muted(tr!("settings.about")))
-        .child(field(
-            tr!("settings.name"),
-            tr!("settings.name_help"),
-            text_box(name, tr!("settings.name_placeholder")).test_id("settings-name"),
-        ))
+        .child(
+            input_field(
+                tr!("settings.name"),
+                tr!("settings.name_help"),
+                text_box(name, tr!("settings.name_placeholder")).test_id("settings-name"),
+            )
+            .first_row(),
+        )
         .child(checked_field(
             tr!("common.project_vault"),
             tr!("settings.vault_help"),
@@ -160,9 +163,12 @@ fn codex(d: &Detail) -> View {
         )
         .into_element(),
     };
-    card().test_id("codex").child(heading("Codex")).child(field(
-        tr!("codex.auto_approve"),
-        tr!("codex.auto_approve_help"),
-        control,
-    ))
+    card().test_id("codex").child(heading("Codex")).child(
+        field(
+            tr!("codex.auto_approve"),
+            tr!("codex.auto_approve_help"),
+            control,
+        )
+        .first_row(),
+    )
 }

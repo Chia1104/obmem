@@ -4,18 +4,14 @@
 //! app's own words, which then follow the language, or a `String` for what is data (a name, a
 //! path, what a library reported).
 
-use crate::motion::{self, Eased, Enters, pressed, pressed_icon};
-use crate::sidebar;
+use crate::motion::{Eased, Enters, pressed, pressed_icon};
 use crate::words::tr;
 use nsh_base::{button, input, theme};
-use nsh_core::element::desktop::title_bar;
 use nsh_core::prelude::*;
 use std::rc::Rc;
 
 /// Below this window width the sidebar stops taking room and opens over the page instead.
 pub(crate) const NARROW: f32 = 760.0;
-/// Below this page width a form row puts its label above its control.
-const STACK_FIELDS: f32 = 620.0;
 /// The widest the page's column gets: lines stay readable in a wide window.
 const PAGE_MAX: f32 = 920.0;
 
@@ -24,84 +20,90 @@ pub(crate) fn narrow() -> bool {
     window().width.0 < NARROW
 }
 
-/// Makes the layout glide when the window crosses a width where it rearranges: the sidebar
-/// becomes a rail, or form rows put their labels above their controls. Call it once, in the
-/// root component.
-pub(crate) fn glide_at_breakpoints() {
-    let last = stored(None);
-    effect(move || {
-        let now = (narrow(), page_width() < STACK_FIELDS);
-        if last.replace(Some(now)).is_some_and(|was| was != now) {
-            untracked(motion::glide);
-        }
-    });
-}
-
-/// The width left for the page beside the sidebar.
-fn page_width() -> f32 {
-    (window().width.0 - sidebar::docked_width()).min(PAGE_MAX)
-}
-
 /// One of the app's own theme tokens (`theme.json`), else the text color.
 pub(crate) fn tone(name: &'static str) -> impl Fn() -> AdaptiveColor + Copy {
     move || theme().color(name).unwrap_or(theme().foreground)
 }
 
-/// The strip along the window's top edge where the system's title bar was: it drags the window,
-/// and the window's controls sit in it. Nothing where the system draws its own title bar.
-pub(crate) fn title_strip() -> View {
+/// How far the page's panel stands in from the window's edges.
+const INSET: f32 = 8.0;
+
+/// A page: one panel set into the window beside the sidebar, under the strip along the window's
+/// top edge (`sidebar::top_strip`). Its `bar` stays at the top
+/// ([`page_bar`], and a project's tabs under it); its `body` scrolls below, in a column that stops
+/// growing in a wide window and rises in when the page is opened.
+pub(crate) fn page(bar: impl IntoElement, body: impl IntoElement) -> impl IntoElement {
     view()
-        .flex_shrink_0()
-        .h(move || title_bar().top)
-        .window_drag(true)
-}
-
-/// A page: its header, then its blocks, in a column that scrolls and stops growing in a wide
-/// window. The column rises in when the page is opened.
-pub(crate) fn page(header: impl IntoElement, body: impl IntoElement) -> impl IntoElement {
-    view().flex_1().min_w(px(0.0)).child(title_strip()).child(
-        scroll().flex_1().child(
+        .flex_1()
+        .min_w(px(0.0))
+        .pr(px(INSET))
+        .pb(px(INSET))
+        .child(
             view()
-                .w_full()
-                .max_w(px(PAGE_MAX))
-                .gap_4()
-                .px_6()
-                .pb_6()
-                .pt_2()
-                .style_when(narrow, |s| s.px_4().pb_4())
-                .child(header)
-                .child(body)
-                .rises(),
-        ),
-    )
+                .flex_1()
+                .overflow_hidden()
+                .rounded(move || theme().radius + px(4.0))
+                .border_1()
+                .border_color(move || theme().border)
+                .bg(move || theme().background)
+                .child(view().flex_shrink_0().window_drag(true).child(bar))
+                .child(
+                    scroll().flex_1().child(
+                        view()
+                            .w_full()
+                            .max_w(px(PAGE_MAX))
+                            .gap_4()
+                            .px_6()
+                            .pb_6()
+                            .pt_1()
+                            .style_when(narrow, |s| s.px_4().pb_4())
+                            .child(body)
+                            .rises(),
+                    ),
+                ),
+        )
 }
 
-/// A page's title, what it is about below it, and its actions, which move under the title when
-/// they do not fit beside it.
-pub(crate) fn page_header(
+/// The top row of a page's panel: its title, what stands beside the title (a project's folder),
+/// and its actions at the right.
+pub(crate) fn page_bar(
     title: impl IntoReactive<SharedString>,
-    about: impl IntoElement,
+    beside: impl IntoElement,
     actions: Vec<AnyElement>,
 ) -> View {
-    let mut buttons = view().flex_row().flex_wrap().gap_2();
+    let mut buttons = view().flex_row().items_center().gap_1();
     for a in actions {
         buttons = buttons.child(a);
     }
     view()
         .flex_row()
-        .flex_wrap()
-        .items_end()
+        .items_center()
         .gap_3()
-        .pb_2()
+        .h(px(52.0))
+        .pl_6()
+        .pr_3()
+        .style_when(narrow, |s| s.pl_4())
         .child(
             view()
                 .flex_1()
-                .min_w(px(220.0))
-                .gap_1()
-                .child(text(title).text_2xl().font_weight(FontWeight::SEMIBOLD))
-                .child(about),
+                .min_w(px(0.0))
+                .flex_row()
+                .items_baseline()
+                .gap_3()
+                .child(
+                    text(title)
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .number_of_lines(1u32),
+                )
+                .child(view().flex_1().min_w(px(0.0)).child(beside)),
         )
         .child(buttons)
+}
+
+/// What a page is about, said once above its blocks.
+pub(crate) fn about(label: impl IntoReactive<SharedString>) -> Text {
+    muted(label)
 }
 
 /// A section title.
@@ -264,33 +266,76 @@ pub(crate) fn loading(label: impl IntoReactive<SharedString>) -> View {
         .child(muted(label))
 }
 
-/// A square button holding an icon, for chrome such as the sidebar's.
+/// A square button holding an icon, named by a hint: for the sidebar and a page's bar. While its
+/// own work runs it spins and takes no presses ([`IconPress::busy`]).
+pub(crate) struct IconPress {
+    paths: &'static str,
+    label: Reactive<SharedString>,
+    on_press: Box<dyn Fn()>,
+    busy: Rc<dyn Fn() -> bool>,
+}
+
 pub(crate) fn icon_button(
     paths: &'static str,
     label: impl IntoReactive<SharedString>,
     on_press: impl Fn() + 'static,
-) -> impl IntoElement {
-    let label = label.into_reactive();
-    button()
-        .w(px(28.0))
-        .h(px(28.0))
-        .items_center()
-        .justify_center()
-        .rounded(move || theme().radius)
-        .text_color(move || theme().muted_foreground)
-        .presses()
-        .hover(|s| {
-            s.bg(move || theme().sidebar_accent)
-                .text_color(move || theme().foreground)
-        })
-        .active(pressed_icon)
-        .accessibility_label({
-            let label = label.clone();
-            move || Some(label.get())
-        })
-        .on_press(on_press)
-        .child(crate::icons::icon(paths, 16.0))
-        .with_hint(label)
+) -> IconPress {
+    IconPress {
+        paths,
+        label: label.into_reactive(),
+        on_press: Box::new(on_press),
+        busy: Rc::new(|| false),
+    }
+}
+
+impl IconPress {
+    /// Whether the work it starts is running (`state::running`).
+    pub(crate) fn busy(mut self, busy: impl Fn() -> bool + 'static) -> Self {
+        self.busy = Rc::new(busy);
+        self
+    }
+}
+
+impl IntoElement for IconPress {
+    fn into_element(self) -> AnyElement {
+        let IconPress {
+            paths,
+            label,
+            on_press,
+            busy,
+        } = self;
+        let ink = move || theme().muted_foreground;
+        let spins = busy.clone();
+        button()
+            .w(px(28.0))
+            .h(px(28.0))
+            .items_center()
+            .justify_center()
+            .rounded(move || theme().radius)
+            .text_color(ink)
+            .presses()
+            // A wash of the text color: the button sits on the sidebar and on the page alike.
+            .hover(|s| {
+                s.bg(move || theme().foreground.opacity(0.08))
+                    .text_color(move || theme().foreground)
+            })
+            .active(pressed_icon)
+            .disabled(move || busy())
+            .accessibility_label({
+                let label = label.clone();
+                move || Some(label.get())
+            })
+            .on_press(on_press)
+            .child(dynamic(move || {
+                if spins() {
+                    spinner(ink).into_element()
+                } else {
+                    crate::icons::icon(paths, 16.0).into_element()
+                }
+            }))
+            .with_hint(label)
+            .into_element()
+    }
 }
 
 /// Shows `label` above an element while the pointer rests on it.
@@ -394,27 +439,27 @@ pub(crate) fn card() -> View {
         .rounded(move || theme().radius)
 }
 
-/// A row of tabs over the page (NSH's `Tabs`): the shown one is underlined in ink, and the
-/// underline travels to the next one. Tabs that do not fit wrap. Each option is a value and the
-/// translation key of its label.
+/// A row of tabs under a page's bar (NSH's `Tabs`): the shown one stands on a pill, which travels
+/// to the next one. Tabs that do not fit wrap. Each option is a value and the translation key of
+/// its label.
 pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
     options: &[(T, &'static str)],
     current: impl Fn() -> T + Copy + 'static,
     pick: impl Fn(T) + Copy + 'static,
 ) -> impl IntoElement {
     let mut list = nsh_base::tabs()
-        .indicator_class(Some("bottom-0 h-[2px] rounded-full bg-primary".into()))
+        .indicator_class(Some("top-0 bottom-0 rounded-full bg-secondary".into()))
         .flex_row()
         .flex_wrap()
-        .gap_x_4()
-        .border_b_1()
-        .border_b_color(move || theme().border);
+        .gap_1();
     for &(value, label) in options {
         let on = move || current() == value;
         list = list.child(
             nsh_base::tab()
                 .selected(on)
-                .py_2()
+                .px_3()
+                .py_1()
+                .rounded_full()
                 .washes()
                 .hover(|s| s.opacity(0.8))
                 .on_press(move || pick(value))
@@ -432,7 +477,13 @@ pub(crate) fn tabs<T: Copy + PartialEq + 'static>(
                 ),
         );
     }
-    list
+    // The pill spans its list, so the room around the tabs is a view's around the list. The
+    // first pill then starts where the page's title does.
+    view()
+        .px_6()
+        .pb_3()
+        .style_when(narrow, |s| s.px_4())
+        .child(list)
 }
 
 /// One choice among a few, as a segmented control of NSH `Toggle`s; the chosen one is raised.
@@ -602,9 +653,28 @@ pub(crate) fn checkbox_control(
         .child(view().flex_1().min_w(px(0.0)).child(label))
 }
 
-/// A labelled form row: what it is, what it does, and its control. In a narrow page the label
-/// goes above the control.
+/// A row of a card's settings: what it is and what it does at the left, and its control at the
+/// right. For a control that is small: a switch, a choice, a list, a button. Where the two do
+/// not fit side by side the control goes under the words.
 pub(crate) fn field(
+    label: impl IntoReactive<SharedString>,
+    help: impl IntoReactive<SharedString>,
+    control: impl IntoElement,
+) -> View {
+    row()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .justify_between()
+        .gap_x_6()
+        .gap_y_2()
+        .child(words(label, help).flex_1().min_w(px(220.0)))
+        .child(view().flex_shrink_0().child(control))
+}
+
+/// A row of a card's settings whose control is a text box: what it is and what it does, then
+/// the box under them, as wide as the card.
+pub(crate) fn input_field(
     label: impl IntoReactive<SharedString>,
     help: impl IntoReactive<SharedString>,
     control: impl IntoElement,
@@ -612,40 +682,46 @@ pub(crate) fn field(
     checked_field(label, help, control, || None)
 }
 
-/// A [`field`] whose value has rules: the one it breaks (`form::Problems::at`) shows under the
-/// control, which marks itself too ([`Marked`]).
+/// An [`input_field`] whose value has rules: the one it breaks (`form::Problems::at`) shows under
+/// the box, which marks itself too ([`Marked`]).
 pub(crate) fn checked_field(
     label: impl IntoReactive<SharedString>,
     help: impl IntoReactive<SharedString>,
     control: impl IntoElement,
     problem: impl Fn() -> Option<String> + 'static,
 ) -> View {
-    let stacked = move || page_width() < STACK_FIELDS;
+    row()
+        .gap_2()
+        .child(words(label, help))
+        .child(control)
+        .child(problem_line(problem))
+}
+
+/// A row of a card's settings, parted from the row above it by a hairline.
+fn row() -> View {
     view()
-        .flex_row()
-        .gap_4()
         .py_3()
         .border_t_1()
         .border_t_color(move || theme().border)
-        .style_when(stacked, |s| s.flex_col().gap_2())
-        .child(
-            view()
-                .w(px(240.0))
-                .flex_shrink_0()
-                .gap_1()
-                .style_when(stacked, |s| s.w_full())
-                .child(text(label).text_sm().font_weight(FontWeight::MEDIUM))
-                .child(muted(help).text_xs()),
-        )
-        .child(
-            view()
-                .flex_1()
-                .min_w(px(0.0))
-                .justify_center()
-                .gap_1()
-                .child(control)
-                .child(problem_line(problem)),
-        )
+}
+
+/// What a row is and what it does.
+fn words(label: impl IntoReactive<SharedString>, help: impl IntoReactive<SharedString>) -> View {
+    view()
+        .gap_1()
+        .child(text(label).text_sm().font_weight(FontWeight::MEDIUM))
+        .child(muted(help).text_xs())
+}
+
+/// The first of a card's rows has nothing above it to be parted from.
+pub(crate) trait FirstRow {
+    fn first_row(self) -> Self;
+}
+
+impl FirstRow for View {
+    fn first_row(self) -> Self {
+        self.border_t(px(0.0)).pt_1()
+    }
 }
 
 /// The rule a value breaks, said under its control while it breaks one. The line fades in when
@@ -727,6 +803,93 @@ pub(crate) fn callout(
                 .bg(move || color().opacity(0.55)),
         )
         .child(view().flex_1().min_w(px(0.0)).gap_1().child(body))
+}
+
+/// The veil over the window behind a dialog or the drawer, as a Tailwind class.
+pub(crate) const SCRIM: &str = "bg-background/70";
+
+/// A dialog over the window (NSH's `Dialog`), for a flow done once or a decision to confirm: its
+/// title, what it shows, and its buttons at the bottom right. Put it in a region that holds it
+/// only while it is open. Its ✕, a press outside it and Escape call `close`. `id` is what tests
+/// find its panel by.
+pub(crate) fn dialog_box(
+    id: &str,
+    title: impl IntoReactive<SharedString>,
+    width: f32,
+    body: impl IntoElement,
+    buttons: Vec<AnyElement>,
+    close: impl Fn() + Clone + 'static,
+) -> AnyElement {
+    let title = title.into_reactive();
+    let mut foot = view()
+        .flex_row()
+        .flex_wrap()
+        .justify_end()
+        .gap_2()
+        .px_5()
+        .pb_5();
+    for b in buttons {
+        foot = foot.child(b);
+    }
+    let panel = view()
+        .test_id(id)
+        .w_full()
+        .max_w(px(width))
+        // The dialog stands in from the window's edges by the padding around it.
+        .max_h(move || px(window().height.0 - 48.0))
+        .overflow_hidden()
+        .rounded(move || theme().radius + px(4.0))
+        .border_1()
+        .border_color(move || theme().border)
+        .bg(move || theme().card)
+        .shadow_xl()
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .pl_5()
+                .pr_3()
+                .pt_4()
+                .pb_2()
+                .child(
+                    text(title.clone())
+                        .flex_1()
+                        .font_weight(FontWeight::SEMIBOLD),
+                )
+                .child(icon_button(
+                    crate::icons::X,
+                    tr!("common.close"),
+                    close.clone(),
+                )),
+        )
+        .child(
+            scroll()
+                .flex_shrink(1.0)
+                .child(view().gap_3().px_5().pb_5().child(body)),
+        )
+        .child(foot)
+        .rises();
+    nsh_base::dialog()
+        .animation(nsh_core::ModalAnimation::Fade)
+        .label(title)
+        .on_cancel(close.clone())
+        .child(
+            view()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .p_6()
+                .child(
+                    view()
+                        .absolute()
+                        .inset_0()
+                        .app_class(Some(SharedString::from(SCRIM)))
+                        .on_press(close),
+                )
+                .child(panel),
+        )
+        .into_element()
 }
 
 /// What the last action reported, when that is more than a line: with a way to dismiss it.

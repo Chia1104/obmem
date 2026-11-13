@@ -6,7 +6,6 @@
 
 use nsh_core::element::StyleRefinement;
 use nsh_core::prelude::*;
-use nsh_core::{LayoutAnimation, LayoutCurve, LayoutTransition};
 
 /// A color changing under the pointer, in milliseconds.
 const INSTANT: f32 = 120.0;
@@ -67,19 +66,6 @@ pub(crate) trait Enters: Element {
 }
 
 impl<T: Element> Enters for T {}
-
-/// Makes the next change of layout a motion: what moves or resizes glides there, and what comes
-/// or goes fades. Call it before the change, when the arrangement changes (the sidebar collapses,
-/// the window crosses a breakpoint), not for a size that follows the pointer.
-pub(crate) fn glide() {
-    if reduce_motion() {
-        return;
-    }
-    animate_layout(LayoutAnimation::all(LayoutTransition::new(
-        LayoutCurve::EaseInEaseOut,
-        BASE,
-    )));
-}
 
 /// Out of sight to in sight, as things settle.
 fn coming() -> MotionSpec {

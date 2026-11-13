@@ -87,7 +87,13 @@ Terms are cut by Unicode script, not by language:
 - Hangul, and Thai / Lao / Khmer / Myanmar: bigrams of character clusters.
 - Small English and Chinese filler lists drop common words. With more than 16 terms, the longest win.
 
-Each note is ranked by how many distinct terms it contains, with title matches counting double. Matching is literal: there is no stemming and no matching across languages.
+Matching is literal: there is no stemming and no matching across languages. The query is the terms as bare words joined by `OR`, never quoted: Obsidian finds a bare word anywhere, and a quoted one almost only as a whole word, which the built-in search does not copy. The ranking then decides again what a note has (`count`): a word of a script written with spaces counts only where a word starts (`rag` is not in `storage`, `token` is in `tokens`), and a bigram counts anywhere.
+
+Each note is ranked by the terms it has:
+- A term is worth more the fewer of the found notes have it (`weight`), so `does` and `not` decide little. There is no list of common words to extend for this.
+- A note gets more of a term's weight for having it more often, and a long note needs it more often (`share`, the term-frequency part of BM25). A term in the title gets its weight once more.
+- Equal scores come project vault first, then by path, so both backends give one order.
+- `Index.md` is never a match: it has most terms of any task. When it has some, the answer names it in one line.
 
 The agent that calls `memory_context` can search again, so the answer (`context::Recall`) also says where to go next:
 - Each match lists the terms it contains.

@@ -1,6 +1,8 @@
 //! `memory_context(task)`: the notes most relevant to a task description, within a size budget.
 //! `Store::search` does the searching; this only turns free text into an OR query (Obsidian ANDs
-//! words, and many scripts have no spaces) and ranks the hits, which Obsidian search does not.
+//! words, and many scripts have no spaces) and ranks the hits, which Obsidian search does not:
+//! by the terms a note has. A rare term counts for more than one most notes have ([`weight`]), and
+//! a note that is long needs a term more often ([`share`]).
 //!
 //! The caller is an agent that can search again, so the answer also says where to go next: which
 //! terms each note matched, which terms no note contains, and the notes one link away from the
@@ -15,8 +17,9 @@
 //! - Hangul: bigrams, because particles attach to nouns (방식을 → 방식, 식을);
 //! - Thai, Lao, Khmer, Myanmar (no spaces): bigrams of character clusters (base + marks).
 //!
-//! Matching stays literal (Obsidian substring search): "rotation" does not find 輪替, and an
-//! inflected form only finds itself.
+//! Matching stays literal: "rotation" does not find 輪替, and an inflected form finds only what
+//! starts with it. Obsidian's search finds a word anywhere, the ranking only where a word starts
+//! ([`count`]).
 
 use crate::catalog::Hit;
 use crate::note::{Note, Scope};
@@ -32,8 +35,8 @@ const CANDIDATES: usize = 500;
 const FOLLOWED: usize = 3;
 /// How many notes one link away are listed.
 const MAX_LINKED: usize = 5;
-/// The vault's map of content links to every note, so it says nothing about which notes belong
-/// together.
+/// The vault's map of content. It links to every note, so it says nothing about which notes
+/// belong together, and it has most terms of any task.
 const INDEX: &str = "Index.md";
 const EN_STOP: &[&str] = &[
     "the", "and", "for", "with", "that", "this", "from", "into", "how", "what", "why", "when",
@@ -176,10 +179,11 @@ pub fn task_terms(task: &str) -> Vec<String> {
 #[derive(Debug, Clone)]
 pub struct Match {
     pub hit: Hit,
-    /// The terms the note contains, in the task's order.
+    /// The terms the note contains, the rarest first.
     pub terms: Vec<String>,
-    /// One for each of `terms`, two when the title has it.
-    score: usize,
+    /// For each of `terms`, its weight ([`weight`]) times the note's share of it ([`share`]),
+    /// and the weight once more when the title has it.
+    score: f64,
 }
 
 /// A note one link away from the matches that is not one of them.
@@ -209,6 +213,9 @@ pub struct Recall {
     pub notes: Vec<Match>,
     /// Notes linked with the best matches, the one linked with the most of them first.
     pub linked: Vec<Linked>,
+    /// The vault's map of content, when it has the task's terms. It is never one of `notes`: it
+    /// would be there for every task.
+    pub index: Option<Hit>,
     /// Open findings about the matches.
     pub findings: Vec<Hit>,
     /// What could not be searched or listed.
@@ -223,25 +230,68 @@ fn scope_of(hit: &Hit) -> Scope {
     }
 }
 
-/// The terms a note contains, and its score: one for each term, two when the title has it.
-fn matched(store: &Store, hit: &Hit, terms: &[String]) -> (Vec<String>, usize) {
-    let text = std::fs::read_to_string(store.vault_for(scope_of(hit)).join(&hit.path))
+/// How often `text` has `term`. A word of a script written with spaces counts only where a word
+/// starts, so `rag` is not in `storage` and `token` is in `tokens` and `rotate_token`. A bigram
+/// counts anywhere, because its script does not mark where a word starts.
+fn count(text: &str, term: &str) -> usize {
+    if term.chars().next().map(class) != Some(Class::Word) {
+        return text.matches(term).count();
+    }
+    text.match_indices(term)
+        .filter(|(at, _)| {
+            text[..*at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| class(c) != Class::Word || c == '-' || c == '_')
+        })
+        .count()
+}
+
+/// One note the search handed over, as the ranking reads it.
+struct Candidate {
+    hit: Hit,
+    /// The terms it has, by their place in the task's terms: how often, and whether the title
+    /// has it too.
+    terms: Vec<(usize, usize, bool)>,
+    /// The note's length in characters.
+    len: usize,
+}
+
+fn candidate(store: &Store, hit: Hit, terms: &[String]) -> Candidate {
+    let text = std::fs::read_to_string(store.vault_for(scope_of(&hit)).join(&hit.path))
         .unwrap_or_default()
         .to_lowercase();
     let title = hit.title.to_lowercase();
-    let (mut found, mut score) = (Vec::new(), 0);
-    for t in terms {
-        let points = if title.contains(t.as_str()) {
-            2
-        } else {
-            usize::from(text.contains(t.as_str()))
-        };
-        if points > 0 {
-            found.push(t.clone());
-            score += points;
-        }
+    Candidate {
+        terms: terms
+            .iter()
+            .enumerate()
+            .filter_map(|(i, t)| {
+                let in_title = count(&title, t) > 0;
+                let times = count(&text, t).max(usize::from(in_title));
+                (times > 0).then_some((i, times, in_title))
+            })
+            .collect(),
+        len: text.chars().count(),
+        hit,
     }
-    (found, score)
+}
+
+/// What a term is worth that `with` of the `of` notes the task found have. A term most of them
+/// have (`does`, `not`) says little about which note the task is about.
+fn weight(with: usize, of: usize) -> f64 {
+    (1.0 + of as f64 / with.max(1) as f64).ln()
+}
+
+/// How much of a term's weight a note gets for having it `times` times: more for more, but each
+/// time adds less, and a note longer than the others (`len` to `average`) needs more of them. A
+/// long note has a little of every word. This is the term-frequency part of BM25, with its usual
+/// constants.
+fn share(times: usize, len: usize, average: f64) -> f64 {
+    const K1: f64 = 1.2;
+    const B: f64 = 0.75;
+    let times = times as f64;
+    times * (K1 + 1.0) / (times + K1 * (1.0 - B + B * len as f64 / average.max(1.0)))
 }
 
 /// The parts of a task that no note contains: the terms for which `found` is false, as the
@@ -358,6 +408,7 @@ pub fn recall(store: &mut Store, task: &str, limit: usize) -> Result<Recall> {
         unmatched: Vec::new(),
         notes: Vec::new(),
         linked: Vec::new(),
+        index: None,
         findings: Vec::new(),
         problems: Vec::new(),
     };
@@ -365,25 +416,60 @@ pub fn recall(store: &mut Store, task: &str, limit: usize) -> Result<Recall> {
         return Ok(recall);
     }
     let terms = &recall.terms;
-    let query = terms
-        .iter()
-        .map(|t| format!("\"{t}\""))
-        .collect::<Vec<_>>()
-        .join(" OR ");
+    // Bare words: Obsidian finds a bare word anywhere, and a quoted one in few notes that have
+    // it only as part of a longer word. `"token"` would leave out a note that says `tokens`
+    // before the ranking sees it, and the built-in search would not.
+    let query = terms.join(" OR ");
     let (hits, problems) = store.search(&query, None, None, CANDIDATES)?;
     let complete = problems.is_empty() && hits.len() < CANDIDATES;
-    let mut ranked: Vec<Match> = hits
+    // The search matches a word anywhere, so it can hand over a note that has none of the terms
+    // the way `count` counts them.
+    let mut found: Vec<Candidate> = hits
         .into_iter()
-        .map(|hit| {
-            let (terms, score) = matched(store, &hit, terms);
-            Match { hit, terms, score }
+        .map(|hit| candidate(store, hit, terms))
+        .filter(|c| !c.terms.is_empty())
+        .collect();
+    let has = |c: &Candidate, term: usize| c.terms.iter().any(|(i, ..)| *i == term);
+    if complete {
+        recall.unmatched = unmatched_parts(task, terms, |t| {
+            let at = terms.iter().position(|x| x == t);
+            at.is_some_and(|at| found.iter().any(|c| has(c, at)))
+        });
+    }
+    // The map of content links to every note, so it has most terms of any task.
+    if let Some(at) = found.iter().position(|c| c.hit.path == INDEX) {
+        recall.index = Some(found.remove(at).hit);
+    }
+    let weights: Vec<f64> = (0..terms.len())
+        .map(|i| weight(found.iter().filter(|c| has(c, i)).count(), found.len()))
+        .collect();
+    let average = found.iter().map(|c| c.len).sum::<usize>() as f64 / found.len().max(1) as f64;
+    let mut ranked: Vec<Match> = found
+        .into_iter()
+        .map(|mut c| {
+            c.terms
+                .sort_by(|a, b| weights[b.0].total_cmp(&weights[a.0]));
+            Match {
+                score: c
+                    .terms
+                    .iter()
+                    .map(|(i, times, in_title)| {
+                        weights[*i]
+                            * (share(*times, c.len, average) + f64::from(u8::from(*in_title)))
+                    })
+                    .sum(),
+                terms: c.terms.iter().map(|(i, ..)| terms[*i].clone()).collect(),
+                hit: c.hit,
+            }
         })
         .collect();
-    if complete {
-        recall.unmatched =
-            unmatched_parts(task, terms, |t| ranked.iter().any(|m| m.terms.contains(t)));
-    }
-    ranked.sort_by_key(|m| std::cmp::Reverse(m.score));
+    // Equal scores: the project's notes first, then by path, so that both backends give one order.
+    ranked.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| (a.hit.scope != "project").cmp(&(b.hit.scope != "project")))
+            .then_with(|| a.hit.path.cmp(&b.hit.path))
+    });
     // findings are listed separately, against the notes they are about
     let (findings, mut notes): (Vec<_>, Vec<_>) = ranked
         .into_iter()
@@ -484,6 +570,12 @@ impl Recall {
             }
             out.push_str(&line);
             heading = "";
+        }
+        if let Some(h) = &self.index {
+            out.push_str(&format!(
+                "\nNot listed above: [[{}]], the map of every note in the {} vault.\n",
+                h.id, h.scope
+            ));
         }
         if !self.findings.is_empty() {
             out.push_str("\nOpen findings on these notes (check before trusting them):\n");
@@ -687,6 +779,57 @@ mod tests {
         // a task with nothing to search for
         let r = recall(&mut store, "how to do it?", 8).unwrap();
         assert!(r.render(4000).starts_with("No searchable terms"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_word_counts_where_a_word_starts() {
+        assert_eq!(count("storage of paragraphs", "rag"), 0);
+        assert_eq!(count("tokens, rotate_token and refresh-token", "token"), 3);
+        assert_eq!(count("rag: the rag pipeline", "rag"), 2);
+        // a word after a script without spaces starts a word; a bigram counts anywhere
+        assert_eq!(count("使用git的流程", "git"), 1);
+        assert_eq!(count("備份與備份", "備份"), 2);
+    }
+
+    #[test]
+    fn weak_matches_do_not_outrank_the_note_the_task_is_about() {
+        let note = |body: &str| format!("---\ntype: fact\nstatus: active\n---\n{body}\n");
+        let long = format!(
+            "Storage does compress paragraphs. {}",
+            "Nothing else. ".repeat(40)
+        );
+        let (mut store, dir) = store(
+            "weak",
+            &[
+                ("Index.md", &note("[[rag]] [[storage]] [[b]] [[a]]")),
+                (
+                    "Knowledge/rag.md",
+                    &note("RAG does not fit a vault this small."),
+                ),
+                ("Knowledge/storage.md", &note(&long)),
+                ("Knowledge/b.md", &note("It does.")),
+                ("Knowledge/a.md", &note("It does.")),
+            ],
+        );
+        let r = recall(&mut store, "does obmem use RAG", 8).unwrap();
+        let ids: Vec<&str> = r.notes.iter().map(|m| m.hit.id.as_str()).collect();
+        // `rag` is not in `storage`, a long note that says `does` once gets less for it than a
+        // short one, and equal notes come by path
+        assert_eq!(ids, ["rag", "a", "b", "storage"]);
+        // the rarest term first
+        assert_eq!(r.notes[0].terms, ["rag", "does"]);
+        assert_eq!(r.notes[3].terms, ["does"]);
+        assert_eq!(r.unmatched, ["obmem"]);
+        // the map of content has every note's name, and is named without taking a place
+        assert_eq!(r.index.as_ref().map(|h| h.id.as_str()), Some("Index"));
+        assert!(
+            r.render(4000).contains(
+                "\nNot listed above: [[Index]], the map of every note in the project vault.\n"
+            ),
+            "{}",
+            r.render(4000)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

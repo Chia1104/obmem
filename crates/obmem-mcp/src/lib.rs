@@ -335,8 +335,8 @@ impl MemoryServer {
 
     #[tool(
         description = "Get the memory most relevant to a task before starting it: pass the task \
-        description (any language) and receive the best-matching notes, ranked by how many of the task's \
-        terms they contain, with the terms each one matched, the notes one link away from the best \
+        description (any language) and receive the best-matching notes, ranked by the task's terms they \
+        contain (a rare term counts most), with the terms each one matched, the notes one link away from the best \
         ones, and open findings about them. Matching is literal: the answer names the words no note \
         contains, so that you can search again with other words or in the notes' language. Use at \
         the start of a non-trivial task; use memory_search for precise lookups."

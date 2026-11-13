@@ -6,13 +6,14 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-14
-verified_commit: 3fa0335
+verified_commit: 21e8190
 code_refs:
 - crates/obmem-core/src/obsidian.rs#vault_id
 - crates/obmem-core/src/obsidian.rs#is_empty_result
 - crates/obmem-core/src/obsidian.rs#app_missing
 - crates/obmem-core/src/obsidian.rs#parse_links
 - crates/obmem-core/src/store.rs#search
+- crates/obmem-core/src/context.rs#recall
 tags:
 - obsidian
 - gotcha
@@ -35,6 +36,11 @@ Non-obvious behaviour of the official Obsidian CLI (verified on Obsidian 1.14.5)
   - `orphans`: one path per line.
   - `links path=<note>` (checked on 2026-11-14): one target per line, sorted by name, each target once. It has no JSON form: `format=json` prints the same lines. A file is its vault-relative path, and other files than notes are listed too (`未命名.canvas`). A link that opens nothing is `<link text> (unresolved)`. The note's link to itself is listed, so obmem drops it. `total` prints only the count.
 - **Search operators:** `[type:x]`, `-[status:x]`, `-path:X`, `tag:x` and `line:( )` all work, and words are ANDed. `a OR b -x` parses as `a OR (b -x)`, so obmem wraps the user's query in parentheses before adding its filters.
+- **A bare word and a quoted word match differently** (checked on 2026-11-14 on this repo's vault):
+  - A bare word is found anywhere, also inside a longer word: `orag` found the 2 notes that say `storage`, and `toke` the 5 that say `token`. A bare word with a hyphen or an underscore is one word (`code-drift`, `verified_commit`), also inside `( … OR … )`.
+  - A quoted word is found almost only as a whole word: `"orag"` found 0 notes, `"not"` 27 where `not` found 28, and `"backups"` 0 where `"backup"` found 7. Two results do not fit whole words and are not explained: `"toke"` and `"backu"` each found 1 note.
+  - Chinese text has no such difference: `"輪替"` and `輪替` found the same 5 notes.
+  - The built-in search (`query.rs`) finds a quoted word anywhere, so it does not copy this. `memory_context` therefore sends bare words. A `memory_search` with a quoted word can still return more notes without Obsidian than with it.
 - **What counts as a link:** links inside code are ignored, links in frontmatter count, and so do Markdown links (`[text](Index.md)`). A `[[link]]` in a finding would count as a backlink and rescue an orphan, so findings name their note by path.
 - **No relevance ranking** in search results.
 - **Speed:** a call takes about 5 ms while the app is running (2026-11-14), so a few calls per `memory_context` cost nothing a person notices.

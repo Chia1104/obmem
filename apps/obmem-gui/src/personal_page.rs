@@ -1,5 +1,5 @@
 //! The pages of the settings that are about the personal vault, which apply to every project:
-//! the vault itself (`~/.config/obmem/config.toml`), syncing it, and its allowlist.
+//! the vault itself (`~/.obmem/config.toml`), syncing it, and its allowlist.
 
 use crate::data::{self, ConnectField, Personal, SyncInfo, Vault};
 use crate::form::{Problems, said};

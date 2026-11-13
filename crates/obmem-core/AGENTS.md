@@ -7,7 +7,7 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 - This crate has no transport and no UI, so there is no rmcp, tokio or terminal output here. An enum that the CLI takes as an argument derives clap only behind the `clap` feature: `#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]`.
 - `schemars::JsonSchema` derives become the MCP tool schemas. The doc comments on those enums and their variants are the descriptions agents read.
 - `audit` and `store` call each other, so they belong in the same crate.
-- `projects` is the machine's list of project roots (`~/.config/obmem/projects.toml`, next to the global config). Front ends record into it: the CLI's `init` and session-start hook, and the GUI. Library functions never record, because their tests would fill the user's real list with temp folders.
+- `projects` is the machine's list of project roots (`~/.obmem/projects.toml`, next to the global config). Front ends record into it: the CLI's `init` and session-start hook, and the GUI. Library functions never record, because their tests would fill the user's real list with temp folders.
 
 ## Settings and allowlists (`settings.rs`, `allowlist.rs`)
 

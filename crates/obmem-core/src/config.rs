@@ -230,13 +230,14 @@ pub fn expand_tilde(p: &str) -> PathBuf {
     }
 }
 
-/// `~/.config/obmem/config.toml` (XDG style on every OS, easier to find than
-/// `~/Library/Application Support`).
+/// `~/.obmem/config.toml`: one folder in the home directory on every OS, for the user's config
+/// and everything obmem keeps beside it (the project list, the sync state, the desktop app's
+/// themes). A standalone install has its binary there too, in `bin/`.
 pub fn global_config_path() -> PathBuf {
     if let Ok(p) = std::env::var("OBMEM_CONFIG") {
         return PathBuf::from(p);
     }
-    home().join(".config/obmem/config.toml")
+    home().join(".obmem/config.toml")
 }
 
 /// Walk up from `start` until a `.obmem.toml` or `.git` is found.

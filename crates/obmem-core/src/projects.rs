@@ -19,7 +19,7 @@ struct Registry {
     projects: Vec<Project>,
 }
 
-/// `projects.toml` next to the global config (`~/.config/obmem/`).
+/// `projects.toml` next to the global config (`~/.obmem/`).
 pub fn registry_path() -> PathBuf {
     crate::config::global_config_path().with_file_name("projects.toml")
 }

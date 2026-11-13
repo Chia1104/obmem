@@ -28,7 +28,7 @@ enum Cmd {
     Init {
         /// Keep the project vault in this folder, outside the repo, instead of `docs/kb`: for
         /// memory that must not be in the repo. Your own config records the folder
-        /// (`[[project]]` in ~/.config/obmem/config.toml); `.obmem.toml` only says the vault
+        /// (`[[project]]` in ~/.obmem/config.toml); `.obmem.toml` only says the vault
         /// is private. Also how another machine says where its copy of the vault is.
         #[arg(long, value_name = "FOLDER")]
         private: Option<PathBuf>,
@@ -148,7 +148,7 @@ enum Cmd {
         check: bool,
     },
     /// Sync the personal vault with an S3-compatible bucket, encrypted (`[sync]` in
-    /// ~/.config/obmem/config.toml), and this project's vault when it is private and has a bucket
+    /// ~/.obmem/config.toml), and this project's vault when it is private and has a bucket
     /// of its own (`[project.sync]`). Without a subcommand: sync now; every sync is also a snapshot.
     Sync {
         /// The vault a subcommand is about (default: personal). Without a subcommand: sync only

@@ -11,7 +11,7 @@ Under `[sync] prefix` (default `obmem`):
 
 ## Sync (`sync.rs`)
 
-- Each device keeps a *base*, the snapshot it last synced with, in `~/.config/obmem/sync/<hash>.json`, never in the vault. A base made under another key, or newer than the bucket's latest snapshot, is ignored, which makes the sync a pure merge.
+- Each device keeps a *base*, the snapshot it last synced with, in `~/.obmem/sync/<hash>.json`, never in the vault. A base made under another key, or newer than the bucket's latest snapshot, is ignored, which makes the sync a pure merge.
 - `merge` compares base, local and latest snapshot per name. If one side changed, it wins. If both edited, the local version stays and the remote one becomes `<stem>.sync-conflict-<device>-<time>.<ext>` (core's `audit::SYNC_CONFLICT_MARK`, reported by the `sync-conflict` rule). An edit beats a deletion.
 - Names this pass does not sync are carried along from the bucket untouched, never downloaded and never deleted: what `files::included` leaves out (community plugins when off), files the scan skipped (symlinks, case collisions), and bucket names that fail `check_portable`. The saved base covers only the names this device synced, plus its old entries for the rest; otherwise a name it only carried would count as deleted here once it starts syncing it.
 - Order matters: upload blobs, then create the snapshot, then change local files, then save the base. If the snapshot number is taken, or a file changed between hashing and upload, nothing local has changed yet and the pass starts over.

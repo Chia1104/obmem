@@ -4,12 +4,13 @@
 
 mod agent_tab;
 mod appearance;
-mod appearance_page;
 mod data;
 mod form;
 mod icons;
 mod login_env;
+mod motion;
 mod personal_page;
+mod preferences_page;
 mod project_page;
 mod review_page;
 mod secrets_tab;
@@ -49,8 +50,8 @@ pub fn prepare_process() {
 /// The window: the project list beside the shown project.
 #[component]
 pub fn App() -> impl IntoElement {
-    // The sidebar and the page run up to the window's top edge; each keeps a strip there that
-    // drags the window (`widgets::title_strip`).
+    // The window has no title bar of the system's: a strip along its top edge drags it and holds
+    // the sidebar's button (`sidebar::top_strip`).
     let mut title_bar = nsh_core::desktop::TitleBarOptions::default();
     title_bar.style = nsh_core::desktop::TitleBarStyle::Hidden;
     title_bar.height = Some(px(40.0));
@@ -63,16 +64,35 @@ pub fn App() -> impl IntoElement {
     view()
         .flex_1()
         .relative()
-        .flex_row()
-        .bg(move || theme().background)
+        // The window is the sidebar's color: the page is a panel set into it (`widgets::page`).
+        .bg(move || theme().sidebar)
         .text_color(move || theme().foreground)
-        .child(sidebar::sidebar())
-        .child(dynamic(move || match state::screen() {
-            state::Screen::Project => project_page::project_page().into_element(),
-            state::Screen::Personal => personal_page::personal_page().into_element(),
-            state::Screen::Review => review_page::review_page().into_element(),
-            state::Screen::Appearance => appearance_page::appearance_page().into_element(),
-        }))
+        .child(sidebar::top_strip(false))
+        .child(
+            view()
+                .flex_1()
+                .flex_row()
+                .child(sidebar::sidebar())
+                .child(dynamic(move || {
+                    use state::{Screen, Section};
+                    match state::screen() {
+                        Screen::Project => project_page::project_page().into_element(),
+                        Screen::Review => review_page::review_page().into_element(),
+                        Screen::Settings(Section::Preferences) => {
+                            preferences_page::preferences_page().into_element()
+                        }
+                        Screen::Settings(Section::Vault) => {
+                            personal_page::vault_page().into_element()
+                        }
+                        Screen::Settings(Section::Sync) => {
+                            personal_page::sync_page().into_element()
+                        }
+                        Screen::Settings(Section::Secrets) => {
+                            personal_page::secrets_page().into_element()
+                        }
+                    }
+                })),
+        )
         .child(sidebar::drawer())
         .child(toasts::toaster())
 }

@@ -7,6 +7,7 @@
 //! `ToastStack` lays them out, a `Toast` is each one's root.
 
 use crate::icons::{X, icon};
+use crate::motion::Eased;
 use crate::widgets::{Level, mark};
 use crate::words::named;
 use nsh_base::{
@@ -196,8 +197,7 @@ fn one(host: Host, entry: ReadSignal<Entry>) -> impl IntoElement {
         .border_1()
         .border_color(move || theme().border)
         .shadow_lg()
-        .transition_all()
-        .duration(200.0)
+        .settles()
         .starting_class(Some("opacity-0 translate-y-4".into()))
         .ending_class(Some("opacity-0 scale-95".into()))
         .child(mark(report.level))
@@ -211,6 +211,7 @@ fn one(host: Host, entry: ReadSignal<Entry>) -> impl IntoElement {
                 .justify_center()
                 .rounded(move || theme().radius)
                 .text_color(move || theme().muted_foreground)
+                .washes()
                 .hover(|s| s.text_color(move || theme().foreground))
                 .accessibility_label(named("common.dismiss"))
                 .on_press(move || host.dismiss(id))

@@ -2,9 +2,7 @@
 //! for a language obmem does not have, and a language picked in the window shows at once and is
 //! kept in `appearance.toml`.
 
-use crate::common::{SLOW, project, sandbox, start, start_in};
-
-const OPEN: &str = "id:screen-appearance >> role:button";
+use crate::common::{SLOW, open_settings, project, sandbox, start, start_in};
 
 #[test]
 fn the_window_follows_the_computers_language() {
@@ -74,22 +72,21 @@ fn a_picked_language_shows_at_once_and_is_kept() {
     };
 
     let mut app = start();
-    app.wait_for_within(OPEN, SLOW).unwrap();
-    app.press(OPEN).unwrap();
+    open_settings(&mut app, "preferences");
     app.wait_for_within("text:Light theme", SLOW).unwrap();
 
     // The open window changes: the page, and the sidebar beside it.
     pick(&mut app, "繁體中文");
     app.wait_for_within("text:淺色佈景主題", SLOW).unwrap();
-    app.wait_for_within("text:個人設定", SLOW).unwrap();
+    app.wait_for_within("text:返回", SLOW).unwrap();
     assert!(!app.screen().shows("Light theme"));
     kept(&mut app, "language = \"zh\"");
     drop(app);
 
     // The next start is in the language picked, whatever the computer's.
     let mut app = start_in(Some("en-US"));
-    app.wait_for_within("text:個人設定", SLOW).unwrap();
-    app.press(OPEN).unwrap();
+    app.wait_for_within("text:審閱", SLOW).unwrap();
+    open_settings(&mut app, "preferences");
     app.wait_for_within("text:淺色佈景主題", SLOW).unwrap();
 
     // English is picked the same way, and System follows the computer again.
@@ -99,8 +96,8 @@ fn a_picked_language_shows_at_once_and_is_kept() {
     drop(app);
 
     let mut app = start_in(Some("zh-Hant-TW"));
-    app.wait_for_within("text:Personal settings", SLOW).unwrap();
-    app.press(OPEN).unwrap();
+    app.wait_for_within("text:Review", SLOW).unwrap();
+    open_settings(&mut app, "preferences");
     app.wait_for_within("text:Light theme", SLOW).unwrap();
     pick(&mut app, "System");
     app.wait_for_within("text:淺色佈景主題", SLOW).unwrap();

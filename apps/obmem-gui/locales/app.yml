@@ -30,6 +30,12 @@ common:
   try_again:
     en: "Try again"
     zh: "再試一次"
+  close:
+    en: "Close"
+    zh: "關閉"
+  done:
+    en: "Done"
+    zh: "完成"
   dismiss:
     en: "Dismiss"
     zh: "關閉"
@@ -93,6 +99,26 @@ sidebar:
     button:
       en: "Add"
       zh: "加入"
+
+prefs:
+  title:
+    en: "Settings"
+    zh: "設定"
+  back:
+    en: "Back"
+    zh: "返回"
+  preferences:
+    en: "Preferences"
+    zh: "偏好設定"
+  preferences_about:
+    en: "The language this window speaks and how it looks, on this device."
+    zh: "這個視窗使用的語言與外觀，只對這台裝置有效。"
+  secrets:
+    en: "Allowed secrets"
+    zh: "允許的機密"
+  change_theme:
+    en: "Change…"
+    zh: "更換…"
 
 project:
   none:
@@ -446,6 +472,9 @@ review:
   reject_ask:
     en: "Reject…"
     zh: "駁回…"
+  reject_title:
+    en: "Reject this finding?"
+    zh: "要駁回這項問題嗎？"
   reject_about:
     en: "A false positive? It is never reported again."
     zh: "這是誤判嗎？駁回後就不會再回報。"
@@ -474,18 +503,12 @@ decided:
     zh: "[[%{id}]] 已於 %{date} 驗證（沒有 code_refs，所以沒有記錄 commit）。"
 
 personal:
-  title:
-    en: "Personal settings"
-    zh: "個人設定"
   about:
     en: "Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault."
     zh: "只屬於你，對所有專案有效：~/.config/obmem/config.toml 與你的個人儲存庫。"
   unreadable:
     en: "Could not read your settings"
     zh: "無法讀取你的設定"
-  settings:
-    en: "Settings"
-    zh: "設定"
   vault_help:
     en: "Your feedback, preferences and session logs. Now: %{now}. Empty: ~/Obsidian/AgentMemory."
     zh: "你的回饋、偏好與工作階段紀錄。目前：%{now}。留空：~/Obsidian/AgentMemory。"
@@ -512,6 +535,9 @@ sync:
   about:
     en: "Keep this personal vault the same on your Macs and PCs through an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Everything in the bucket is encrypted, and only your passphrase unlocks it."
     zh: "透過你自己的 S3 相容儲存貯體（AWS S3、Cloudflare R2 或 MinIO），讓個人儲存庫在你的 Mac 與 PC 上保持一致。儲存貯體中的內容全部加密，只有你的通關密語能解開。"
+  settings:
+    en: "Sync settings"
+    zh: "同步設定"
   unreadable:
     en: "Could not read the sync settings"
     zh: "無法讀取同步設定"
@@ -525,8 +551,8 @@ sync:
     en: "This device is not connected"
     zh: "這部裝置尚未連接"
   not_connected_about:
-    en: "Enter the bucket's access key and your passphrase below."
-    zh: "請在下方輸入儲存貯體的存取金鑰與你的通關密語。"
+    en: "Connect it with the bucket's access key and your passphrase."
+    zh: "用儲存貯體的存取金鑰與你的通關密語來連接。"
   not_synced:
     en: "Connected, not synced yet"
     zh: "已連接，尚未同步"
@@ -771,12 +797,6 @@ rule:
     zh: "兩次輸入的通關密語不同。"
 
 appearance:
-  title:
-    en: "Appearance"
-    zh: "外觀"
-  about:
-    en: "How this window looks, on this device."
-    zh: "這個視窗在這部裝置上的樣子。"
   mode:
     en: "Mode"
     zh: "模式"
@@ -814,8 +834,8 @@ appearance:
     en: "Duplicate"
     zh: "製作副本"
   duplicate_about:
-    en: "Saves a copy of this theme in your themes folder, for you to edit."
-    zh: "把這個佈景主題的副本存到你的佈景主題資料夾，讓你編輯。"
+    en: "Duplicate saves a copy of the theme shown in your themes folder, for you to edit."
+    zh: "「製作副本」會把目前顯示的佈景主題存一份到你的佈景主題資料夾，讓你編輯。"
   duplicated:
     en: "Saved as %{copy}.json in your themes folder. Edit it and come back."
     zh: "已在你的佈景主題資料夾存為 %{copy}.json。編輯後回到這裡即可。"
@@ -823,8 +843,8 @@ appearance:
     en: "Your themes"
     zh: "你的佈景主題"
   own_about:
-    en: "A theme is a JSON file of shadcn/ui colors, as tweakcn.com exports them. Duplicate one above or put a file in your themes folder, then edit it in any editor: it shows here when you come back to this window."
-    zh: "佈景主題是一個 shadcn/ui 顏色的 JSON 檔案，格式與 tweakcn.com 匯出的相同。在上方製作副本，或把檔案放進你的佈景主題資料夾，再用任何編輯器修改：回到這個視窗時就會顯示在這裡。"
+    en: "A theme is a JSON file of shadcn/ui colors, as tweakcn.com exports them. Duplicate one where you pick a theme or put a file in your themes folder, then edit it in any editor: it shows here when you come back to this window."
+    zh: "佈景主題是一個 shadcn/ui 顏色的 JSON 檔案，格式與 tweakcn.com 匯出的相同。在選擇佈景主題的地方製作副本，或把檔案放進你的佈景主題資料夾，再用任何編輯器修改：回到這個視窗時就會顯示在這裡。"
   open_folder:
     en: "Open themes folder"
     zh: "打開佈景主題資料夾"

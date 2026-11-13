@@ -1,6 +1,6 @@
 //! Settings, Codex, secrets and personal settings, as a user changes them.
 
-use crate::common::{SLOW, project, sandbox, start};
+use crate::common::{SLOW, open_settings, project, sandbox, show_settings, start};
 use obmem_agents::hooks::Agent;
 use obmem_core::config::{Config, SecretMode};
 use obmem_core::{allowlist, config, init, settings};
@@ -98,9 +98,8 @@ fn settings_secrets_and_personal_settings_are_saved() {
         1
     );
 
-    app.press("id:screen-personal-settings >> role:button")
-        .unwrap();
-    app.wait_for_within("id:personal-settings", SLOW).unwrap();
+    open_settings(&mut app, "secrets");
+    app.wait_for_within("id:personal-allowlist", SLOW).unwrap();
     // An entry the scanner would ignore is not added, and its box says why.
     const SHORT_WORD: &str = "The scanner would ignore \"abc\": it is shorter than 4 characters.";
     app.type_text("id:add-words", "abc").unwrap();
@@ -120,6 +119,8 @@ fn settings_secrets_and_personal_settings_are_saved() {
     );
 
     // The personal vault's rule shows at its box, and what was typed stays.
+    show_settings(&mut app, "vault");
+    app.wait_for_within("id:personal-settings", SLOW).unwrap();
     const PERSONAL_RULE: &str = "The personal vault must be an absolute path or start with ~/.";
     let vault_before = settings::read_global().unwrap().vault;
     app.clear("id:personal-vault").unwrap();
@@ -158,10 +159,7 @@ fn sync_settings_are_saved_and_ask_to_connect() {
         return;
     };
     let mut app = start();
-    app.wait_for_within("id:screen-personal-settings", SLOW)
-        .unwrap();
-    app.press("id:screen-personal-settings >> role:button")
-        .unwrap();
+    open_settings(&mut app, "sync");
     app.wait_for_within("id:personal-sync", SLOW).unwrap();
     assert!(app.screen().shows("Off: no bucket yet."));
 
@@ -209,7 +207,11 @@ fn sync_settings_are_saved_and_ask_to_connect() {
         "neither the connect prompt nor a keychain error"
     );
 
-    // Connecting asks for every value at its own box before it tries anything.
+    // Connecting is a dialog, which asks for every value at its own box before it tries
+    // anything.
+    app.press("id:sync-status >> role:button[Connect this device]")
+        .unwrap();
+    app.wait_for_within("id:sync-connect", SLOW).unwrap();
     app.type_text("id:connect-passphrase", "one").unwrap();
     app.type_text("id:connect-repeat", "another").unwrap();
     app.press("id:sync-connect >> role:button[Connect]")

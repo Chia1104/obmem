@@ -1,11 +1,26 @@
-//! Appearance: the mode and each appearance's theme are picked and kept in `appearance.toml`, a
-//! theme is copied to a file of the user's, and files put in the themes folder are listed.
+//! The look, on the settings' Preferences page: the mode and each appearance's theme are picked
+//! and kept in `appearance.toml` (a theme in its dialog), a theme is copied to a file of the
+//! user's, and files put in the themes folder are listed.
 
-use crate::common::{SLOW, sandbox, start};
+use crate::common::{SLOW, open_settings, sandbox, show_settings, start};
 use nsh_testing::Headless;
 use std::path::Path;
 
-const OPEN: &str = "id:screen-appearance >> role:button";
+/// Opens the dialog that picks the theme of `scheme` (`light` or `dark`).
+fn pick_theme_of(app: &mut Headless, scheme: &str) {
+    app.press(&format!("id:{scheme}-theme-row >> role:button[Change…]"))
+        .unwrap();
+    app.wait_for_within(&format!("id:{scheme}-theme"), SLOW)
+        .unwrap();
+}
+
+/// Closes that dialog.
+fn done(app: &mut Headless, scheme: &str) {
+    app.press(&format!("id:{scheme}-theme >> role:button[Done]"))
+        .unwrap();
+    app.wait_for_gone(&format!("id:{scheme}-theme"), SLOW)
+        .unwrap();
+}
 
 /// Waits until `appearance.toml` has `line`: it is written in the background.
 fn kept(app: &mut Headless, file: &Path, line: &str) {
@@ -24,8 +39,7 @@ fn the_look_is_picked_and_kept_and_themes_are_files() {
     let themes = dir.join("config/themes");
 
     let mut app = start();
-    app.wait_for_within(OPEN, SLOW).unwrap();
-    app.press(OPEN).unwrap();
+    open_settings(&mut app, "preferences");
     app.wait_for_within("text:Light theme", SLOW).unwrap();
     assert!(
         app.screen().shows("None yet."),
@@ -34,19 +48,23 @@ fn the_look_is_picked_and_kept_and_themes_are_files() {
     );
 
     // A pick shows at once and is kept.
+    pick_theme_of(&mut app, "light");
     app.press("id:light-theme >> role:radio[Sepia]").unwrap();
     kept(&mut app, &file, "light = \"sepia\"");
+    done(&mut app, "light");
     app.press("id:appearance-mode >> role:button[Dark]")
         .unwrap();
     kept(&mut app, &file, "mode = \"dark\"");
 
     // Duplicate saves the shown theme as a file of the user's and shows the copy.
+    pick_theme_of(&mut app, "dark");
     app.press("id:dark-theme >> role:button[Duplicate]")
         .unwrap();
     app.wait_for_within("id:dark-theme >> role:radio[Ink copy]", SLOW)
         .unwrap();
     kept(&mut app, &file, "dark = \"ink-copy\"");
     assert!(themes.join("ink-copy.json").is_file());
+    done(&mut app, "dark");
     app.wait_for_within("text:ink-copy.json", SLOW).unwrap();
 
     // A file put in the folder is a theme the next time the screen opens; one that is not a
@@ -57,13 +75,14 @@ fn the_look_is_picked_and_kept_and_themes_are_files() {
     )
     .unwrap();
     std::fs::write(themes.join("broken.json"), "not a theme").unwrap();
-    app.press(OPEN).unwrap();
-    app.wait_for_within("id:light-theme >> role:radio[Mine]", SLOW)
-        .unwrap();
+    show_settings(&mut app, "preferences");
     app.wait_until("why broken.json is no theme", SLOW, |screen| {
         screen.texts().iter().any(|t| t.contains("It is not JSON"))
     })
     .unwrap();
+    pick_theme_of(&mut app, "light");
+    app.wait_for_within("id:light-theme >> role:radio[Mine]", SLOW)
+        .unwrap();
     assert!(
         app.wait_for("id:light-theme >> role:radio[broken]")
             .is_err(),
@@ -75,14 +94,15 @@ fn the_look_is_picked_and_kept_and_themes_are_files() {
     // and the screen says so.
     std::fs::remove_file(themes.join("ink-copy.json")).unwrap();
     let mut app = start();
-    app.wait_for_within(OPEN, SLOW).unwrap();
-    app.press(OPEN).unwrap();
+    open_settings(&mut app, "preferences");
     app.wait_for_within("text:The theme ink-copy cannot be shown", SLOW)
         .unwrap();
+    pick_theme_of(&mut app, "dark");
     app.press("id:dark-theme >> role:radio[Lagoon]").unwrap();
+    kept(&mut app, &file, "dark = \"lagoon\"");
+    done(&mut app, "dark");
     app.wait_for_gone("text:The theme ink-copy cannot be shown", SLOW)
         .unwrap();
-    kept(&mut app, &file, "dark = \"lagoon\"");
     assert!(
         std::fs::read_to_string(&file)
             .unwrap()

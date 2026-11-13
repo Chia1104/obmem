@@ -110,7 +110,7 @@ The CLI has the same features, plus what only people may do: `obmem approve <not
 
 ## Auto-approve
 
-Every note an agent writes waits as a `draft` until you approve it. To skip that review, turn on auto-approve in your own config, or in the desktop app's Personal settings:
+Every note an agent writes waits as a `draft` until you approve it. To skip that review, turn on auto-approve in your own config, or in the desktop app's settings, under Personal vault:
 
 ```toml
 # ~/.config/obmem/config.toml
@@ -184,7 +184,7 @@ obmem sync restore --snapshot 12 --to ~/restored   # an older state, into an emp
 obmem sync prune --dry-run        # what retention would remove (it runs by itself daily)
 ```
 
-Once a device is set up, obmem syncs on its own: when an agent session starts in an obmem project, and when an agent turn ends, the hook starts `obmem sync` in the background, so the agent never waits on the network. Such syncs start at most once a minute; the last one always runs. `obmem status` and the desktop app's Personal settings show the last sync and why it failed, if it did. Set `auto = false` to sync only by hand. The desktop app can also edit `[sync]`, connect the device and sync now.
+Once a device is set up, obmem syncs on its own: when an agent session starts in an obmem project, and when an agent turn ends, the hook starts `obmem sync` in the background, so the agent never waits on the network. Such syncs start at most once a minute; the last one always runs. `obmem status` and the desktop app's settings, under Sync, show the last sync and why it failed, if it did. Set `auto = false` to sync only by hand. The desktop app can also edit `[sync]`, connect the device and sync now.
 
 `setup` keeps the access key and the unlocked vault key in the OS keychain (macOS Keychain, Windows Credential Manager), never in a config file. **If you forget the passphrase, the bucket cannot be read.**
 
@@ -285,9 +285,11 @@ In a repository you share, the bucket is yours and not the team's: take `endpoin
 - **Settings:** `.obmem.toml`, and whether Codex runs obmem's tools without asking.
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
 - **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.
-- **Personal settings:** your personal vault, environment-variable scanning, and the patterns and words allowed in every project.
-- **Appearance:** light, dark or the system's, and a theme for each. Thirteen themes are built in. Your own are JSON files in `~/.config/obmem/themes/`, in shadcn/ui's theme format (what [tweakcn](https://tweakcn.com) exports): duplicate a built-in one from the app and edit the file. `~/.config/obmem/appearance.toml` keeps what you chose.
-- **Language:** English or Traditional Chinese. The app follows the system's language and shows English for any other; pick one under Appearance to keep it whatever the system's. The reason an action failed stays in English, as the CLI reports it.
+- **Settings**, for every project, in four pages:
+  - **Preferences:** the language, and how the window looks: light, dark or the system's, and a theme for each. Thirteen themes are built in. Your own are JSON files in `~/.config/obmem/themes/`, in shadcn/ui's theme format (what [tweakcn](https://tweakcn.com) exports): duplicate a built-in one where you pick a theme and edit the file. `~/.config/obmem/appearance.toml` keeps what you chose. The app speaks English or Traditional Chinese: it follows the system's language and shows English for any other, and a language picked here stays whatever the system's. The reason an action failed stays in English, as the CLI reports it.
+  - **Personal vault:** where it is, environment-variable scanning, and auto-approve.
+  - **Sync:** the bucket, connecting this device, the last sync, and syncing now.
+  - **Allowed secrets:** the fingerprints, patterns and words the scanner lets pass in every project.
 
 ```sh
 cargo run -p obmem-gui

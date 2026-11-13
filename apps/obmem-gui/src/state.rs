@@ -83,12 +83,24 @@ pub(crate) enum Screen {
     /// The selected project, on one of its tabs.
     #[default]
     Project,
-    /// The user's own settings, which apply to every project.
-    Personal,
     /// Drafts and findings waiting for a person, across projects.
     Review,
-    /// How the window looks.
-    Appearance,
+    /// One page of the settings, which apply to every project. The sidebar then lists the pages
+    /// instead of the projects.
+    Settings(Section),
+}
+
+/// A page of the settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Section {
+    /// The language, and how the window looks.
+    Preferences,
+    /// Where the personal vault is and how agents' notes get into it.
+    Vault,
+    /// Syncing the personal vault between devices.
+    Sync,
+    /// What the secret scanner lets pass in every project.
+    Secrets,
 }
 
 /// A project's tab.
@@ -113,6 +125,9 @@ struct Shown(Load<Detail>);
 struct Notices(Option<Notice>);
 #[derive(Clone, Default)]
 struct Screens(Screen);
+/// The screen the settings were opened from, which Back returns to.
+#[derive(Clone, Default)]
+struct Before(Screen);
 #[derive(Clone, Default)]
 struct Tabs(Tab);
 #[derive(Clone, Default)]
@@ -611,17 +626,36 @@ fn after_allowlist_change(r: Result<(), String>, said: String) {
     {
         scan(input);
     }
-    if screen() == Screen::Personal {
+    if matches!(screen(), Screen::Settings(_)) {
         load_personal();
     }
 }
 
-// --- Personal settings -------------------------------------------------------
+// --- Settings ----------------------------------------------------------------
 
-pub(crate) fn show_personal() {
+/// Shows a page of the settings, reading again what it shows.
+pub(crate) fn show_settings(section: Section) {
+    let from = screen();
+    if !matches!(from, Screen::Settings(_)) {
+        global::<Before>().set(Before(from));
+    }
     set_notice(None);
-    global::<Screens>().set(Screens(Screen::Personal));
-    load_personal();
+    global::<Screens>().set(Screens(Screen::Settings(section)));
+    match section {
+        Section::Preferences => load_themes(),
+        Section::Vault | Section::Sync | Section::Secrets => load_personal(),
+    }
+}
+
+/// Leaves the settings for the screen they were opened from.
+pub(crate) fn leave_settings() {
+    match global::<Before>().get_untracked().0 {
+        Screen::Review => show_review(),
+        _ => {
+            set_notice(None);
+            global::<Screens>().set(Screens(Screen::Project));
+        }
+    }
 }
 
 fn load_personal() {
@@ -851,12 +885,6 @@ pub(crate) fn start_appearance() {
             untracked(load_themes);
         }
     });
-}
-
-pub(crate) fn show_appearance() {
-    set_notice(None);
-    global::<Screens>().set(Screens(Screen::Appearance));
-    load_themes();
 }
 
 /// Reads the theme files again. What is chosen stays as it is in the window: `appearance.toml`

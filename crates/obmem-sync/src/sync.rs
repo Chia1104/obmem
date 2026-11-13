@@ -79,7 +79,7 @@ pub struct SyncReport {
     pub skipped: Vec<(String, String)>,
 }
 
-/// What a device remembers between syncs, in `~/.config/obmem/sync/` (not in the vault, which
+/// What a device remembers between syncs, in `~/.obmem/sync/` (not in the vault, which
 /// is what gets synced).
 #[derive(Default, Serialize, Deserialize)]
 struct State {

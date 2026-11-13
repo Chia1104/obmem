@@ -1,5 +1,5 @@
 //! Editing obmem's two config files as a person does in a settings screen: `.obmem.toml` (the
-//! project's, in git) and `~/.config/obmem/config.toml` (the user's). Values are read as the files
+//! project's, in git) and `~/.obmem/config.toml` (the user's). Values are read as the files
 //! state them, not as `Config::load` merges them, and writes keep everything else in the file,
 //! comments included.
 

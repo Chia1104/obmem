@@ -36,7 +36,7 @@ The user chose three things on 2026-11-14:
 
 Where the vault is (layer 1, PR #29):
 - Scope stays `project` and `global`. Where the project vault is became a separate property. `Store`, audit, drift and the Obsidian calls only see a path.
-- The folder is named only by the user's config: `[[project]]` with `root` and `vault` in `~/.config/obmem/config.toml`. `.obmem.toml` can say `private = true`, which names no folder. A machine whose config names no vault for such a project fails `Config::load`, so a teammate who has not set it up never writes private notes into `docs/kb`.
+- The folder is named only by the user's config: `[[project]]` with `root` and `vault` in `~/.obmem/config.toml`. `.obmem.toml` can say `private = true`, which names no folder. A machine whose config names no vault for such a project fails `Config::load`, so a teammate who has not set it up never writes private notes into `docs/kb`.
 - The mapping is in `config.toml`, not in `projects.toml`: the GUI removes entries from that list, and a removed entry would send writes back into the repo.
 - A private vault must be outside the project and apart from the personal vault (`config::private_vault_path`).
 - `obmem init --private <folder>` starts a private vault, moves a project to one, or tells another machine where its copy is. It moves no notes.

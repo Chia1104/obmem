@@ -30,7 +30,7 @@ Decided with the user on 2026-11-09. This builds on [[split-obmem-into-a-cargo-w
 
 **Choices**
 - **Platforms:** macOS and Windows.
-- **Project list:** both automatic and manual. The session-start hook and `obmem init` record each project in `~/.config/obmem/projects.toml`, and the GUI or `obmem projects add` can add a folder by hand.
+- **Project list:** both automatic and manual. The session-start hook and `obmem init` record each project in `~/.obmem/projects.toml`, and the GUI or `obmem projects add` can add a folder by hand.
 - **Drafts:** a person can approve them (draft → active) with `Store::approve`, through `obmem approve` or the GUI. MCP does not offer it.
 - **Scheduled audit:** not now.
 - **Codex auto-approval:** off by default, with a per-project switch (CHI-59, closed).

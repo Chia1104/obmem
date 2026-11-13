@@ -24,7 +24,7 @@ Decided with the user on 2026-11-11, when solyx's theme customization was ported
 **Decision.**
 - A theme is a Native Shell theme file: shadcn's `cssVars` with a `light` and a `dark` section, plus the app's own tokens `ok`, `warn`, `highlight`. obmem adds no token model of its own.
 - The built-in themes are files too: `apps/obmem-gui/src/themes/*.json`, built into the binary. `ink` is the default (the former `theme.json`). Eleven others are solyx's palettes, converted once. `motoko` was drawn for obmem from a picture the user gave, and solyx does not have it.
-- The user's themes are `.json` files in `~/.config/obmem/themes/`, same format. `~/.config/obmem/appearance.toml` keeps the mode (`system`, `light`, `dark`) and one theme id for each appearance.
+- The user's themes are `.json` files in `~/.obmem/themes/`, same format. `~/.obmem/appearance.toml` keeps the mode (`system`, `light`, `dark`) and one theme id for each appearance.
 - The window's tokens merge the two picks: each color has the light theme's light value and the dark theme's dark value. Radius and fonts have one value, so they come from the theme that shows.
 - The app has no color editor. Duplicate copies a theme to the user's folder, and the user edits the file. Theme files are read again when the Appearance screen opens and when the window becomes active.
 

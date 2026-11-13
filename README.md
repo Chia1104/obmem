@@ -21,7 +21,7 @@ A team that does not want its memory in the repo keeps the project vault in a fo
 obmem init --private ~/Obsidian/acme-memory
 ```
 
-- Your own config records the folder, under `[[project]]` in `~/.config/obmem/config.toml`. `.obmem.toml` only says `private = true`, so the repo never says where the notes are.
+- Your own config records the folder, under `[[project]]` in `~/.obmem/config.toml`. `.obmem.toml` only says `private = true`, so the repo never says where the notes are.
 - Each person runs the command once on each machine, with the folder that holds their copy of the vault. Until then obmem refuses the project there, and writes no note into the repo.
 - Give the vault a bucket and obmem syncs it between the team's machines: see [Syncing a private project vault](#syncing-a-private-project-vault). Without one, share the folder your own way, for example as a private git repository.
 - On a project that already has `docs/kb`, the command switches it to the private vault and leaves the old notes where they are. Move them yourself, and take the folder out of git.
@@ -126,7 +126,7 @@ The CLI has the same features, plus what only people may do: `obmem approve <not
 Every note an agent writes waits as a `draft` until you approve it. To skip that review, turn on auto-approve in your own config, or in the desktop app's settings, under Personal vault:
 
 ```toml
-# ~/.config/obmem/config.toml
+# ~/.obmem/config.toml
 [review]
 auto_approve = true
 ```
@@ -177,7 +177,7 @@ For human edits, use `obmem scan --staged` as a git pre-commit hook. It checks t
 obmem can sync the personal vault between your machines through an S3-compatible bucket you own: AWS S3, Cloudflare R2 or MinIO. Every sync is also a backup snapshot. Everything in the bucket is encrypted with a key that only your passphrase unlocks, file names included. macOS and Windows machines can share one bucket.
 
 ```toml
-# ~/.config/obmem/config.toml
+# ~/.obmem/config.toml
 [sync]
 endpoint = "https://<account-id>.r2.cloudflarestorage.com"  # leave out for AWS S3
 bucket = "my-obmem-vault"
@@ -217,7 +217,7 @@ It asks for the bucket's access key and the vault's passphrase. The first member
 The command writes this to your config, which you can also edit by hand:
 
 ```toml
-# ~/.config/obmem/config.toml
+# ~/.obmem/config.toml
 [[project]]
 root = "/Users/me/code/acme"
 vault = "~/Obsidian/acme-memory"
@@ -261,7 +261,7 @@ Set all three: when any of them is set, obmem does not ask the keychain. Keep th
 A private project vault has three variables of its own: `OBMEM_SYNC_PROJECT_ACCESS_KEY_ID`, `OBMEM_SYNC_PROJECT_SECRET_ACCESS_KEY` and `OBMEM_SYNC_PROJECT_VAULT_KEY` (`obmem sync key --vault project` prints the last one). They are one project's keys, so such a machine's config names a bucket for one project only. The config also names the project and its vault, since `obmem init --private` asks questions a setup script cannot answer:
 
 ```toml
-# ~/.config/obmem/config.toml
+# ~/.obmem/config.toml
 [[project]]
 root = "/workspace/acme"
 vault = "~/acme-memory"
@@ -274,7 +274,7 @@ bucket = "acme-memory"
 For a machine that is thrown away after a session, such as a cloud agent's sandbox, install obmem (`npm install -g @chia1104/obmem`) and write a config with `ephemeral = true` in its setup script:
 
 ```toml
-# ~/.config/obmem/config.toml
+# ~/.obmem/config.toml
 vault = "~/AgentMemory"
 
 [sync]
@@ -322,8 +322,8 @@ command -v obmem >/dev/null 2>&1 || npm install -g @chia1104/obmem
 # .agents/resume: runs when the orb starts and each time it wakes
 set -euo pipefail
 [ -n "${OBMEM_SYNC_VAULT_KEY:-}" ] || exit 0 # no backup key: nothing to do
-mkdir -p ~/.config/obmem
-cat > ~/.config/obmem/config.toml <<'EOF'
+mkdir -p ~/.obmem
+cat > ~/.obmem/config.toml <<'EOF'
 vault = "~/AgentMemory"
 
 [sync]
@@ -355,7 +355,7 @@ In a repository you share, the bucket is yours and not the team's: take `endpoin
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
 - **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.
 - **Settings**, for every project, in four pages:
-  - **Preferences:** the language, and how the window looks: light, dark or the system's, and a theme for each. Thirteen themes are built in. Your own are JSON files in `~/.config/obmem/themes/`, in shadcn/ui's theme format (what [tweakcn](https://tweakcn.com) exports): duplicate a built-in one where you pick a theme and edit the file. `~/.config/obmem/appearance.toml` keeps what you chose. The app speaks English or Traditional Chinese: it follows the system's language and shows English for any other, and a language picked here stays whatever the system's. The reason an action failed stays in English, as the CLI reports it.
+  - **Preferences:** the language, and how the window looks: light, dark or the system's, and a theme for each. Thirteen themes are built in. Your own are JSON files in `~/.obmem/themes/`, in shadcn/ui's theme format (what [tweakcn](https://tweakcn.com) exports): duplicate a built-in one where you pick a theme and edit the file. `~/.obmem/appearance.toml` keeps what you chose. The app speaks English or Traditional Chinese: it follows the system's language and shows English for any other, and a language picked here stays whatever the system's. The reason an action failed stays in English, as the CLI reports it.
   - **Personal vault:** where it is, environment-variable scanning, and auto-approve.
   - **Sync:** the bucket, connecting this device, the last sync, and syncing now.
   - **Allowed secrets:** the fingerprints, patterns and words the scanner lets pass in every project.

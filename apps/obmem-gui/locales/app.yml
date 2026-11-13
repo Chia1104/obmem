@@ -507,8 +507,8 @@ decided:
 
 personal:
   about:
-    en: "Yours alone, for every project: ~/.config/obmem/config.toml and your personal vault."
-    zh: "只屬於你，對所有專案有效：~/.config/obmem/config.toml 與你的個人儲存庫。"
+    en: "Yours alone, for every project: ~/.obmem/config.toml and your personal vault."
+    zh: "只屬於你，對所有專案有效：~/.obmem/config.toml 與你的個人儲存庫。"
   unreadable:
     en: "Could not read your settings"
     zh: "無法讀取你的設定"

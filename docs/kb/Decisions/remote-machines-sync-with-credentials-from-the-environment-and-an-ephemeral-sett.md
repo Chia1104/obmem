@@ -39,5 +39,5 @@ Remote agents run in cloud sandboxes: a new Linux machine per session, with no O
 ## Consequences
 - The vault key in a cloud secret store reads the whole personal vault, and what an agent writes there syncs to every machine. A read-only or partial vault for the cloud would need a second key and prefix, and is not built.
 - On an ephemeral machine every turn end waits for a sync.
-- A vault folder cached in a sandbox image must be cached together with `~/.config/obmem/sync/`. A vault without its sync state is merged as if both sides had changed, which makes conflict copies.
+- A vault folder cached in a sandbox image must be cached together with `~/.obmem/sync/`. A vault without its sync state is merged as if both sides had changed, which makes conflict copies.
 - Checked end to end on 2026-11-10 against a local mock S3 server (moto): a machine with no vault fetched it in the session-start hook, its stop hook uploaded a new file, and the first machine received it.

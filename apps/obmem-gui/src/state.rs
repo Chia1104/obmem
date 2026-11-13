@@ -19,7 +19,7 @@ use nsh_core::prelude::*;
 use obmem_agents::hooks::Agent;
 use obmem_core::allowlist::Kind;
 use obmem_core::note::Scope;
-use obmem_core::settings::{GlobalSettings, ProjectSettings, SyncSettings};
+use obmem_core::settings::{GlobalSettings, ProjectSettings, Rule, SyncSettings};
 use obmem_core::store::{Decided, Verdict};
 use std::path::PathBuf;
 
@@ -61,6 +61,7 @@ pub(crate) enum Work {
     ImportClaude,
     PreviewTask,
     SaveSettings,
+    MakePrivate,
     Scan,
     Allow(Vault, Kind, String),
     Disallow(Vault, Kind, String),
@@ -121,6 +122,13 @@ struct Projects(Load<Vec<ProjectRow>>);
 struct Selected(Option<PathBuf>);
 #[derive(Clone, Default)]
 struct Shown(Load<Detail>);
+/// The shown project could not be read because its memory is private and this machine names no
+/// vault for it.
+#[derive(Clone, Default)]
+struct NoVaultHere(bool);
+/// The folder last refused as a private vault, and the rule it breaks.
+#[derive(Clone, Default)]
+struct VaultRule(Option<(String, Rule)>);
 #[derive(Clone, Default)]
 struct Notices(Option<Notice>);
 #[derive(Clone, Default)]
@@ -155,6 +163,19 @@ pub(crate) fn selected() -> Option<PathBuf> {
 
 pub(crate) fn detail() -> Load<Detail> {
     global::<Shown>().with(|v| v.0.clone())
+}
+
+pub(crate) fn no_vault_here() -> bool {
+    global::<NoVaultHere>().with(|v| v.0)
+}
+
+/// The rule `folder` breaks as a private vault, if it is the one last refused.
+pub(crate) fn vault_rule(folder: &str) -> Option<Rule> {
+    global::<VaultRule>().with(|v| {
+        v.0.as_ref()
+            .filter(|(refused, _)| refused == folder)
+            .map(|(_, rule)| rule.clone())
+    })
 }
 
 pub(crate) fn notice() -> Option<Notice> {
@@ -372,10 +393,12 @@ fn reload(path: PathBuf) {
             if selected().as_ref() != Some(&wanted) {
                 return;
             }
-            global::<Shown>().set(Shown(match r {
-                Ok(d) => Load::Ready(d),
-                Err(e) => Load::Failed(e),
-            }));
+            let (shown, no_vault_here) = match r {
+                Ok(d) => (Load::Ready(d), false),
+                Err(e) => (Load::Failed(e.why), e.no_vault_here),
+            };
+            global::<NoVaultHere>().set(NoVaultHere(no_vault_here));
+            global::<Shown>().set(Shown(shown));
         },
     );
 }
@@ -565,6 +588,52 @@ pub(crate) fn save_settings(s: ProjectSettings) {
             Err(e) => fail(e),
         },
     );
+}
+
+/// Keeps the shown project's memory in `folder`, outside the repo. A folder that breaks a rule
+/// is for the form that asked to say so ([`vault_rule`]).
+pub(crate) fn make_private(folder: String) {
+    let Some(path) = selected() else { return };
+    let asked = folder.clone();
+    in_background_as(
+        Work::MakePrivate,
+        move || data::make_private(&path, &folder),
+        move |r| match r {
+            Ok(Ok(made)) => {
+                global::<VaultRule>().set(VaultRule(None));
+                let title = t!("private.made", folder = made.vault.display());
+                match made.left_in_repo {
+                    Some(old) => set_notice(Some(Notice {
+                        title,
+                        lines: vec![t!("private.left_in_repo", folder = old.display())],
+                    })),
+                    None => done(title),
+                }
+                // The name in the list may have been the folder's, while the project did not load.
+                load_projects(None);
+            }
+            Ok(Err(rule)) => global::<VaultRule>().set(VaultRule(Some((asked, rule)))),
+            Err(e) => fail(e),
+        },
+    );
+}
+
+/// Asks for a folder and puts it in `into`, a form's field.
+pub(crate) fn pick_vault_folder(into: Signal<String>) {
+    run_task(async move {
+        let dialog = OpenDialog::folders()
+            .title(t!("private.pick_title"))
+            .button_label(t!("private.pick_button"));
+        match pick_paths(dialog).await {
+            Ok(Some(paths)) => {
+                if let Some(folder) = paths.into_iter().next() {
+                    into.set(folder.display().to_string());
+                }
+            }
+            Ok(None) => {}
+            Err(e) => fail(format!("could not show the folder dialog: {e}")),
+        }
+    });
 }
 
 pub(crate) fn set_codex_auto_approve(on: bool) {

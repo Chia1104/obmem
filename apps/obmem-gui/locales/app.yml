@@ -308,8 +308,8 @@ settings:
     en: "Where the project's notes live, relative to the project."
     zh: "專案筆記的位置，相對於專案根目錄。"
   vault_private:
-    en: "Private: outside the repo, at %{path}. Your own config names the folder; change it with obmem init --private."
-    zh: "私有：在 repo 之外，位於 %{path}。資料夾由你自己的設定指定；用 obmem init --private 變更。"
+    en: "Private: outside the repo, at %{path}. Your own config names the folder."
+    zh: "私有：在 repo 之外，位於 %{path}。資料夾由你自己的設定指定。"
   secret_mode:
     en: "When a write contains a secret"
     zh: "寫入的內容含有機密時"
@@ -758,6 +758,58 @@ ignored:
     en: "The scanner would ignore \"%{entry}\": it is too generic."
     zh: "掃描器會忽略「%{entry}」：它太常見了。"
 
+private:
+  row:
+    en: "Private vault"
+    zh: "私有儲存庫"
+  row_help:
+    en: "Keep this project's notes in a folder outside the repo, for memory that must not be in git."
+    zh: "把這個專案的筆記放在 repo 之外的資料夾，適合不能進 git 的記憶。"
+  make:
+    en: "Make private…"
+    zh: "設為私有…"
+  change:
+    en: "Change folder…"
+    zh: "變更資料夾…"
+  choose_folder:
+    en: "Choose the vault's folder…"
+    zh: "選擇儲存庫的資料夾…"
+  title:
+    en: "Keep this project's memory private"
+    zh: "讓這個專案的記憶保持私有"
+  about:
+    en: "The project's notes are then kept in the folder below, outside the repo. .obmem.toml only says that the vault is private, and your own config records the folder. Notes already in the repo are not moved."
+    zh: "之後專案的筆記會放在下面這個 repo 之外的資料夾。.obmem.toml 只會記錄儲存庫是私有的，資料夾的位置記在你自己的設定裡。已經在 repo 裡的筆記不會被搬移。"
+  folder:
+    en: "Folder"
+    zh: "資料夾"
+  choose:
+    en: "Choose…"
+    zh: "選擇…"
+  each_machine:
+    en: "Everyone on the project chooses a folder on each of their computers. Until then obmem does not open the project there."
+    zh: "專案的每位成員都要在自己的每台電腦上選一個資料夾。在那之前，obmem 不會在那台電腦開啟這個專案。"
+  confirm:
+    en: "Use this folder"
+    zh: "使用這個資料夾"
+  pick_title:
+    en: "Choose the private vault's folder"
+    zh: "選擇私有儲存庫的資料夾"
+  pick_button:
+    en: "Choose"
+    zh: "選擇"
+  made:
+    en: "The project vault is now %{folder}."
+    zh: "專案儲存庫現在是 %{folder}。"
+  left_in_repo:
+    en: "The notes in %{folder} were not moved. Move them to the private vault yourself, and take the folder out of git."
+    zh: "%{folder} 裡的筆記沒有搬移。請自行搬到私有儲存庫，並把該資料夾從 git 移除。"
+  no_vault_here:
+    en: "This project keeps its memory in a private vault"
+    zh: "這個專案的記憶放在私有儲存庫"
+  no_vault_here_about:
+    en: "The vault is outside the repo, and this computer does not know where its copy is. Choose the folder that holds it, or an empty folder to start one."
+    zh: "儲存庫在 repo 之外，這台電腦還不知道它的副本在哪裡。請選擇存放它的資料夾，或選一個空資料夾來建立。"
 rule:
   vault_inside_project:
     en: "The vault must be a relative path inside the project, without `..` or `~`."
@@ -786,6 +838,15 @@ rule:
   bucket_is_name:
     en: "The bucket is a name, without slashes or spaces."
     zh: "儲存貯體是一個名稱，不能含有斜線或空格。"
+  private_vault_absolute:
+    en: "The private vault must be an absolute path or start with ~/, without `..`."
+    zh: "私有儲存庫必須是絕對路徑或以 ~/ 開頭，不能含有 `..`。"
+  private_vault_outside_project:
+    en: "A private vault is kept outside the project."
+    zh: "私有儲存庫必須放在專案之外。"
+  private_vault_apart_from_personal:
+    en: "The private vault and the personal vault must be separate folders."
+    zh: "私有儲存庫和個人儲存庫必須是不同的資料夾。"
   key_id_needed:
     en: "Enter the bucket's access key ID."
     zh: "請輸入儲存貯體的存取金鑰 ID。"

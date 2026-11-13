@@ -7,6 +7,7 @@ mod agent;
 mod app;
 mod appearance;
 mod language;
+mod private;
 mod review;
 mod settings;
 mod sidebar;

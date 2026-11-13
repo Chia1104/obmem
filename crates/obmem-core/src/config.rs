@@ -285,12 +285,12 @@ impl Config {
         let global_vault = global_vault_from(gf.vault);
         let project_vault = match private_vault(&gf.projects, &project_root, &global_vault)? {
             Some(vault) => vault,
-            None if pf.private.unwrap_or(false) => anyhow::bail!(
-                "{}: this project keeps its memory in a private vault outside the repo, and \
-                 this machine has none for it. Run `obmem init --private <folder>` here to say \
-                 where it is.",
-                project_root.join(PROJECT_CONFIG_FILE).display()
-            ),
+            None if pf.private.unwrap_or(false) => {
+                return Err(NoVaultHere {
+                    project_file: project_root.join(PROJECT_CONFIG_FILE),
+                }
+                .into());
+            }
             None => {
                 project_vault_path(&project_root, pf.vault.as_deref().unwrap_or(DEFAULT_VAULT))?
             }
@@ -493,35 +493,79 @@ fn private_vault(
         .transpose()
 }
 
+/// The error of loading a project whose memory is private on a machine whose config names no
+/// vault for it. A front end that can ask for the folder finds it by its type.
+#[derive(Debug)]
+pub struct NoVaultHere {
+    /// The `.obmem.toml` that says the vault is private.
+    pub project_file: PathBuf,
+}
+
+impl std::fmt::Display for NoVaultHere {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: this project keeps its memory in a private vault outside the repo, and this \
+             machine has none for it. Run `obmem init --private <folder>` here to say where it is.",
+            self.project_file.display()
+        )
+    }
+}
+
+impl std::error::Error for NoVaultHere {}
+
+/// Why a folder cannot be a project's private vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Misplaced {
+    /// Not an absolute path or one under `~/`, or it has `..` in it.
+    NotAbsolute,
+    InsideProject,
+    /// It is the personal vault, in it, or around it.
+    WithPersonalVault,
+}
+
 /// The private vault of the project at `root`, for `vault` as the user's config states it. It is
 /// a folder of its own: outside the project, where git would carry it, and apart from the
 /// personal vault, whose sync and whose Obsidian vault would otherwise take it in.
-pub fn private_vault_path(root: &Path, vault: &str, personal: &Path) -> Result<PathBuf> {
+pub fn private_vault_place(
+    root: &Path,
+    vault: &str,
+    personal: &Path,
+) -> std::result::Result<PathBuf, Misplaced> {
     let path = expand_tilde(vault.trim());
     let plain = path
         .components()
         .all(|c| !matches!(c, std::path::Component::ParentDir));
     if !path.is_absolute() || !plain {
-        anyhow::bail!(
-            "the private vault \"{vault}\" must be an absolute path or start with ~/, without `..`"
-        );
+        return Err(Misplaced::NotAbsolute);
     }
     let (real, real_root, real_personal) = (resolved(&path), resolved(root), resolved(personal));
     if path.starts_with(root) || real.starts_with(&real_root) {
-        anyhow::bail!(
-            "the private vault {} is inside the project {}: a private vault is kept outside the repo",
-            path.display(),
-            root.display()
-        );
+        return Err(Misplaced::InsideProject);
     }
     if real.starts_with(&real_personal) || real_personal.starts_with(&real) {
-        anyhow::bail!(
-            "the private vault {} and the personal vault {} must be separate folders",
-            path.display(),
-            personal.display()
-        );
+        return Err(Misplaced::WithPersonalVault);
     }
     Ok(path)
+}
+
+/// [`private_vault_place`], with an error that names the folders.
+pub fn private_vault_path(root: &Path, vault: &str, personal: &Path) -> Result<PathBuf> {
+    private_vault_place(root, vault, personal).map_err(|why| match why {
+        Misplaced::NotAbsolute => anyhow::anyhow!(
+            "the private vault \"{vault}\" must be an absolute path or start with ~/, without `..`"
+        ),
+        Misplaced::InsideProject => anyhow::anyhow!(
+            "the private vault {} is inside the project {}: a private vault is kept outside the repo",
+            vault.trim(),
+            root.display()
+        ),
+        Misplaced::WithPersonalVault => anyhow::anyhow!(
+            "the private vault {} and the personal vault {} must be separate folders",
+            vault.trim(),
+            personal.display()
+        ),
+    })
 }
 
 /// `p` with symlinks resolved as far as it exists; what does not exist yet stays as written.
@@ -786,10 +830,10 @@ mod tests {
             vault: Some("docs/kb".into()),
             ..Default::default()
         };
-        let err = Config::resolve(root.clone(), repo, GlobalFile::default())
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("obmem init --private"), "{err}");
+        let err = Config::resolve(root.clone(), repo, GlobalFile::default()).unwrap_err();
+        assert!(err.to_string().contains("obmem init --private"), "{err}");
+        // A front end that can ask for the folder tells this failure from any other.
+        assert!(err.downcast_ref::<NoVaultHere>().is_some());
         let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
 
@@ -802,6 +846,10 @@ mod tests {
         );
         let refused = |v: &Path| private_vault_path(&root, &v.display().to_string(), &personal);
         assert!(refused(Path::new("memory")).is_err(), "relative");
+        let place = |v: &Path| private_vault_place(&root, &v.display().to_string(), &personal);
+        assert_eq!(place(Path::new("memory")), Err(Misplaced::NotAbsolute));
+        assert_eq!(place(&root.join("docs/kb")), Err(Misplaced::InsideProject));
+        assert_eq!(place(&personal), Err(Misplaced::WithPersonalVault));
         assert!(refused(&root.join("docs/kb")).is_err(), "inside the repo");
         assert!(refused(&root).is_err(), "the repo itself");
         assert!(

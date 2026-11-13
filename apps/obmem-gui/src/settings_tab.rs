@@ -2,6 +2,7 @@
 
 use crate::data::Detail;
 use crate::form::{Problems, said};
+use crate::private_vault;
 use crate::state::{self, Work};
 use crate::widgets::{
     FirstRow, Level, Marked, card, check, checked_field, choice, field, heading, input_field,
@@ -95,10 +96,11 @@ fn project_form(s: ProjectSettings, vault_path: String) -> View {
             .first_row(),
         )
         .child(if private {
+            let shown = vault_path.clone();
             field(
                 tr!("common.project_vault"),
-                tr!("settings.vault_private", path = vault_path),
-                view(),
+                tr!("settings.vault_private", path = shown),
+                private_vault::offer("private.change", Some(vault_path), false),
             )
             .test_id("settings-vault-private")
         } else {
@@ -111,6 +113,14 @@ fn project_form(s: ProjectSettings, vault_path: String) -> View {
                 problems.at(ProjectField::Vault),
             )
         })
+        .children((!private).then(|| {
+            field(
+                tr!("private.row"),
+                tr!("private.row_help"),
+                private_vault::offer("private.make", None, false),
+            )
+            .test_id("settings-make-private")
+        }))
         .child(field(
             tr!("settings.secret_mode"),
             tr!("settings.secret_mode_help"),

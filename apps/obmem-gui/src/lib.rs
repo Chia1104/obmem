@@ -11,6 +11,7 @@ mod login_env;
 mod motion;
 mod personal_page;
 mod preferences_page;
+mod private_vault;
 mod project_page;
 mod review_page;
 mod secrets_tab;

@@ -22,7 +22,7 @@ obmem init --private ~/Obsidian/acme-memory
 ```
 
 - Your own config records the folder, under `[[project]]` in `~/.obmem/config.toml`. `.obmem.toml` only says `private = true`, so the repo never says where the notes are.
-- Each person runs the command once on each machine, with the folder that holds their copy of the vault. Until then obmem refuses the project there, and writes no note into the repo.
+- Each person runs the command once on each machine, with the folder that holds their copy of the vault. The desktop app does the same from the project's Settings. Until then obmem refuses the project there, and writes no note into the repo.
 - Give the vault a bucket and obmem syncs it between the team's machines: see [Syncing a private project vault](#syncing-a-private-project-vault). Without one, share the folder your own way, for example as a private git repository.
 - On a project that already has `docs/kb`, the command switches it to the private vault and leaves the old notes where they are. Move them yourself, and take the folder out of git.
 
@@ -351,7 +351,7 @@ In a repository you share, the bucket is yours and not the team's: take `endpoin
 - **Overview:** each project's health, setting up agents with one click, and importing the project's Claude Code memory (pick which).
 - **Agent view:** what the session-start hook gives an agent, and what `memory_context` returns for a task you type.
 - **Sessions:** the project's session logs, newest first.
-- **Settings:** `.obmem.toml`, and whether Codex runs obmem's tools without asking.
+- **Settings:** `.obmem.toml`, making the project's vault [private](#a-private-project-vault) or changing its folder, and whether Codex runs obmem's tools without asking. A private project that this computer has no vault for asks for the folder when you open it.
 - **Secrets:** try the scanner on any text and allow a false positive in one click.
 - **Review:** agent drafts and open findings across projects. Approve a draft, mark a finding fixed, accepted or rejected, verify the note it is about, open any of them in Obsidian, and run the audit.
 - **Settings**, for every project, in four pages:

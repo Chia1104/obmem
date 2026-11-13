@@ -44,6 +44,9 @@ pub(crate) fn rule(rule: &Rule) -> String {
         Rule::PersonalVaultAbsolute => t!("rule.personal_vault_absolute"),
         Rule::EndpointIsUrl => t!("rule.endpoint_is_url"),
         Rule::BucketIsName => t!("rule.bucket_is_name"),
+        Rule::PrivateVaultAbsolute => t!("rule.private_vault_absolute"),
+        Rule::PrivateVaultOutsideProject => t!("rule.private_vault_outside_project"),
+        Rule::PrivateVaultApartFromPersonal => t!("rule.private_vault_apart_from_personal"),
     }
 }
 

@@ -392,17 +392,13 @@ fn main() -> Result<()> {
     {
         let root = config::project_root(cli.project.as_deref())?;
         let folder = std::path::absolute(folder)?;
-        left_in_repo = config::Config::load(Some(&root))
-            .ok()
-            .filter(|c| !c.vault_is_private() && c.project_vault.is_dir())
-            .map(|c| c.project_vault);
         let bucket = bucket.as_ref().map(|name| config::Bucket {
             endpoint: endpoint.clone(),
             region: region.clone(),
             bucket: Some(name.clone()),
             prefix: prefix.clone(),
         });
-        settings::make_private(&root, &folder.to_string_lossy(), bucket.as_ref())?;
+        left_in_repo = settings::make_private(&root, &folder.to_string_lossy(), bucket.as_ref())?;
     }
     let cfg = config::Config::load(cli.project.as_deref())?;
 

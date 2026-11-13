@@ -11,7 +11,7 @@ use obmem_core::allowlist::{self, Allowlist, Kind};
 use obmem_core::audit::{AuditOptions, Severity};
 use obmem_core::config::{self, Config};
 use obmem_core::note::Scope;
-use obmem_core::settings::{self, GlobalSettings, ProjectSettings, SyncSettings};
+use obmem_core::settings::{self, GlobalSettings, ProjectSettings, Rule, SyncSettings};
 use obmem_core::status::{self, Status};
 use obmem_core::store::{Decided, NoteRef, Store, Verdict};
 use obmem_core::{import, init, obsidian, projects, review, sessions};
@@ -41,6 +41,32 @@ pub struct Detail {
     pub allowlist: Result<Allowlist, String>,
     /// Claude Code's memory for this project, to import.
     pub claude_memory: Result<ClaudeMemory, String>,
+}
+
+/// Why a project's page has nothing to show.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Unreadable {
+    pub why: String,
+    /// Its memory is private, and this machine's config names no vault for it: the page asks
+    /// for the folder instead of showing `why`.
+    pub no_vault_here: bool,
+}
+
+impl Unreadable {
+    fn of(e: anyhow::Error) -> Self {
+        Unreadable {
+            no_vault_here: e.downcast_ref::<config::NoVaultHere>().is_some(),
+            why: text(e),
+        }
+    }
+}
+
+/// What making a project's vault private did.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MadePrivate {
+    pub vault: PathBuf,
+    /// The vault folder the repo had: its notes were not moved.
+    pub left_in_repo: Option<PathBuf>,
 }
 
 /// The user's own settings and their personal vault's allowlist.
@@ -122,20 +148,21 @@ pub fn projects() -> Result<Vec<ProjectRow>, String> {
         .collect())
 }
 
-/// Lists a folder (or the project it is in), and returns the project's root.
+/// Lists a folder (or the project it is in), and returns the project's root. A project that
+/// does not load is listed too: its page says why, and what to do about it.
 pub fn add_project(folder: &Path) -> Result<PathBuf, String> {
-    let cfg = Config::load(Some(folder)).map_err(text)?;
-    projects::record(&cfg.project_root).map_err(text)?;
-    Ok(cfg.project_root)
+    let root = config::project_root(Some(folder)).map_err(text)?;
+    projects::record(&root).map_err(text)?;
+    Ok(root)
 }
 
 pub fn remove_project(path: &Path) -> Result<(), String> {
     projects::remove(path).map(|_| ()).map_err(text)
 }
 
-pub fn detail(path: &Path) -> Result<Detail, String> {
-    let cfg = Config::load(Some(path)).map_err(text)?;
-    let store = Store::open(cfg.clone()).map_err(text)?;
+pub fn detail(path: &Path) -> Result<Detail, Unreadable> {
+    let cfg = Config::load(Some(path)).map_err(Unreadable::of)?;
+    let store = Store::open(cfg.clone()).map_err(Unreadable::of)?;
     let agents = Agent::ALL
         .into_iter()
         .map(|agent| AgentState {
@@ -153,6 +180,24 @@ pub fn detail(path: &Path) -> Result<Detail, String> {
         allowlist: allowlist::read(&cfg.project_vault).map_err(text),
         claude_memory: claude_memory(&store, root),
     })
+}
+
+/// `obmem init --private <folder>`: the project's vault is `folder` from now on, outside the
+/// repo, and gets a vault's first files where it has none. `Ok(Err(rule))`: the folder breaks a
+/// rule, and nothing was written. It works on a project that does not load for want of a vault.
+pub fn make_private(path: &Path, folder: &str) -> Result<Result<MadePrivate, Rule>, String> {
+    let root = config::project_root(Some(path)).map_err(text)?;
+    if let Some(rule) = settings::private_vault_rule(&root, folder).map_err(text)? {
+        return Ok(Err(rule));
+    }
+    let left_in_repo = settings::make_private(&root, folder, None).map_err(text)?;
+    let cfg = Config::load(Some(&root)).map_err(text)?;
+    init::run(&cfg).map_err(text)?;
+    projects::record(&cfg.project_root).map_err(text)?;
+    Ok(Ok(MadePrivate {
+        vault: cfg.project_vault,
+        left_in_repo,
+    }))
 }
 
 pub fn save_settings(path: &Path, s: &ProjectSettings) -> Result<(), String> {

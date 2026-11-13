@@ -9,7 +9,7 @@ use crate::widgets::{
     notice_area, page, page_bar, path_text, primary, tabs,
 };
 use crate::words::tr;
-use crate::{agent_tab, secrets_tab, sessions_tab, settings_tab};
+use crate::{agent_tab, private_vault, secrets_tab, sessions_tab, settings_tab};
 use nsh_base::theme;
 use nsh_core::prelude::*;
 use obmem_core::status::{Registration, VaultStatus};
@@ -90,6 +90,24 @@ fn content() -> Vec<AnyElement> {
             return vec![muted(tr!("project.none")).into_element()];
         }
         Load::Loading => return vec![loading(tr!("common.loading")).into_element()],
+        // Its memory is private and this computer has no vault for it: ask for the folder.
+        Load::Failed(_) if state::no_vault_here() => {
+            return vec![
+                card()
+                    .test_id("no-vault-here")
+                    .child(text(tr!("private.no_vault_here")))
+                    .child(muted(tr!("private.no_vault_here_about")))
+                    .child(
+                        view()
+                            .flex_row()
+                            .gap_2()
+                            .pt_2()
+                            .child(private_vault::offer("private.choose_folder", None, true))
+                            .child(remove_button()),
+                    )
+                    .into_element(),
+            ];
+        }
         Load::Failed(e) => {
             return vec![
                 check(Level::Error, tr!("project.unreadable"), e).into_element(),

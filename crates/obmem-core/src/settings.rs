@@ -4,13 +4,13 @@
 //! comments included.
 
 use crate::config::{
-    Bucket, GlobalFile, PROJECT_CONFIG_FILE, ProjectFile, SecretMode, SecretsConfig, expand_tilde,
-    global_config_path, global_vault_from, is_plain_relative, private_vault_path,
-    project_vault_path, resolved,
+    Bucket, DEFAULT_VAULT, GlobalFile, Misplaced, PROJECT_CONFIG_FILE, ProjectFile, SecretMode,
+    SecretsConfig, expand_tilde, global_config_path, global_vault_from, is_plain_relative,
+    private_vault_path, private_vault_place, project_vault_path, resolved,
 };
 use crate::store::atomic_write;
 use anyhow::{Context, Result, bail};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use toml_edit::{Array, ArrayOfTables, DocumentMut, Item, Table, Value};
 
 /// What `.obmem.toml` sets.
@@ -82,6 +82,19 @@ pub enum Rule {
     PersonalVaultAbsolute,
     EndpointIsUrl,
     BucketIsName,
+    PrivateVaultAbsolute,
+    PrivateVaultOutsideProject,
+    PrivateVaultApartFromPersonal,
+}
+
+impl From<Misplaced> for Rule {
+    fn from(why: Misplaced) -> Self {
+        match why {
+            Misplaced::NotAbsolute => Rule::PrivateVaultAbsolute,
+            Misplaced::InsideProject => Rule::PrivateVaultOutsideProject,
+            Misplaced::WithPersonalVault => Rule::PrivateVaultApartFromPersonal,
+        }
+    }
 }
 
 impl std::fmt::Display for Rule {
@@ -105,6 +118,15 @@ impl std::fmt::Display for Rule {
                 f.write_str("The endpoint must be a URL starting with https://.")
             }
             Rule::BucketIsName => f.write_str("The bucket is a name, without slashes or spaces."),
+            Rule::PrivateVaultAbsolute => f.write_str(
+                "The private vault must be an absolute path or start with ~/, without `..`.",
+            ),
+            Rule::PrivateVaultOutsideProject => {
+                f.write_str("A private vault is kept outside the project.")
+            }
+            Rule::PrivateVaultApartFromPersonal => {
+                f.write_str("The private vault and the personal vault must be separate folders.")
+            }
         }
     }
 }
@@ -303,19 +325,48 @@ pub fn save_project(root: &Path, s: &ProjectSettings) -> Result<()> {
 ///
 /// With `bucket`, the project's `[project.sync]` names that bucket, in place of the one it named.
 /// Without, what it names stays.
-pub fn make_private(root: &Path, vault: &str, bucket: Option<&Bucket>) -> Result<()> {
+///
+/// Returns the vault folder the repo had, when there is one: its notes stay there, for a person
+/// to move.
+pub fn make_private(root: &Path, vault: &str, bucket: Option<&Bucket>) -> Result<Option<PathBuf>> {
     make_private_at(&global_config_path(), root, vault, bucket)
 }
 
-fn make_private_at(config: &Path, root: &Path, vault: &str, bucket: Option<&Bucket>) -> Result<()> {
+/// The rule `vault` breaks as the private vault of the project at `root`, for a form to show at
+/// its field. A folder that breaks none is one [`make_private`] takes.
+pub fn private_vault_rule(root: &Path, vault: &str) -> Result<Option<Rule>> {
+    private_vault_rule_at(&global_config_path(), root, vault)
+}
+
+fn private_vault_rule_at(config: &Path, root: &Path, vault: &str) -> Result<Option<Rule>> {
+    let root = std::path::absolute(root)?;
+    let file: GlobalFile = toml::from_str(&read_doc(config)?.to_string())?;
+    let personal = global_vault_from(file.vault);
+    Ok(private_vault_place(&root, &as_recorded(vault), &personal)
+        .err()
+        .map(Rule::from))
+}
+
+/// A private vault's folder as the config records it: one under `~/` as it is, any other with
+/// its links and `..` resolved.
+fn as_recorded(vault: &str) -> String {
+    match vault.trim() {
+        home if home.starts_with('~') => home.to_string(),
+        path => resolved(Path::new(path)).display().to_string(),
+    }
+}
+
+fn make_private_at(
+    config: &Path,
+    root: &Path,
+    vault: &str,
+    bucket: Option<&Bucket>,
+) -> Result<Option<PathBuf>> {
     let sync = bucket.map(sync_table).transpose()?;
     let root = std::path::absolute(root)?;
     let mut doc = read_doc(config)?;
     let file: GlobalFile = toml::from_str(&doc.to_string())?;
-    let vault = match vault.trim() {
-        home if home.starts_with('~') => home.to_string(),
-        path => resolved(Path::new(path)).display().to_string(),
-    };
+    let vault = as_recorded(vault);
     let vault = vault.as_str();
     private_vault_path(&root, vault, &global_vault_from(file.vault))?;
     let list = doc
@@ -351,12 +402,18 @@ fn make_private_at(config: &Path, root: &Path, vault: &str, bucket: Option<&Buck
     atomic_write(dir, config, &doc.to_string())?;
 
     let path = root.join(PROJECT_CONFIG_FILE);
+    let mut doc = read_doc(&path)?;
+    let repo: ProjectFile = toml::from_str(&doc.to_string())?;
+    let in_repo = (!repo.private.unwrap_or(false))
+        .then(|| repo.vault.unwrap_or_else(|| DEFAULT_VAULT.into()))
+        .filter(|vault| is_plain_relative(vault))
+        .map(|vault| root.join(vault))
+        .filter(|folder| folder.is_dir());
     if path.exists() {
-        let mut doc = read_doc(&path)?;
         mark_private(&mut doc);
         atomic_write(&root, &path, &doc.to_string())?;
     }
-    Ok(())
+    Ok(in_repo)
 }
 
 /// `[project.sync]` for `bucket`, checked by the rules `[sync]` has.
@@ -714,7 +771,13 @@ mod tests {
 
         // As a person types a folder beside the repo.
         let typed = root.join("../memory").display().to_string();
-        make_private_at(&config, &root, &typed, None).unwrap();
+        // The repo's vault folder holds notes that are not moved: the caller is told where.
+        std::fs::create_dir_all(root.join("docs/kb")).unwrap();
+        assert_eq!(private_vault_rule_at(&config, &root, &typed).unwrap(), None);
+        assert_eq!(
+            make_private_at(&config, &root, &typed, None).unwrap(),
+            Some(root.join("docs/kb"))
+        );
         // The folder as the file system names it: a temp folder is behind a link on macOS.
         let vault = resolved(&vault);
         assert_eq!(
@@ -746,7 +809,9 @@ mod tests {
 
         // Naming another folder replaces the entry.
         let moved = dir.join("moved");
-        make_private_at(&config, &root, &moved.display().to_string(), None).unwrap();
+        // Once private, the repo has no vault of its own left to report.
+        let again = make_private_at(&config, &root, &moved.display().to_string(), None);
+        assert_eq!(again.unwrap(), None);
         let list = projects();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].vault, resolved(&moved).display().to_string());
@@ -786,9 +851,18 @@ mod tests {
         }
         assert_eq!(projects(), list);
 
-        // A folder a private vault cannot be changes nothing.
-        for bad in [root.join("docs/kb"), personal.clone()] {
-            assert!(make_private_at(&config, &root, &bad.display().to_string(), None).is_err());
+        // A folder a private vault cannot be changes nothing, and a form can ask which rule.
+        for (bad, rule) in [
+            (root.join("docs/kb"), Rule::PrivateVaultOutsideProject),
+            (personal.clone(), Rule::PrivateVaultApartFromPersonal),
+            (PathBuf::from("memory"), Rule::PrivateVaultAbsolute),
+        ] {
+            let bad = bad.display().to_string();
+            assert_eq!(
+                private_vault_rule_at(&config, &root, &bad).unwrap(),
+                Some(rule)
+            );
+            assert!(make_private_at(&config, &root, &bad, None).is_err());
         }
         assert_eq!(projects(), list);
         let _ = std::fs::remove_dir_all(&dir);

@@ -65,12 +65,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
-    # Holds the NPM_TOKEN secret, and whatever approval the environment asks for.
+    # The trusted publisher of every npm package names this environment, and it holds whatever
+    # approval a release asks for.
     environment: release
     permissions:
       # the GitHub release
       contents: write
-      # npm provenance
+      # npm trusted publishing and provenance: npm trades the job's OIDC token for one publish
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -79,13 +80,11 @@ jobs:
           path: binaries
       - uses: actions/setup-node@v7
         with:
+          # npm 11.5.1 or later signs in through the job's OIDC token
           node-version: 26
-          registry-url: https://registry.npmjs.org
       - name: Assemble the npm packages
         run: node npm/build.mjs "${GITHUB_REF_NAME#v}" binaries dist > packages.txt
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         # A version that is already there is skipped, so a release that failed halfway can be
         # run again: npm never takes the same version twice.
         run: |

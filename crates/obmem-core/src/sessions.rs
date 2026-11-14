@@ -78,12 +78,13 @@ pub fn logs(cfg: &Config, limit: usize) -> Result<Vec<SessionLog>> {
 
 /// This project's root as a log header records it: the real (symlink-resolved) path, which
 /// `Store::log` writes, then the path as configured, which older logs recorded. Both are absolute,
-/// and in the form `Path::display` writes, so they compare as the text a header holds.
+/// and in the form `Path::display` writes, so they compare as the text a header holds. It is the
+/// main checkout's, so a session in a git worktree reads and continues the project's logs.
 pub(crate) fn own_roots(cfg: &Config) -> Vec<String> {
     let mut own: Vec<String> = Vec::new();
     for root in [
-        std::fs::canonicalize(&cfg.project_root),
-        std::path::absolute(&cfg.project_root),
+        std::fs::canonicalize(&cfg.main_root),
+        std::path::absolute(&cfg.main_root),
     ]
     .into_iter()
     .flatten()
@@ -147,6 +148,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let cfg = Config {
             project_root: dir.join("repo"),
+            main_root: dir.join("repo"),
             project_name: "p".into(),
             project_vault: dir.join("repo/docs/kb"),
             global_vault: dir.join("global"),
@@ -201,6 +203,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("repo")).unwrap();
         let cfg = Config {
             project_root: dir.join("repo"),
+            main_root: dir.join("repo"),
             project_name: "p".into(),
             project_vault: dir.join("repo/docs/kb"),
             global_vault: dir.join("global"),
@@ -273,13 +276,19 @@ mod tests {
             );
         }
 
-        let mut seen: Vec<String> = logs(&cfg, 20)
-            .unwrap()
-            .into_iter()
-            .map(|l| l.name)
-            .collect();
-        seen.sort();
-        assert_eq!(seen, vec!["configured", "none", "real"]);
+        let names = |cfg: &Config| {
+            let mut seen: Vec<String> =
+                logs(cfg, 20).unwrap().into_iter().map(|l| l.name).collect();
+            seen.sort();
+            seen
+        };
+        assert_eq!(names(&cfg), vec!["configured", "none", "real"]);
+        // A git worktree of the project reads the same logs: they record the main checkout.
+        let worktree = Config {
+            project_root: dir.join("tree"),
+            ..cfg.clone()
+        };
+        assert_eq!(names(&worktree), names(&cfg));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

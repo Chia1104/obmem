@@ -9,12 +9,17 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Status {
     pub project_root: PathBuf,
+    /// The repo's main checkout, when `project_root` is a linked git worktree of it.
+    pub main_root: PathBuf,
     pub project_name: String,
     /// The project has `.obmem.toml` (`obmem init` ran). Without it, hooks do nothing and the
     /// MCP server refuses project-vault writes.
     pub initialized: bool,
-    /// Where search, backlinks and link checks come from.
+    /// Where search, backlinks and link checks come from on this machine.
     pub backend: obsidian::Backend,
+    /// Where they come from for the project vault: its files in a git worktree, whose copy of
+    /// the repo's vault Obsidian has not opened (`Backend::for_project_vault`).
+    pub project_backend: obsidian::Backend,
     pub project_vault: VaultStatus,
     /// The project vault is outside the repo, where the user's config says.
     pub private: bool,
@@ -60,9 +65,11 @@ pub fn status(store: &Store) -> Status {
     };
     Status {
         project_root: cfg.project_root.clone(),
+        main_root: cfg.main_root.clone(),
         project_name: cfg.project_name.clone(),
         initialized: cfg.project_root.join(PROJECT_CONFIG_FILE).exists(),
-        backend: store.backend(),
+        backend: store.backend(Scope::Global),
+        project_backend: store.backend(Scope::Project),
         project_vault: vault(&cfg.project_vault),
         private: cfg.vault_is_private(),
         global_vault: vault(&cfg.global_vault),

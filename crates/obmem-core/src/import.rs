@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 pub const IMPORT_AUTHOR: &str = "agent:import";
 
 /// Claude Code keeps per-project memory under the project path with every
-/// non-alphanumeric character replaced by `-`.
+/// non-alphanumeric character replaced by `-`. The worktrees of a repo share the folder of its
+/// main checkout, so that is the path to pass (`Config::main_root`).
 pub fn default_dir(project_root: &Path) -> PathBuf {
     let enc: String = project_root
         .to_string_lossy()
@@ -378,6 +379,7 @@ mod tests {
         let dir = memory_dir("standing");
         let cfg = crate::config::Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),

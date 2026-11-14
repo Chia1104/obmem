@@ -2,6 +2,7 @@
 //! GUI). The session-start hook and `obmem init` record a project; people add and remove them by
 //! hand. Only paths are kept: everything else comes from each project's own config.
 
+use crate::config::main_checkout;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -29,14 +30,15 @@ pub fn list() -> Result<Vec<Project>> {
     list_at(&registry_path())
 }
 
-/// Add a project, or mark it seen today. Writes only when something changed.
+/// Add a project, or mark it seen today. Writes only when something changed. A git worktree is
+/// listed as its main checkout: the list is of projects, not of the folders they are used from.
 pub fn record(path: &Path) -> Result<()> {
-    record_at(&registry_path(), path, &today())
+    record_at(&registry_path(), &main_checkout(path), &today())
 }
 
 /// Returns whether the project was listed.
 pub fn remove(path: &Path) -> Result<bool> {
-    remove_at(&registry_path(), path)
+    remove_at(&registry_path(), &main_checkout(path))
 }
 
 fn today() -> String {

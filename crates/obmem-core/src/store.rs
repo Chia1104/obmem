@@ -14,9 +14,24 @@ use std::path::{Path, PathBuf};
 pub struct Store {
     pub cfg: Config,
     index: Catalog,
-    backend: obsidian::Backend,
-    obs: Box<dyn obsidian::Api>,
+    project: Source,
+    global: Source,
     scanner: Scanner,
+}
+
+/// Where one vault's search, backlinks and link checks come from.
+struct Source {
+    backend: obsidian::Backend,
+    api: Box<dyn obsidian::Api>,
+}
+
+impl From<obsidian::Backend> for Source {
+    fn from(backend: obsidian::Backend) -> Self {
+        Self {
+            backend,
+            api: backend.api(),
+        }
+    }
 }
 
 pub struct WriteRequest {
@@ -241,7 +256,8 @@ impl Store {
         Self::open_with(cfg, obsidian::Backend::detect())
     }
 
-    /// Open with a given backend for search, backlinks and link checks.
+    /// Open with a given backend for search, backlinks and link checks. It is the machine's: the
+    /// project vault of a git worktree can have the other (`Backend::for_project_vault`).
     pub fn open_with(cfg: Config, backend: obsidian::Backend) -> Result<Self> {
         let index = Catalog::default();
         let rule_files = [
@@ -270,10 +286,10 @@ impl Store {
             scan_process_env: cfg.secrets.scan_process_env,
         })?;
         let mut s = Self {
+            project: backend.for_project_vault(&cfg).into(),
+            global: backend.into(),
             cfg,
             index,
-            backend,
-            obs: backend.api(),
             scanner,
         };
         s.sync()?;
@@ -288,9 +304,20 @@ impl Store {
         &self.cfg
     }
 
-    /// Where this store's search, backlinks and link checks come from.
-    pub fn backend(&self) -> obsidian::Backend {
-        self.backend
+    /// Where a vault's search, backlinks and link checks come from.
+    pub fn backend(&self, scope: Scope) -> obsidian::Backend {
+        self.source(scope).backend
+    }
+
+    fn source(&self, scope: Scope) -> &Source {
+        match scope {
+            Scope::Project => &self.project,
+            Scope::Global => &self.global,
+        }
+    }
+
+    fn api(&self, scope: Scope) -> &dyn obsidian::Api {
+        self.source(scope).api.as_ref()
     }
 
     /// Every note in both vaults, as of the last sync.
@@ -371,7 +398,7 @@ impl Store {
                 continue;
             }
             tried += 1;
-            match self.obs.search(&root, &query, limit) {
+            match self.api(sc).search(&root, &query, limit) {
                 Ok(found) => {
                     // Sync conflict copies are left to a person (see the catalog).
                     for r in found
@@ -424,14 +451,14 @@ impl Store {
         };
         let content = std::fs::read_to_string(&path)?;
         let rel = self.relative(&path);
-        let root = if scope == "project" {
-            &self.cfg.project_vault
+        let scope_of = if scope == "project" {
+            Scope::Project
         } else {
-            &self.cfg.global_vault
+            Scope::Global
         };
-        let links = self.obs.links(root, &rel).map_err(|e| format!("{e:#}"));
-        let backlinks = self
-            .obs
+        let (root, api) = (self.vault_for(scope_of), self.api(scope_of));
+        let links = api.links(root, &rel).map_err(|e| format!("{e:#}"));
+        let backlinks = api
             .backlinks(root, &rel)
             .map(|files| files.iter().map(|f| link_name(f)).collect())
             .map_err(|e| format!("{e:#}"));
@@ -446,17 +473,13 @@ impl Store {
     /// The notes one link away from the note at `rel`: the ones it links to, then the ones that
     /// link to it, as vault-relative paths in the same vault.
     pub fn neighbours(&self, scope: Scope, rel: &str) -> Result<Vec<String>> {
-        let root = self.vault_for(scope);
+        let (root, api) = (self.vault_for(scope), self.api(scope));
         let mut out: Vec<String> = Vec::new();
-        let to = self
-            .obs
-            .links(root, rel)?
-            .into_iter()
-            .filter_map(|l| match l {
-                obsidian::Link::File(f) => Some(f),
-                obsidian::Link::Unresolved(_) => None,
-            });
-        for f in to.chain(self.obs.backlinks(root, rel)?) {
+        let to = api.links(root, rel)?.into_iter().filter_map(|l| match l {
+            obsidian::Link::File(f) => Some(f),
+            obsidian::Link::Unresolved(_) => None,
+        });
+        for f in to.chain(api.backlinks(root, rel)?) {
             if f != rel && !out.contains(&f) {
                 out.push(f);
             }
@@ -817,7 +840,7 @@ impl Store {
         let Some(root) = own.first() else {
             bail!(
                 "cannot tell where the project root {} is",
-                self.cfg.project_root.display()
+                self.cfg.main_root.display()
             )
         };
         let mut n = 1;
@@ -877,7 +900,12 @@ impl Store {
         opts: &AuditOptions,
         write: Option<Severity>,
     ) -> Result<(Audit, Option<WriteStats>)> {
-        let mut report = audit::run(&self.cfg, opts, self.obs.as_ref())?;
+        let mut report = audit::run(
+            &self.cfg,
+            opts,
+            self.api(Scope::Project),
+            self.api(Scope::Global),
+        )?;
         if !self.project_ready() && opts.scope != Some(Scope::Global) {
             report.notices.push(format!(
                 "project vault not audited: {}",
@@ -1305,6 +1333,60 @@ mod tests {
     }
 
     #[test]
+    fn a_worktrees_copy_of_the_vault_is_read_from_its_files() {
+        use obsidian::Backend;
+        let dir = std::env::temp_dir().join(format!("obmem-worktree-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tree")).unwrap();
+        std::fs::write(dir.join("tree/.obmem.toml"), "").unwrap();
+        // A linked git worktree of `main`, with the repo's vault in it.
+        let cfg = Config {
+            project_root: dir.join("tree"),
+            main_root: dir.join("main"),
+            project_name: "t".into(),
+            project_vault: dir.join("tree/docs/kb"),
+            global_vault: dir.join("global"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: false,
+            device: "test".into(),
+        };
+        // On a machine with Obsidian, which has never opened the copy.
+        let mut store = Store::open_with(cfg.clone(), Backend::App).unwrap();
+        assert_eq!(store.backend(Scope::Project), Backend::Headless);
+        assert_eq!(store.backend(Scope::Global), Backend::App);
+        let outcome = store.write(WriteRequest {
+            title: "JWT rotation".into(),
+            body: "Rotate the signing key every 30 days.".into(),
+            ..req(Scope::Project)
+        });
+        assert!(matches!(outcome, Ok(WriteOutcome::Written { .. })));
+        let (hits, problems) = store
+            .search("rotate", None, Some(Scope::Project), 10)
+            .unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(hits[0].id, "jwt-rotation");
+        assert!(store.neighbours(Scope::Project, &hits[0].path).is_ok());
+
+        // The main checkout's vault and a private vault are Obsidian's: one path, opened once.
+        let main = Config {
+            project_root: cfg.main_root.clone(),
+            ..cfg.clone()
+        };
+        assert_eq!(Backend::App.for_project_vault(&main), Backend::App);
+        let private = Config {
+            project_vault: dir.join("memory"),
+            ..cfg.clone()
+        };
+        assert_eq!(Backend::App.for_project_vault(&private), Backend::App);
+        assert_eq!(
+            Backend::Headless.for_project_vault(&main),
+            Backend::Headless
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn works_without_obsidian() {
         let dir = std::env::temp_dir().join(format!("obmem-headless-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1312,6 +1394,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "t".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1433,6 +1516,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "home".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1483,6 +1567,7 @@ mod tests {
         .unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1505,6 +1590,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1576,6 +1662,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1664,6 +1751,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "My App".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1709,6 +1797,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1790,6 +1879,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1900,6 +1990,7 @@ mod tests {
         std::fs::write(dir.join(".obmem.toml"), "").unwrap();
         let cfg = |mode| Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),
@@ -1964,6 +2055,7 @@ mod tests {
     fn log_store(dir: &Path, root: &Path, name: &str) -> Store {
         Store::open(Config {
             project_root: root.to_path_buf(),
+            main_root: root.to_path_buf(),
             project_name: name.into(),
             project_vault: root.join("docs/kb"),
             global_vault: dir.join("global"),

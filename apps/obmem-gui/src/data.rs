@@ -615,7 +615,7 @@ pub type Imported = Result<String, import::Skip>;
 /// Imports the chosen memory files as drafts. Returns what happened to each file, by its name.
 pub fn import_claude(root: &Path, chosen: &[PathBuf]) -> Result<Vec<(String, Imported)>, String> {
     let mut store = store_at(root)?;
-    let dir = import::default_dir(&store.config().project_root);
+    let dir = import::default_dir(&store.config().main_root);
     let items = import::plan(&dir)
         .map_err(text)?
         .into_iter()

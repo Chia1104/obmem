@@ -6,7 +6,7 @@
 use crate::config::{
     Bucket, DEFAULT_VAULT, GlobalFile, Misplaced, PROJECT_CONFIG_FILE, ProjectFile, SecretMode,
     SecretsConfig, expand_tilde, global_config_path, global_vault_from, is_plain_relative,
-    private_vault_path, private_vault_place, project_vault_path, resolved,
+    main_checkout, private_vault_path, private_vault_place, project_vault_path, resolved,
 };
 use crate::store::atomic_write;
 use anyhow::{Context, Result, bail};
@@ -342,8 +342,11 @@ fn private_vault_rule_at(config: &Path, root: &Path, vault: &str) -> Result<Opti
     let root = std::path::absolute(root)?;
     let file: GlobalFile = toml::from_str(&read_doc(config)?.to_string())?;
     let personal = global_vault_from(file.vault);
-    Ok(private_vault_place(&root, &as_recorded(vault), &personal)
-        .err()
+    let vault = as_recorded(vault);
+    // Outside the folder the project is used from, and outside its main checkout (`Config::load`).
+    Ok([root.clone(), main_checkout(&root)]
+        .iter()
+        .find_map(|root| private_vault_place(root, &vault, &personal).err())
         .map(Rule::from))
 }
 
@@ -364,11 +367,16 @@ fn make_private_at(
 ) -> Result<Option<PathBuf>> {
     let sync = bucket.map(sync_table).transpose()?;
     let root = std::path::absolute(root)?;
+    // The user's config names the project by its main checkout, and `.obmem.toml` is the one of
+    // the folder this runs in: in a git worktree, the branch's.
+    let main = main_checkout(&root);
     let mut doc = read_doc(config)?;
     let file: GlobalFile = toml::from_str(&doc.to_string())?;
     let vault = as_recorded(vault);
     let vault = vault.as_str();
-    private_vault_path(&root, vault, &global_vault_from(file.vault))?;
+    let personal = global_vault_from(file.vault);
+    private_vault_path(&root, vault, &personal)?;
+    private_vault_path(&main, vault, &personal)?;
     let list = doc
         .entry("project")
         .or_insert(Item::ArrayOfTables(ArrayOfTables::new()));
@@ -378,11 +386,11 @@ fn make_private_at(
             config.display()
         )
     };
-    let entry = match entry_of(list, &root) {
+    let entry = match entry_of(list, &main) {
         Some(entry) => entry,
         None => {
             let mut entry = Table::new();
-            entry.insert("root", toml_edit::value(root.display().to_string()));
+            entry.insert("root", toml_edit::value(main.display().to_string()));
             list.push(entry);
             list.iter_mut().last().expect("just added")
         }
@@ -410,7 +418,7 @@ fn make_private_at(
     Ok(in_repo)
 }
 
-/// The `[[project]]` entry for the project at `root`.
+/// The `[[project]]` entry for the project whose main checkout is `root`.
 fn entry_of<'a>(list: &'a mut ArrayOfTables, root: &Path) -> Option<&'a mut Table> {
     let real_root = resolved(root);
     list.iter_mut().find(|t| {
@@ -429,7 +437,7 @@ pub fn read_project_sync(root: &Path) -> Result<SyncSettings> {
 
 fn read_project_sync_at(config: &Path, root: &Path) -> Result<SyncSettings> {
     let file: GlobalFile = toml::from_str(&read_doc(config)?.to_string())?;
-    let real_root = resolved(&std::path::absolute(root)?);
+    let real_root = resolved(&main_checkout(&std::path::absolute(root)?));
     let bucket = file
         .projects
         .into_iter()
@@ -454,7 +462,7 @@ pub fn save_project_sync(root: &Path, s: &SyncSettings) -> Result<()> {
 
 fn save_project_sync_at(config: &Path, root: &Path, s: &SyncSettings) -> Result<()> {
     refuse(s.problems())?;
-    let root = std::path::absolute(root)?;
+    let root = main_checkout(&std::path::absolute(root)?);
     let mut doc = read_doc(config)?;
     let entry = doc
         .get_mut("project")
@@ -805,6 +813,51 @@ mod tests {
                 }
             )
             .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_worktree_names_its_project_by_the_main_checkout() {
+        let (main, linked) = crate::config::linked_worktree("settings");
+        let dir = main.parent().unwrap().to_path_buf();
+        let (config, vault) = (dir.join("config/config.toml"), dir.join("memory"));
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            format!("vault = '{}'\n", dir.join("personal").display()),
+        )
+        .unwrap();
+        std::fs::write(linked.join(PROJECT_CONFIG_FILE), "name = \"acme\"\n").unwrap();
+        let vault = vault.display().to_string();
+        let projects = || {
+            let text = std::fs::read_to_string(&config).unwrap();
+            toml::from_str::<GlobalFile>(&text).unwrap().projects
+        };
+
+        make_private_at(&config, &linked, &vault, None).unwrap();
+        let listed = projects();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(resolved(Path::new(&listed[0].root)), resolved(&main));
+        // The branch's own `.obmem.toml` is the one marked.
+        let repo = std::fs::read_to_string(linked.join(PROJECT_CONFIG_FILE)).unwrap();
+        assert!(repo.contains("private = true"), "{repo}");
+        // The main checkout and the worktree have one entry, and one bucket.
+        make_private_at(&config, &main, &vault, None).unwrap();
+        assert_eq!(projects().len(), 1);
+        let form = SyncSettings {
+            bucket: "team".into(),
+            ..Default::default()
+        };
+        save_project_sync_at(&config, &linked, &form).unwrap();
+        assert_eq!(read_project_sync_at(&config, &main).unwrap(), form);
+        assert_eq!(read_project_sync_at(&config, &linked).unwrap(), form);
+        // A folder in the worktree is in the project.
+        let inside = linked.join("kb").display().to_string();
+        assert!(
+            private_vault_rule_at(&config, &linked, &inside)
+                .unwrap()
+                .is_some()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

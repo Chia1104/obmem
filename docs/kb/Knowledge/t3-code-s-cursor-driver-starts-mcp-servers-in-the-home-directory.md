@@ -38,4 +38,4 @@ How obmem copes:
 
 The real fix is in T3: start MCP servers in the workspace, or interpolate `${workspaceFolder}`.
 
-Related: [[obmem-in-a-git-worktree-cannot-reach-obsidian]].
+Related: [[a-git-worktree-is-the-project-of-its-main-checkout-and-its-copy-of-the-repo-s-va]].

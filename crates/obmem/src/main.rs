@@ -571,7 +571,7 @@ fn main() -> Result<()> {
             );
         }
         Cmd::ImportClaude { dir, dry_run } => {
-            let dir = dir.unwrap_or_else(|| import::default_dir(&cfg.project_root));
+            let dir = dir.unwrap_or_else(|| import::default_dir(&cfg.main_root));
             let items = import::plan(&dir)?;
             let mut store = store::Store::open(cfg)?;
             if dry_run {
@@ -665,6 +665,9 @@ fn main() -> Result<()> {
             let st = status::status(&store);
             print_binary();
             println!("project root:   {}", st.project_root.display());
+            if st.main_root != st.project_root {
+                println!("worktree of:    {}", st.main_root.display());
+            }
             println!("project name:   {}", st.project_name);
             if !st.initialized {
                 println!("not initialized: run `obmem init` here");
@@ -691,6 +694,12 @@ fn main() -> Result<()> {
                 );
                 // Without Obsidian nothing needs the vault to be registered.
                 if headless {
+                    continue;
+                }
+                if name == "project" && st.project_backend != st.backend {
+                    println!(
+                        "obsidian project built-in search: this worktree's copy of the vault is not open in Obsidian"
+                    );
                     continue;
                 }
                 let state = match &v.obsidian {
@@ -1194,6 +1203,7 @@ mod tests {
         g(&["init", "-q"]);
         let cfg = config::Config {
             project_root: root.clone(),
+            main_root: root.clone(),
             project_name: "t".into(),
             project_vault: root.join("docs/kb"),
             global_vault: root.join("g"),

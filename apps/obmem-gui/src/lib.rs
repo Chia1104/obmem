@@ -49,6 +49,14 @@ pub fn prepare_process() {
     ONCE.call_once(login_env::adopt_login_path);
 }
 
+/// On macOS the window stands on the system's sidebar material, and the desktop shows through it
+/// around the page's panel, as it does in the system's own apps.
+const SEE_THROUGH: bool = cfg!(target_os = "macos");
+
+/// How much of the theme's sidebar color lies over that material: enough for a theme to keep its
+/// color and its text to stay readable, little enough for the desktop to show.
+const TINT: f32 = 0.5;
+
 /// The window: the project list beside the shown project.
 #[component]
 pub fn App() -> impl IntoElement {
@@ -59,6 +67,18 @@ pub fn App() -> impl IntoElement {
     title_bar.height = Some(px(40.0));
     let mut attributes = nsh_core::desktop::WindowAttributes::default();
     attributes.title_bar = Some(title_bar);
+    let mut material = None;
+    if SEE_THROUGH {
+        // The material is the root view's, not the window's (`WindowAttributes::backdrop`): the
+        // window's is laid beside the root and keeps the computer's appearance, so a dark obmem on
+        // a light computer would stand on a light material.
+        attributes.transparent = Some(true);
+        let mut sidebar = MacOsBackdrop::default();
+        sidebar.material = MacOsBackdropMaterial::Sidebar;
+        sidebar.blending = MacOsBackdropBlending::BehindWindow;
+        sidebar.state = MacOsBackdropState::FollowsWindowActiveState;
+        material = Some(sidebar);
+    }
     nsh_core::element::desktop::current_window().set(attributes);
     state::own_tasks();
     state::start_appearance();
@@ -66,8 +86,15 @@ pub fn App() -> impl IntoElement {
     view()
         .flex_1()
         .relative()
+        .macos_backdrop(material)
         // The window is the sidebar's color: the page is a panel set into it (`widgets::page`).
-        .bg(move || theme().sidebar)
+        .bg(move || {
+            if SEE_THROUGH {
+                theme().sidebar.opacity(TINT)
+            } else {
+                theme().sidebar
+            }
+        })
         .text_color(move || theme().foreground)
         .child(sidebar::top_strip(false))
         .child(

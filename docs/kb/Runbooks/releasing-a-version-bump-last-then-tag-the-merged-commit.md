@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-10
 updated: 2026-11-14
-verified_commit: 34a6cfa
+verified_commit: dfbd894
 code_refs:
 - .github/workflows/release.yml
 - apps/obmem-gui/nsh.json
@@ -26,8 +26,8 @@ The `release` skill (`.agents/skills/release/SKILL.md`) says what a release is a
 4. Tag the merged bump commit `v<version>` and push the tag.
 5. Wait for the `verify` job. It installs the release with the install scripts on Linux, macOS and Windows and runs the binary.
 
-## The npm token is temporary
-The publish job still signs in to npm with the `NPM_TOKEN` secret, a token that bypasses 2FA. It was needed for the first publish, because npm only lets a package that already exists have a trusted publisher. Moving to trusted publishing is CHI-71 in Linear. Its trusted publishers are set up on the day of a release, because one that goes unused for two days may expire. Before a release, check whether CHI-71 is still open.
+## npm signs in with trusted publishing
+The publish job has no npm token: npm trades the job's OIDC token for the publish (CHI-71). Each `@chia1104/obmem*` package names the repository, `release.yml` and the environment `release` as its trusted publisher on npmjs.com. The first release after a trusted publisher is set up must run within two days, because one that goes unused for two days may expire.
 
 ## Why the bump goes last
 The release build runs with `--locked`. A pull request that adds a crate writes it into `Cargo.lock` at the current version. If the bump merges before that pull request, `Cargo.lock` on `main` holds the new crate at the old version and the locked build fails. PR #17 (bump to 0.1.1) was stacked on PR #16 (new crate `obmem-update`) for this reason.

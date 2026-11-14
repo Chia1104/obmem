@@ -53,9 +53,35 @@ pub fn prepare_process() {
 /// around the page's panel, as it does in the system's own apps.
 const SEE_THROUGH: bool = cfg!(target_os = "macos");
 
-/// How much of the theme's sidebar color lies over that material: enough for a theme to keep its
-/// color and its text to stay readable, little enough for the desktop to show.
+/// How much of the theme's sidebar color lies over that material, or over the user's picture:
+/// enough for a theme to keep its color and its text to stay readable, little enough for what is
+/// behind to show.
 const TINT: f32 = 0.5;
+
+/// What the window's content stands on. The window is the sidebar's color, and the page is a
+/// panel set into it (`widgets::page`). That color is a tint while something shows through it:
+/// the picture the user chose (`state::background`), or on macOS the desktop.
+fn behind() -> View {
+    let fills = || view().absolute().top(px(0.0)).left(px(0.0)).size_full();
+    fills()
+        .child(dynamic(|| {
+            state::background().map(|file| {
+                image(file.display().to_string())
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(0.0))
+                    .size_full()
+                    .object_fit(ResizeMode::Cover)
+            })
+        }))
+        .child(fills().bg(|| {
+            if SEE_THROUGH || state::background().is_some() {
+                theme().sidebar.opacity(TINT)
+            } else {
+                theme().sidebar
+            }
+        }))
+}
 
 /// The window: the project list beside the shown project.
 #[component]
@@ -87,15 +113,8 @@ pub fn App() -> impl IntoElement {
         .flex_1()
         .relative()
         .macos_backdrop(material)
-        // The window is the sidebar's color: the page is a panel set into it (`widgets::page`).
-        .bg(move || {
-            if SEE_THROUGH {
-                theme().sidebar.opacity(TINT)
-            } else {
-                theme().sidebar
-            }
-        })
         .text_color(move || theme().foreground)
+        .child(behind())
         .child(sidebar::top_strip(false))
         .child(
             view()

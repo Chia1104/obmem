@@ -77,6 +77,8 @@ pub(crate) enum Work {
     Review(String, Decision),
     /// Copying the theme an appearance shows into the user's themes folder.
     DuplicateTheme(Scheme),
+    /// Keeping a copy of the picture picked for behind the window's content, or dropping it.
+    Background,
 }
 
 /// What the main area shows.
@@ -272,7 +274,7 @@ pub(crate) fn own_tasks() {
 }
 
 /// Runs `task` under the window's owner.
-fn run_task(task: impl Future<Output = ()> + 'static) {
+pub(crate) fn run_task(task: impl Future<Output = ()> + 'static) {
     let owner = global::<Tasks>()
         .with(|t| t.0)
         .unwrap_or_else(Owner::current);
@@ -937,6 +939,10 @@ impl Default for Themes {
 #[derive(Clone, Default)]
 struct Picked(Chosen);
 
+/// The chosen picture's file, while it is there.
+#[derive(Clone, Default)]
+struct Picture(Option<PathBuf>);
+
 pub(crate) fn themes() -> Vec<ThemeFile> {
     global::<Themes>().with(|t| t.0.clone())
 }
@@ -962,6 +968,36 @@ pub(crate) fn shown_theme(scheme: Scheme) -> String {
     })
 }
 
+/// The picture behind the sidebar and around the page's panel, when one is chosen and its file is
+/// there.
+pub(crate) fn background() -> Option<PathBuf> {
+    global::<Picture>().with(|p| p.0.clone())
+}
+
+/// The name of the chosen picture, whose file may be gone.
+pub(crate) fn chosen_background() -> Option<String> {
+    global::<Picked>().with(|p| p.0.background.clone())
+}
+
+/// How much a page's panel covers of what is behind it, in percent.
+pub(crate) fn panel() -> u8 {
+    global::<Picked>().with(|p| p.0.panel())
+}
+
+/// Whether a page stands on a panel.
+pub(crate) fn panel_shows() -> bool {
+    global::<Picked>().with(|p| p.0.show_panel)
+}
+
+/// How much of what is behind a page its panel covers, from 0 (no panel) to 1 (all of it).
+pub(crate) fn panel_cover() -> f32 {
+    if panel_shows() {
+        f32::from(panel()) / 100.0
+    } else {
+        0.0
+    }
+}
+
 /// Called by the root component: draws the window as the user chose, in the language they chose,
 /// and keeps it so. The files
 /// are read here, on the engine thread, so that the first frame already has the theme; they are
@@ -970,6 +1006,7 @@ pub(crate) fn start_appearance() {
     let chosen = appearance::chosen();
     set_color_scheme(chosen.mode.into());
     set_locale(chosen.language.locale());
+    global::<Picture>().set(Picture(appearance::background(&chosen)));
     global::<Picked>().set(Picked(chosen));
     global::<Themes>().set(Themes(appearance::themes()));
     // Again whenever a theme is picked or read again, and when the appearance shown changes: a
@@ -982,12 +1019,26 @@ pub(crate) fn start_appearance() {
             }),
         );
     });
-    // A theme file edited in another app shows when the user comes back to the window.
+    // A theme file edited in another app shows when the user comes back to the window, and a
+    // picture taken out of the folder goes.
     effect(|| {
         if lifecycle() == nsh_core::platform::Lifecycle::Active {
             untracked(load_themes);
+            untracked(load_picture);
         }
     });
+}
+
+/// Looks for the chosen picture's file again.
+fn load_picture() {
+    let chosen = global::<Picked>().get_untracked().0;
+    in_background(move || appearance::background(&chosen), set_picture);
+}
+
+fn set_picture(file: Option<PathBuf>) {
+    if global::<Picture>().with_untracked(|p| p.0 != file) {
+        global::<Picture>().set(Picture(file));
+    }
 }
 
 /// Reads the theme files again. What is chosen stays as it is in the window: `appearance.toml`
@@ -1047,6 +1098,77 @@ pub(crate) fn duplicate_theme(scheme: Scheme) {
             Err(e) => fail(e),
         },
     );
+}
+
+/// Asks for a picture, keeps a copy of it and shows it behind the window's content.
+pub(crate) fn pick_background() {
+    run_task(async {
+        let dialog = OpenDialog::files()
+            .filter(nsh_core::file_dialog::FileFilter::new(
+                t!("background.pictures"),
+                appearance::PICTURES.iter().copied(),
+            ))
+            .title(t!("background.pick_title"))
+            .button_label(t!("background.pick_button"));
+        match pick_paths(dialog).await {
+            Ok(Some(paths)) => {
+                let Some(picture) = paths.into_iter().next() else {
+                    return;
+                };
+                let before = untracked(chosen_background);
+                in_background_as(
+                    Work::Background,
+                    move || {
+                        let name = appearance::keep_background(&picture, before.as_deref())?;
+                        let file = appearance::backgrounds_dir().join(&name);
+                        Ok::<_, String>((name, file))
+                    },
+                    |r| match r {
+                        Ok((name, file)) => {
+                            set_picture(Some(file));
+                            choose(|c| c.background = Some(name));
+                        }
+                        Err(e) => fail(e),
+                    },
+                );
+            }
+            Ok(None) => {}
+            Err(e) => fail(format!("could not show the file dialog: {e}")),
+        }
+    });
+}
+
+/// Shows no picture any more, and takes obmem's copy of it away.
+pub(crate) fn remove_background() {
+    let Some(name) = untracked(chosen_background) else {
+        return;
+    };
+    set_picture(None);
+    choose(|c| c.background = None);
+    in_background_as(
+        Work::Background,
+        move || appearance::drop_background(&name),
+        |r| {
+            if let Err(e) = r {
+                fail(e);
+            }
+        },
+    );
+}
+
+/// Lets a page's panel cover `percent` of what is behind it, at once. `keep` when the change
+/// has ended: a slider reports every value on its way, and only the last one is written.
+pub(crate) fn set_panel(percent: u8, keep: bool) {
+    if keep {
+        choose(|c| c.panel = percent);
+    } else {
+        global::<Picked>().update(|p| p.0.panel = percent);
+    }
+}
+
+/// Stands pages on a panel, or right on what is behind the window's content.
+pub(crate) fn set_panel_shows(on: bool) {
+    choose(|c| c.show_panel = on);
 }
 
 /// Shows `file`, or the themes folder, in the file manager.

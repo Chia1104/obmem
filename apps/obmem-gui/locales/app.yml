@@ -953,6 +953,44 @@ appearance:
     en: "Show file"
     zh: "顯示檔案"
 
+background:
+  picture:
+    en: "Background picture"
+    zh: "背景圖片"
+  picture_about:
+    en: "A picture behind the sidebar and around the page, in both appearances. obmem keeps its own copy, so the file you pick may move."
+    zh: "顯示在側邊欄後方與頁面四周的圖片，淺色與深色外觀共用。obmem 會自己保留一份副本，所以你選的檔案之後可以移動。"
+  choose:
+    en: "Choose a picture"
+    zh: "選擇圖片"
+  pictures:
+    en: "Pictures"
+    zh: "圖片"
+  pick_title:
+    en: "Choose a background picture"
+    zh: "選擇背景圖片"
+  pick_button:
+    en: "Use this picture"
+    zh: "使用這張圖片"
+  gone:
+    en: "%{file} is gone"
+    zh: "找不到 %{file}"
+  gone_about:
+    en: "obmem's copy of the picture is gone. No picture shows until you choose one again."
+    zh: "obmem 保留的圖片副本不見了。重新選擇之前不會顯示圖片。"
+  show_panel:
+    en: "Page panel"
+    zh: "頁面面板"
+  show_panel_about:
+    en: "Off, a page has no panel: its cards stand right on what is behind them."
+    zh: "關閉後頁面沒有面板，卡片會直接顯示在後方內容上。"
+  panel:
+    en: "Page opacity"
+    zh: "頁面不透明度"
+  panel_about:
+    en: "How much a page covers of what is behind it: the picture, or on macOS the desktop."
+    zh: "頁面遮住後方內容的程度：後方是背景圖片，在 macOS 上沒有圖片時是桌面。"
+
 language:
   title:
     en: "Language"

@@ -10,7 +10,7 @@ use crate::data::ProjectRow;
 use crate::icons::{
     self, CHEVRON_LEFT, CLOUD, INBOX, PERSON, PLUS, SETTINGS, SHIELD, SIDEBAR, SLIDERS,
 };
-use crate::motion::{Eased, pressed, pressed_icon};
+use crate::motion::{Eased, Enters, SLIDE, pressed, pressed_icon, settled};
 use crate::state::{self, Load, Screen, Section};
 use crate::widgets::{self, WithHint, icon_button, loading, muted};
 use crate::words::{named, tr};
@@ -54,6 +54,14 @@ impl Default for Collapsed {
 #[derive(Clone, Default)]
 struct Drag(Option<(f32, f32)>);
 
+/// The width the sidebar has right now, while it slides between the rail and the full list.
+#[derive(Clone, Default)]
+struct Sliding(Option<f32>);
+
+/// How many slides were started: one that is not the last stops.
+#[derive(Clone, Default)]
+struct Slides(u32);
+
 /// The drawer over the page in a narrow window is open.
 #[derive(Clone, Default)]
 struct Drawer(bool);
@@ -83,8 +91,18 @@ fn shape() -> Shape {
     }
 }
 
-/// The width the sidebar takes beside the page.
+/// The width the sidebar takes beside the page: on its way while it slides, unless its edge is
+/// being dragged, which it then follows.
 pub(crate) fn docked_width() -> f32 {
+    let dragged = global::<Drag>().with(|d| d.0.is_some());
+    match global::<Sliding>().with(|s| s.0) {
+        Some(width) if !dragged => width,
+        _ => resting_width(),
+    }
+}
+
+/// The width of the sidebar's shape, which it has when it does not slide.
+fn resting_width() -> f32 {
     match shape() {
         Shape::Rail => RAIL,
         Shape::Full(w) => w,
@@ -101,8 +119,39 @@ fn toggle() {
     if widgets::narrow() {
         global::<Drawer>().update(|d| d.0 = !d.0);
     } else {
+        let from = untracked(docked_width);
         set_collapsed(!global::<Collapsed>().get_untracked().0);
+        slide(from, untracked(resting_width));
     }
+}
+
+/// Takes the sidebar from width `from` to `to` over [`SLIDE`], a frame at a time. Each frame is a
+/// layout of its own, so the page beside it wraps its text at every width on the way. Native
+/// Shell's `animate_layout` would be less work, but in 0.5.0 it leaves a text that gains a line
+/// at its old height, and the page's texts were cut off after the sidebar opened.
+fn slide(from: f32, to: f32) {
+    if reduce_motion() || from == to {
+        return;
+    }
+    // A press while it slides starts again from where it is; the slide before it stops.
+    global::<Slides>().update(|n| n.0 += 1);
+    let mine = global::<Slides>().get_untracked().0;
+    global::<Sliding>().set(Sliding(Some(from)));
+    state::run_task(async move {
+        let start = next_frame().await;
+        loop {
+            let now = next_frame().await;
+            if global::<Slides>().get_untracked().0 != mine {
+                return;
+            }
+            let t = now.duration_since(start).as_secs_f32() * 1000.0 / SLIDE;
+            if t >= 1.0 {
+                break;
+            }
+            global::<Sliding>().set(Sliding(Some(from + (to - from) * settled(t))));
+        }
+        global::<Sliding>().set(Sliding(None));
+    });
 }
 
 fn close_drawer() {
@@ -119,16 +168,30 @@ fn go(f: impl Fn()) -> impl Fn() {
 
 pub(crate) fn sidebar() -> impl IntoElement {
     let edge = signal(ResizeHandleState::Idle);
-    // Rebuilt when it lists something else, not for each page of the settings.
+    // Rebuilt when it lists something else, not for each page of the settings, and when it
+    // becomes the rail or the full list, not for each width on the way.
     let settings = computed(in_settings);
+    let railed = computed(|| shape() == Shape::Rail);
     view()
         .relative()
         .flex_shrink_0()
         .w(move || px(docked_width()))
-        .child(dynamic(move || match shape() {
-            Shape::Rail => rail(settings.get()).into_element(),
-            Shape::Full(_) => panel(settings.get()).into_element(),
-        }))
+        .child(
+            // While the sidebar slides, its list has the width it comes to rest at, and the
+            // sidebar's edge passes over it: at a width on the way its entries would be cut.
+            view().flex_1().overflow_hidden().child(
+                view()
+                    .flex_1()
+                    .w(move || px(resting_width()))
+                    .child(dynamic(move || {
+                        if railed.get() {
+                            rail(settings.get()).fades_in()
+                        } else {
+                            panel(settings.get()).fades_in()
+                        }
+                    })),
+            ),
+        )
         .child(
             resize_handle()
                 .axis(Axis::Horizontal)
@@ -197,19 +260,28 @@ pub(crate) fn top_strip(in_drawer: bool) -> View {
         .h(move || px(title_bar().top.0.max(36.0)))
         .pl(move || px(title_bar().left.0 + 12.0))
         .window_drag(true)
-        .child(icon_button(
-            SIDEBAR,
-            move || {
-                if in_drawer {
-                    t!("sidebar.close")
-                } else if shape() == Shape::Rail {
-                    t!("sidebar.show")
-                } else {
-                    t!("sidebar.collapse")
-                }
-            },
-            toggle,
-        ))
+        .child(
+            view()
+                .rounded_full()
+                .glass_effect(nsh_core::GlassEffect::Regular)
+                .child(
+                    icon_button(
+                        SIDEBAR,
+                        move || {
+                            if in_drawer {
+                                t!("sidebar.close")
+                            } else if shape() == Shape::Rail {
+                                t!("sidebar.show")
+                            } else {
+                                t!("sidebar.collapse")
+                            }
+                        },
+                        toggle,
+                    )
+                    // The glass is its ground: a wash under the pointer would be a square in the disc.
+                    .on_material(),
+                ),
+        )
 }
 
 /// The full list over the page, while it is open in a narrow window (NSH's `Sheet`): it slides in

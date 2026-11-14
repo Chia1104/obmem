@@ -197,19 +197,24 @@ pub(crate) fn top_strip(in_drawer: bool) -> View {
         .h(move || px(title_bar().top.0.max(36.0)))
         .pl(move || px(title_bar().left.0 + 12.0))
         .window_drag(true)
-        .child(icon_button(
-            SIDEBAR,
-            move || {
-                if in_drawer {
-                    t!("sidebar.close")
-                } else if shape() == Shape::Rail {
-                    t!("sidebar.show")
-                } else {
-                    t!("sidebar.collapse")
-                }
-            },
-            toggle,
-        ))
+        .child(
+            view()
+                .rounded_full()
+                .glass_effect(nsh_core::GlassEffect::Regular)
+                .child(icon_button(
+                    SIDEBAR,
+                    move || {
+                        if in_drawer {
+                            t!("sidebar.close")
+                        } else if shape() == Shape::Rail {
+                            t!("sidebar.show")
+                        } else {
+                            t!("sidebar.collapse")
+                        }
+                    },
+                    toggle,
+                )),
+        )
 }
 
 /// The full list over the page, while it is open in a narrow window (NSH's `Sheet`): it slides in

@@ -57,9 +57,9 @@ pub trait Api: Send {
     fn orphans(&self, vault: &Path) -> Result<Vec<String>>;
 }
 
-/// Which [`Api`] a store uses. It is chosen once, when the store opens, and never changed
-/// after a failed call: the two do not agree in every detail, and one process switching between
-/// them would give answers that cannot be compared.
+/// Which [`Api`] a store uses for a vault. It is chosen once, when the store opens, and never
+/// changed after a failed call: the two do not agree in every detail, and a vault whose answers
+/// come from one and then the other would give answers that cannot be compared.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     /// The Obsidian app, through its CLI.
@@ -77,6 +77,22 @@ impl Backend {
             Backend::App
         } else {
             Backend::Headless
+        }
+    }
+
+    /// The backend for the project's vault, on a machine whose backend is `self`.
+    ///
+    /// A linked git worktree has its own copy of the repo's vault, at a path of its own. Obsidian
+    /// has not opened that copy, and nobody will open it: it is gone with the branch. Its files
+    /// are read instead, so search and links answer from the branch's notes. This follows from
+    /// where the vault is, when the store opens, and never from a failed call. A copy that
+    /// Obsidian does know is asked there, and a registry that cannot be read is still reported.
+    pub fn for_project_vault(self, cfg: &crate::config::Config) -> Self {
+        let copy = cfg.project_root != cfg.main_root && !cfg.vault_is_private();
+        if self == Backend::App && copy && matches!(vault_id(&cfg.project_vault), Ok(None)) {
+            Backend::Headless
+        } else {
+            self
         }
     }
 

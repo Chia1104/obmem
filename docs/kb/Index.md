@@ -24,6 +24,7 @@ author: human
 - [[sync-retention-keeps-a-week-then-dailies-then-weeklies-blobs-are-collected-after]]: what prune keeps and deletes.
 - [[remote-machines-sync-with-credentials-from-the-environment-and-an-ephemeral-sett]]: sync on servers and in cloud sandboxes.
 - [[a-project-vault-can-be-private-outside-the-repo-named-by-the-user-s-config]]: a project vault outside the repo, how a team syncs it and how a machine joins.
+- [[a-git-worktree-is-the-project-of-its-main-checkout-and-its-copy-of-the-repo-s-va]]: a git worktree is the same project as its main checkout, and how its copy of the vault is searched.
 - [[obmem-update-replaces-only-standalone-installs-by-running-the-release-s-install-]]: `obmem update` and the install channels.
 - [[npm-packages-are-published-under-the-chia1104-scope]]: why the npm name has a scope.
 - [[the-secret-scanner-never-looks-up-a-value-from-an-env-file-on-disk]]: how the scanner tells a path from a secret.
@@ -31,7 +32,6 @@ author: human
 
 ## Conventions & gotchas
 - [[obsidian-cli-behaviour]]: read before changing how obmem calls the Obsidian CLI.
-- [[obmem-in-a-git-worktree-cannot-reach-obsidian]]: memory search fails in a worktree on a machine with Obsidian.
 - [[t3-code-s-cursor-driver-starts-mcp-servers-in-the-home-directory]]: why tools take a `project` argument.
 - [[cursor-hook-payloads-and-agent-transcript-format-seen-2026-11-09]]: what Cursor sends to hooks.
 - [[token-shaped-test-fixtures-must-be-split-with-concat]]: GitHub rejects a push with a token-shaped literal.

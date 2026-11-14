@@ -804,7 +804,13 @@ impl Vault {
     }
 }
 
-pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result<Audit> {
+/// `project` and `global` answer the link graph rules for the two vaults.
+pub fn run(
+    cfg: &Config,
+    opts: &AuditOptions,
+    project: &dyn obsidian::Api,
+    global: &dyn obsidian::Api,
+) -> Result<Audit> {
     use crate::note::Scope;
     let rules: Vec<&'static str> = if opts.rules.is_empty() {
         RULES.to_vec()
@@ -841,6 +847,11 @@ pub fn run(cfg: &Config, opts: &AuditOptions, obs: &dyn obsidian::Api) -> Result
         }
         checked_notes += v.docs.iter().filter(|d| d.checkable()).count();
         let other = vaults.get(1 - i);
+        let obs = if v.scope == "project" {
+            project
+        } else {
+            global
+        };
         let mut found = Vec::new();
         for rule in rules
             .iter()
@@ -1264,6 +1275,7 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             let cfg = Config {
                 project_root: dir.clone(),
+                main_root: dir.clone(),
                 project_name: "t".into(),
                 project_vault: dir.join("kb"),
                 global_vault: dir.join("global"),
@@ -1309,6 +1321,7 @@ mod tests {
                     rules: vec![],
                     today: parse_date(today).unwrap(),
                 },
+                &self.obs,
                 &self.obs,
             )
             .unwrap()

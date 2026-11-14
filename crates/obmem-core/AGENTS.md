@@ -9,6 +9,17 @@ The memory model every front end shares: config, the two vaults, notes, search, 
 - `audit` and `store` call each other, so they belong in the same crate.
 - `projects` is the machine's list of project roots (`~/.obmem/projects.toml`, next to the global config). Front ends record into it: the CLI's `init` and session-start hook, and the GUI. Library functions never record, because their tests would fill the user's real list with temp folders.
 
+## Git worktrees (`config.rs`)
+
+A linked git worktree is a second folder of one project, so `Config` has two roots:
+- `project_root` is where the files are: `.obmem.toml`, a vault in the repo, the env files, the code that `code_refs` and drift read.
+- `main_root` is the project: the repo's main checkout (`config::main_checkout`). What obmem keeps outside the project's folder is kept under it: `[[project]]` and `[project.sync]` in the user's config, `projects.toml`, the root in a session log's header, the default project name, and Claude Code's memory folder for an import. Outside a worktree the two roots are the same.
+
+Rules:
+- A function that takes a project's root and reads one of those calls `main_checkout` itself (`config::project_sync`, the private-vault functions in `settings`, `projects::record`). Pass it the root you have.
+- `main_checkout` asks the repo, never the folder: a folder is a worktree only when the repo's own `git worktree list` has it. A `.git` file is one line that anyone can write, and a folder that only names a private project's repo must not be given that project's vault.
+- A vault in the repo is not mapped to the main checkout's. The worktree has its own copy, whose notes merge with the branch, and reads and writes stay in it (see "Without Obsidian" for how it is searched).
+
 ## Settings and allowlists (`settings.rs`, `allowlist.rs`)
 
 - These edit the config files and the vaults' `_system/secret-allowlist.toml` the way a person does, through `toml_edit`: the rest of the file stays, comments included.
@@ -44,6 +55,7 @@ obmem keeps no index of its own. Search, a note's links and backlinks, unresolve
 
 `obsidian::Api` has two implementations. `Backend::detect` picks one when a store opens: `Cli` when the Obsidian CLI command (`OBMEM_OBSIDIAN_BIN`, else `obsidian`) is on `PATH`, else `Headless`.
 - The choice holds for the life of the store. A failed CLI call never falls back to `Headless`: the two differ in details, and on a machine with Obsidian a problem with it must be reported.
+- Each vault of a store has its own backend, and they differ in one case (`Backend::for_project_vault`): in a linked git worktree on a machine with Obsidian, the repo's vault is a copy that Obsidian has not opened, and `Headless` reads it. This follows from where the vault is, when the store opens. It is not a fallback: a copy that Obsidian knows is asked there, and so are the main checkout's vault and a private vault.
 - `Headless` reads the vault on every call, like the catalog. Do not add an index.
 - `query.rs` is the part of Obsidian's search syntax that `Headless` supports. An operator it lacks is an error, never a word to search for. `Store::search` and `context` build queries from this syntax, so what they send must stay inside it.
 - `links.rs` (`Names`) decides which file a `[[link]]` opens. `Headless` and the audit's cross-vault hint share it.
@@ -78,7 +90,8 @@ The project vault and `.obmem.toml` may come from an untrusted clone. Input the 
 - A private vault is shared with the team like the one in the repo, so every rule here about the project vault holds for it too.
 - In `.obmem.toml`, `vault` must be a relative path inside the repo. `secrets.env_files` entries are added to the defaults, never replace them, and must be relative paths inside the repo; symlinks that leave the repo are skipped. `scan_process_env = false` from the repo is ignored.
 - Files are written to an exclusively created, randomly named temp file, then renamed into place. The real (symlink-resolved) folder must stay inside its vault, and obmem never writes through a symlinked file. `init` does not write through any symlink, dangling ones included. A global-vault `name` is reduced to one path component.
-- Projects with the same `name` share `Projects/<name>/Sessions`. A session log's header records the real project root, compared as text and never resolved. `Store::log` adds only to a log that records this project's root, else starts `<log>-2.md`, and `sessions::logs` leaves out logs that record another root.
+- A private project's vault is given to its main checkout and to the worktrees the repo lists, never to a folder whose `.git` file only names the repo (`config::main_checkout`).
+- Projects with the same `name` share `Projects/<name>/Sessions`. A session log's header records the real root of the project's main checkout, compared as text and never resolved. `Store::log` adds only to a log that records this project's root, else starts `<log>-2.md`, and `sessions::logs` leaves out logs that record another root.
 - A session log's name holds the device (`<date>-<device>[-<session>]`, `Config::device` from `config::device_name`). The personal vault is synced between machines, and two machines writing one file would conflict every day.
 
 Any change on these paths keeps an existing test for the invariant, or adds one.

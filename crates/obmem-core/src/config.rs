@@ -85,7 +85,7 @@ pub struct GlobalFile {
 /// able to send writes anywhere outside the repo.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PrivateProject {
-    /// The project root, an absolute path.
+    /// The project's main checkout ([`main_checkout`]), an absolute path.
     pub root: String,
     /// The vault: an absolute path, or one starting with `~/`.
     pub vault: String,
@@ -201,7 +201,11 @@ impl Default for SecretsConfig {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The folder the project's files are in: `.obmem.toml`, a vault in the repo, the code.
     pub project_root: PathBuf,
+    /// The checkout that stands for the project ([`main_checkout`]): `project_root`, or the
+    /// repo's main checkout when `project_root` is a linked git worktree.
+    pub main_root: PathBuf,
     pub project_name: String,
     /// Inside `project_root`, or a private vault outside it (see [`Config::vault_is_private`]).
     pub project_vault: PathBuf,
@@ -266,6 +270,53 @@ pub fn find_project_root(start: &Path) -> PathBuf {
     start.to_path_buf()
 }
 
+/// The checkout that stands for the whole project: `root`, or the repo's main checkout when
+/// `root` is in a linked git worktree (`git worktree add`). What obmem keeps about a project
+/// outside its folder is kept under this path (the user's `[[project]]`, the list of projects,
+/// the session logs), so every worktree of a repo is the same project. A function that takes a
+/// project's root and reads one of those calls this itself.
+///
+/// A folder says it is a worktree with one line in its `.git` file, and anyone can write that
+/// line. So the repo is asked: a folder is a worktree only when the repo's own list has it.
+/// Otherwise a downloaded folder could name the repo of a private project and be given its vault.
+pub fn main_checkout(root: &Path) -> PathBuf {
+    main_of_linked_worktree(root).unwrap_or_else(|| root.to_path_buf())
+}
+
+fn main_of_linked_worktree(root: &Path) -> Option<PathBuf> {
+    let root = std::path::absolute(root).ok()?;
+    // The project can be a folder inside the repo. A checkout has a `.git` folder, and only a
+    // linked worktree (or a submodule) a `.git` file, so git runs for those alone.
+    let top = root.ancestors().find(|dir| dir.join(".git").exists())?;
+    if !top.join(".git").is_file() {
+        return None;
+    }
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(top)
+        .args(["worktree", "list", "--porcelain", "-z"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let mut listed = text
+        .split('\0')
+        .filter_map(|line| line.strip_prefix("worktree "));
+    // The first is the main checkout (of a bare repository, the repository itself).
+    let main = std::path::absolute(listed.next()?).ok()?;
+    let here = resolved(top);
+    if resolved(&main) == here || !listed.any(|w| resolved(Path::new(w)) == here) {
+        return None;
+    }
+    // Joining an empty path would end the root with a separator, and a session log's header
+    // compares roots as text.
+    Some(match root.strip_prefix(top) {
+        Ok(inside) if inside.as_os_str().is_empty() => main,
+        Ok(inside) => main.join(inside),
+        Err(_) => return None,
+    })
+}
+
 /// The project a command is about: found from `project_override`, else `OBMEM_PROJECT_ROOT`,
 /// else the current directory.
 pub fn project_root(project_override: Option<&Path>) -> Result<PathBuf> {
@@ -285,19 +336,28 @@ impl Config {
         let pf: ProjectFile =
             read_toml(&project_root.join(PROJECT_CONFIG_FILE))?.unwrap_or_default();
         let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
-        Self::resolve(project_root, pf, gf)
+        let main_root = main_checkout(&project_root);
+        Self::resolve(project_root, main_root, pf, gf)
     }
 
-    /// What the project's file and the user's file come to, for the project at `project_root`.
-    fn resolve(project_root: PathBuf, pf: ProjectFile, gf: GlobalFile) -> Result<Self> {
+    /// What the project's file and the user's file come to, for the project at `project_root`
+    /// whose main checkout is `main_root`.
+    fn resolve(
+        project_root: PathBuf,
+        main_root: PathBuf,
+        pf: ProjectFile,
+        gf: GlobalFile,
+    ) -> Result<Self> {
+        // A worktree's folder is named after a branch or a task, not after the project.
         let project_name = pf.name.clone().unwrap_or_else(|| {
-            project_root
+            main_root
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "default".into())
         });
         let global_vault = global_vault_from(gf.vault);
-        let project_vault = match private_vault(&gf.projects, &project_root, &global_vault)? {
+        let private = private_vault(&gf.projects, &main_root, &project_root, &global_vault)?;
+        let project_vault = match private {
             Some(vault) => vault,
             None if pf.private.unwrap_or(false) => {
                 return Err(NoVaultHere {
@@ -315,6 +375,7 @@ impl Config {
         let device = device_name(&gf.sync);
         Ok(Self {
             project_root,
+            main_root,
             project_name,
             project_vault,
             global_vault,
@@ -436,7 +497,7 @@ pub(crate) fn sync_config_at(path: &Path) -> Result<SyncConfig> {
 /// config names no bucket for it.
 pub fn project_sync(root: &Path) -> Result<Option<SyncConfig>> {
     let gf: GlobalFile = read_toml(&global_config_path())?.unwrap_or_default();
-    Ok(project_sync_in(&gf, root))
+    Ok(project_sync_in(&gf, &main_checkout(root)))
 }
 
 /// How many projects the user's config names a bucket for.
@@ -499,17 +560,24 @@ pub fn project_vault_path(project_root: &Path, vault: &str) -> Result<PathBuf> {
     Ok(project_vault)
 }
 
-/// The private vault the user's config names for the project at `root`, when it names one.
+/// The private vault the user's config names for the project whose main checkout is `main`, when
+/// it names one. `worktree` is the folder the project is used from.
 fn private_vault(
     projects: &[PrivateProject],
-    root: &Path,
+    main: &Path,
+    worktree: &Path,
     personal: &Path,
 ) -> Result<Option<PathBuf>> {
-    let real_root = resolved(root);
+    let real_root = resolved(main);
     projects
         .iter()
         .find(|p| resolved(Path::new(&p.root)) == real_root)
-        .map(|p| private_vault_path(root, &p.vault, personal))
+        .map(|p| {
+            // Outside the worktree too: the paths say which kind of vault a project has
+            // (`Config::vault_is_private`).
+            private_vault_path(worktree, &p.vault, personal)?;
+            private_vault_path(main, &p.vault, personal)
+        })
         .transpose()
 }
 
@@ -665,6 +733,35 @@ fn read_toml<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>> {
     Ok(Some(v))
 }
 
+/// A repo with one commit and a linked worktree of it, for tests: (main checkout, worktree), as
+/// the paths git prints. They are `main` and `linked` in one folder, which the test removes.
+#[cfg(test)]
+pub(crate) fn linked_worktree(name: &str) -> (PathBuf, PathBuf) {
+    let dir = std::env::temp_dir().join(format!("obmem-worktree-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("main")).unwrap();
+    let dir = std::fs::canonicalize(&dir).unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.join("main"))
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "one"]);
+    git(&["worktree", "add", "-q", "../linked"]);
+    (dir.join("main"), dir.join("linked"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -788,13 +885,20 @@ mod tests {
             vault: Some("docs/kb".into()),
             ..Default::default()
         };
-        let c = Config::resolve(root.clone(), repo, user_file(&root, &vault, &personal)).unwrap();
+        let c = Config::resolve(
+            root.clone(),
+            root.clone(),
+            repo,
+            user_file(&root, &vault, &personal),
+        )
+        .unwrap();
         assert_eq!(c.project_vault, vault, "the user's choice beats the repo's");
         assert!(c.vault_is_private());
 
         // Another project on the same machine keeps its vault in its repo.
         let other = root.with_file_name("other");
         let c = Config::resolve(
+            other.clone(),
             other.clone(),
             ProjectFile::default(),
             user_file(&root, &vault, &personal),
@@ -803,6 +907,77 @@ mod tests {
         assert_eq!(c.project_vault, other.join(DEFAULT_VAULT));
         assert!(!c.vault_is_private());
         let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+
+    #[test]
+    fn a_linked_worktree_is_its_main_checkout() {
+        let (main, linked) = linked_worktree("main");
+        let same = |found: PathBuf, want: &Path| assert_eq!(resolved(&found), resolved(want));
+        same(main_checkout(&main), &main);
+        same(main_checkout(&linked), &main);
+        assert_eq!(
+            main_checkout(&linked).display().to_string(),
+            std::path::absolute(&main).unwrap().display().to_string(),
+            "as the main checkout writes its own root in a session log"
+        );
+        // A project in a folder of the repo.
+        std::fs::create_dir_all(linked.join("apps/web")).unwrap();
+        same(
+            main_checkout(&linked.join("apps/web")),
+            &main.join("apps/web"),
+        );
+        // A folder that names the repo in its `.git` file, and is not one of its worktrees.
+        for (name, gitdir) in [
+            ("copy", main.join(".git")),
+            ("claim", main.join(".git/worktrees/linked")),
+        ] {
+            let forged = main.with_file_name(name);
+            std::fs::create_dir_all(&forged).unwrap();
+            std::fs::write(
+                forged.join(".git"),
+                format!("gitdir: {}\n", gitdir.display()),
+            )
+            .unwrap();
+            same(main_checkout(&forged), &forged);
+        }
+        let plain = main.with_file_name("plain");
+        assert_eq!(main_checkout(&plain), plain, "no repo at all");
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[test]
+    fn a_worktree_is_the_project_of_its_main_checkout() {
+        let (main, linked) = linked_worktree("project");
+        let (vault, personal) = (
+            main.with_file_name("memory"),
+            main.with_file_name("personal"),
+        );
+        // The worktree has no `.obmem.toml`: the file is not committed, or the branch is older.
+        let load = |root: &Path, user: GlobalFile| {
+            let main_root = main_checkout(root);
+            Config::resolve(root.to_path_buf(), main_root, ProjectFile::default(), user)
+        };
+        let c = load(&linked, user_file(&main, &vault, &personal)).unwrap();
+        assert_eq!(c.project_vault, vault, "not the worktree's docs/kb");
+        assert!(c.vault_is_private());
+        assert_eq!(c.project_name, "main", "not the worktree's folder name");
+        assert_eq!(c.project_root, linked, "the code is still the worktree's");
+        // A project whose vault is in the repo keeps the worktree's copy: it is the branch's.
+        let c = load(&linked, GlobalFile::default()).unwrap();
+        assert_eq!(c.project_vault, linked.join(DEFAULT_VAULT));
+        // A private vault is outside the worktree as well.
+        assert!(load(&linked, user_file(&main, &linked.join("kb"), &personal)).is_err());
+        // A folder that only claims the repo is a project of its own.
+        let forged = main.with_file_name("forged");
+        std::fs::create_dir_all(&forged).unwrap();
+        std::fs::write(
+            forged.join(".git"),
+            format!("gitdir: {}\n", main.join(".git").display()),
+        )
+        .unwrap();
+        let c = load(&forged, user_file(&main, &vault, &personal)).unwrap();
+        assert_eq!(c.project_vault, forged.join(DEFAULT_VAULT));
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
     }
 
     #[test]
@@ -850,7 +1025,8 @@ mod tests {
             vault: Some("docs/kb".into()),
             ..Default::default()
         };
-        let err = Config::resolve(root.clone(), repo, GlobalFile::default()).unwrap_err();
+        let err =
+            Config::resolve(root.clone(), root.clone(), repo, GlobalFile::default()).unwrap_err();
         assert!(err.to_string().contains("obmem init --private"), "{err}");
         // A front end that can ask for the folder tells this failure from any other.
         assert!(err.downcast_ref::<NoVaultHere>().is_some());

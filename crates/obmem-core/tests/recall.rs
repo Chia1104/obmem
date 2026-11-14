@@ -26,7 +26,8 @@ struct Case {
     expect: &'static [&'static str],
 }
 
-const WORKTREE: &str = "obmem-in-a-git-worktree-cannot-reach-obsidian";
+const WORKTREE: &str =
+    "a-git-worktree-is-the-project-of-its-main-checkout-and-its-copy-of-the-repo-s-va";
 const HEADLESS: &str = "a-headless-backend-answers-for-obsidian-where-the-app-is-not-installed";
 const OBSIDIAN_CLI: &str =
     "use-the-obsidian-cli-for-search-and-link-checks-instead-of-an-own-index";
@@ -313,7 +314,8 @@ fn recall_on_this_repos_vault() {
     let _ = std::fs::remove_dir_all(&global);
     std::fs::create_dir_all(&global).unwrap();
     let cfg = Config {
-        project_root: root,
+        project_root: root.clone(),
+        main_root: root,
         project_name: "obmem".into(),
         project_vault: vault,
         global_vault: global.clone(),

@@ -530,6 +530,7 @@ mod tests {
     fn cfg_for(root: &Path) -> Config {
         Config {
             project_root: root.to_path_buf(),
+            main_root: root.to_path_buf(),
             project_name: "t".into(),
             project_vault: root.join("docs/kb"),
             global_vault: root.join("global"),

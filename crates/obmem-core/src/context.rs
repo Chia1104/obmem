@@ -690,6 +690,7 @@ mod tests {
         }
         let cfg = crate::config::Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "t".into(),
             project_vault: dir.join("kb"),
             global_vault: dir.join("global"),

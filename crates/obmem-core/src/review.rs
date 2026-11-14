@@ -127,6 +127,7 @@ mod tests {
         std::fs::write(dir.join("docs/kb/Findings/b.md"), finding("fixed")).unwrap();
         let mut store = Store::open(Config {
             project_root: dir.clone(),
+            main_root: dir.clone(),
             project_name: "p".into(),
             project_vault: dir.join("docs/kb"),
             global_vault: dir.join("global"),

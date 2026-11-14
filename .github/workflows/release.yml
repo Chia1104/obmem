@@ -82,6 +82,8 @@ jobs:
         with:
           # npm 11.5.1 or later signs in through the job's OIDC token
           node-version: 26
+          # as npm's trusted publishing example has it
+          registry-url: https://registry.npmjs.org
       - name: Assemble the npm packages
         run: node npm/build.mjs "${GITHUB_REF_NAME#v}" binaries dist > packages.txt
       - name: Publish to npm
@@ -95,7 +97,8 @@ jobs:
               continue
             fi
             # `./`: npm takes a bare `dist/<name>` for a GitHub repository, `<user>/<repo>`.
-            npm publish "./$folder" --access public --provenance
+            # `verbose` logs why npm could not trade the OIDC token, when it cannot.
+            npm publish "./$folder" --access public --provenance --loglevel verbose
           done < packages.txt
       - name: Attach the binaries, their checksums and the install scripts to a GitHub release
         env:

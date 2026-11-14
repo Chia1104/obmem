@@ -6,7 +6,7 @@ author: agent
 confidence: high
 created: 2026-11-09
 updated: 2026-11-14
-verified_commit: dd55720
+verified_commit: 7e7edc8
 code_refs:
 - crates/obmem-core/src/config.rs#main_checkout
 - crates/obmem-core/src/obsidian.rs#Backend::for_project_vault
@@ -18,7 +18,7 @@ tags:
 - privacy
 approved_at: 2026-11-14
 approved_by: auto-approve
-verified_at: 2026-11-09
+verified_at: 2026-11-14
 verified_by: agent
 ---
 ## Context

@@ -14,6 +14,9 @@ const FAST: f32 = 180.0;
 /// Something moving into place: a toast coming and going.
 const BASE: f32 = 240.0;
 
+/// The sidebar going between the rail and the full list.
+pub(crate) const SLIDE: f32 = BASE;
+
 /// A long, soft settle: most of the way at once, then slowly home.
 const SMOOTH_OUT: [f32; 4] = [0.22, 1.0, 0.36, 1.0];
 
@@ -72,6 +75,12 @@ fn coming() -> MotionSpec {
     let [x1, y1, x2, y2] = SMOOTH_OUT;
     MotionSpec::new(KeyframeTiming::new(BASE).easing(Easing::Bezier(x1, y1, x2, y2)))
         .values(MotionChannel::Opacity, [0.0, 1.0])
+}
+
+/// How far along its way something is at `t` of its time (0 to 1), for what is moved a frame at a
+/// time: most of the way at once, then slowly home, like [`SMOOTH_OUT`].
+pub(crate) fn settled(t: f32) -> f32 {
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(4)
 }
 
 /// The `active` style of a button or a row: `.presses().active(pressed)`.

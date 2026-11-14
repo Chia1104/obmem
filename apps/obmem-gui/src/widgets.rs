@@ -12,8 +12,9 @@ use std::rc::Rc;
 
 /// Below this window width the sidebar stops taking room and opens over the page instead.
 pub(crate) const NARROW: f32 = 760.0;
-/// The widest the page's column gets: lines stay readable in a wide window.
-const PAGE_MAX: f32 = 920.0;
+/// The widest the page's column gets: lines stay readable in a wide window, where the column
+/// stands in the middle of the panel.
+const PAGE_MAX: f32 = 1120.0;
 
 /// The window is too narrow to keep the sidebar beside the page.
 pub(crate) fn narrow() -> bool {
@@ -31,7 +32,8 @@ const INSET: f32 = 8.0;
 /// A page: one panel set into the window beside the sidebar, under the strip along the window's
 /// top edge (`sidebar::top_strip`). Its `bar` stays at the top
 /// ([`page_bar`], and a project's tabs under it); its `body` scrolls below, in a column that stops
-/// growing in a wide window and rises in when the page is opened.
+/// growing in a wide window, where it and the bar stand in the middle, and rises in when the page
+/// is opened.
 pub(crate) fn page(bar: impl IntoElement, body: impl IntoElement) -> impl IntoElement {
     view()
         .flex_1()
@@ -43,15 +45,35 @@ pub(crate) fn page(bar: impl IntoElement, body: impl IntoElement) -> impl IntoEl
                 .flex_1()
                 .overflow_hidden()
                 .rounded(move || theme().radius + px(4.0))
+                // The user may let the panel show some of what is behind it, which it then
+                // blurs, or have no panel: the page keeps its place, without ground or edge.
                 .border_1()
-                .border_color(move || theme().border)
-                .bg(move || theme().background)
-                .child(view().flex_shrink_0().window_drag(true).child(bar))
+                .border_color(move || {
+                    if crate::state::panel_shows() {
+                        theme().border
+                    } else {
+                        AdaptiveColor::TRANSPARENT
+                    }
+                })
+                .bg(move || theme().background.opacity(crate::state::panel_cover()))
+                .style_when(
+                    || (0.01..1.0).contains(&crate::state::panel_cover()),
+                    |s| s.backdrop_blur(px(24.0)),
+                )
+                // The bar is as wide as the column under it and stands over it; the strip around
+                // it drags the window across the panel's whole width.
+                .child(
+                    view()
+                        .flex_shrink_0()
+                        .window_drag(true)
+                        .child(view().w_full().max_w(px(PAGE_MAX)).self_center().child(bar)),
+                )
                 .child(
                     scroll().flex_1().child(
                         view()
                             .w_full()
                             .max_w(px(PAGE_MAX))
+                            .self_center()
                             .gap_4()
                             .px_6()
                             .pb_6()
@@ -273,6 +295,7 @@ pub(crate) struct IconPress {
     label: Reactive<SharedString>,
     on_press: Box<dyn Fn()>,
     busy: Rc<dyn Fn() -> bool>,
+    washes: bool,
 }
 
 pub(crate) fn icon_button(
@@ -285,10 +308,18 @@ pub(crate) fn icon_button(
         label: label.into_reactive(),
         on_press: Box::new(on_press),
         busy: Rc::new(|| false),
+        washes: true,
     }
 }
 
 impl IconPress {
+    /// For a button that stands on a material of its own (the sidebar's, on glass): under the
+    /// pointer only its icon changes, with no wash behind it.
+    pub(crate) fn on_material(mut self) -> Self {
+        self.washes = false;
+        self
+    }
+
     /// Whether the work it starts is running (`state::running`).
     pub(crate) fn busy(mut self, busy: impl Fn() -> bool + 'static) -> Self {
         self.busy = Rc::new(busy);
@@ -303,6 +334,7 @@ impl IntoElement for IconPress {
             label,
             on_press,
             busy,
+            washes,
         } = self;
         let ink = move || theme().muted_foreground;
         let spins = busy.clone();
@@ -315,9 +347,13 @@ impl IntoElement for IconPress {
             .text_color(ink)
             .presses()
             // A wash of the text color: the button sits on the sidebar and on the page alike.
-            .hover(|s| {
-                s.bg(move || theme().foreground.opacity(0.08))
-                    .text_color(move || theme().foreground)
+            .hover(move |s| {
+                let s = s.text_color(move || theme().foreground);
+                if washes {
+                    s.bg(move || theme().foreground.opacity(0.08))
+                } else {
+                    s
+                }
             })
             .active(pressed_icon)
             .disabled(move || busy())

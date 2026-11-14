@@ -6,6 +6,10 @@
 //! obmem ships are the files in `themes/`, built into the binary. The user's own are the `.json`
 //! files in the `themes` folder next to the global config, and what they chose is
 //! `appearance.toml` beside it. Everything that touches those files blocks.
+//!
+//! The user may also put a picture behind the sidebar and around the page's panel, and let the
+//! panel show some of what is behind it. obmem keeps its own copy of the picture, in the
+//! `backgrounds` folder beside the themes folder, so the picture stays when its file is moved.
 
 use nsh_core::prelude::{AdaptiveColor, Tokens};
 use obmem_core::config::global_config_path;
@@ -108,8 +112,17 @@ impl Language {
     }
 }
 
+/// The kinds of picture that can stand behind the window's content, by extension. macOS and
+/// Windows draw PNG and JPEG themselves. AVIF is drawn by macOS 13 and later, and by Windows
+/// where its AV1 extension is installed; where it is not drawn, the window shows no picture.
+pub(crate) const PICTURES: &[&str] = &["png", "jpg", "jpeg", "avif"];
+
+/// The least a page's panel covers of what is behind it, in percent: under this the page's own
+/// text is hard to read over a picture.
+pub(crate) const PANEL_MIN: u8 = 50;
+
 /// What the user chose (`appearance.toml`): the mode, the id of the theme each appearance shows,
-/// and the language.
+/// the language, and what is behind the window's content.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct Chosen {
@@ -117,6 +130,14 @@ pub(crate) struct Chosen {
     pub light: String,
     pub dark: String,
     pub language: Language,
+    /// The picture behind the sidebar and around the page's panel: the name of a file in the
+    /// backgrounds folder. Both appearances show the same one.
+    pub background: Option<String>,
+    /// How much a page's panel covers of what is behind it, in percent ([`Chosen::panel`]).
+    pub panel: u8,
+    /// Whether a page stands on a panel at all. Without one its cards stand right on what is
+    /// behind the window's content.
+    pub show_panel: bool,
 }
 
 impl Default for Chosen {
@@ -126,6 +147,9 @@ impl Default for Chosen {
             light: DEFAULT.to_owned(),
             dark: DEFAULT.to_owned(),
             language: Language::System,
+            background: None,
+            panel: 100,
+            show_panel: true,
         }
     }
 }
@@ -143,6 +167,12 @@ impl Chosen {
             Scheme::Light => self.light = id,
             Scheme::Dark => self.dark = id,
         }
+    }
+
+    /// How much a page's panel covers of what is behind it, in percent: what the file says, held
+    /// between [`PANEL_MIN`] and 100.
+    pub(crate) fn panel(&self) -> u8 {
+        self.panel.clamp(PANEL_MIN, 100)
     }
 }
 
@@ -236,6 +266,74 @@ pub(crate) fn themes_dir() -> PathBuf {
     global_config_path().with_file_name("themes")
 }
 
+/// The folder obmem keeps the picture behind the window's content in, next to the global config.
+pub(crate) fn backgrounds_dir() -> PathBuf {
+    global_config_path().with_file_name("backgrounds")
+}
+
+/// The chosen picture's file, while it is there.
+pub(crate) fn background(chosen: &Chosen) -> Option<PathBuf> {
+    background_in(&backgrounds_dir(), chosen)
+}
+
+fn background_in(dir: &Path, chosen: &Chosen) -> Option<PathBuf> {
+    let file = dir.join(plain_name(chosen.background.as_deref()?)?);
+    file.is_file().then_some(file)
+}
+
+/// `name` when it names a file in a folder and nothing outside it. The name comes from a file
+/// the user may have edited, and the file it names is one obmem deletes.
+fn plain_name(name: &str) -> Option<&str> {
+    (Path::new(name).file_name()?.to_str()? == name).then_some(name)
+}
+
+/// Copies `picture` into the backgrounds folder and returns the copy's name, which
+/// `appearance.toml` names it by. The picture kept `before` goes: there is one at a time.
+pub(crate) fn keep_background(picture: &Path, before: Option<&str>) -> Result<String, String> {
+    keep_background_in(&backgrounds_dir(), picture, before)
+}
+
+fn keep_background_in(dir: &Path, picture: &Path, before: Option<&str>) -> Result<String, String> {
+    let name = picture
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{} has no name obmem can keep.", picture.display()))?;
+    let extension = picture.extension().and_then(|e| e.to_str());
+    if !extension.is_some_and(|e| PICTURES.iter().any(|p| p.eq_ignore_ascii_case(e))) {
+        return Err(format!(
+            "{name} is not a picture obmem can show. It shows {}.",
+            PICTURES.join(", ")
+        ));
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let copy = dir.join(name);
+    // A picture picked from the folder itself is the copy already. Copying a file onto itself
+    // would empty it.
+    let same = matches!((picture.canonicalize(), copy.canonicalize()), (Ok(a), Ok(b)) if a == b);
+    if !same {
+        std::fs::copy(picture, &copy).map_err(|e| format!("{}: {e}", picture.display()))?;
+    }
+    if let Some(before) = before.filter(|before| *before != name) {
+        drop_background_in(dir, before)?;
+    }
+    Ok(name.to_owned())
+}
+
+/// Takes obmem's copy of the picture `name` out of the backgrounds folder.
+pub(crate) fn drop_background(name: &str) -> Result<(), String> {
+    drop_background_in(&backgrounds_dir(), name)
+}
+
+fn drop_background_in(dir: &Path, name: &str) -> Result<(), String> {
+    let Some(name) = plain_name(name) else {
+        return Ok(());
+    };
+    match std::fs::remove_file(dir.join(name)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{name}: {e}")),
+        _ => Ok(()),
+    }
+}
+
 fn chosen_path() -> PathBuf {
     global_config_path().with_file_name("appearance.toml")
 }
@@ -304,7 +402,7 @@ pub(crate) fn save(chosen: &Chosen) -> Result<(), String> {
 fn save_at(path: &Path, chosen: &Chosen) -> Result<(), String> {
     let body = toml::to_string(chosen).map_err(|e| e.to_string())?;
     let text = format!(
-        "# How obmem's desktop app looks. `light` and `dark` name a theme: a built-in one, or a\n# file in the themes folder beside this file, without `.json`. `language` is `system`, `en`\n# or `zh`. Read when the app starts.\n{body}"
+        "# How obmem's desktop app looks. `light` and `dark` name a theme: a built-in one, or a\n# file in the themes folder beside this file, without `.json`. `language` is `system`, `en`\n# or `zh`. `background` names a picture in the backgrounds folder beside this file, and\n# `panel` is how much a page's panel covers of what is behind it, in percent; `show_panel`\n# is whether a page has a panel at all. Read when the app starts.\n{body}"
     );
     let dir = path.parent().ok_or("the config has no folder")?;
     atomic_write(dir, path, &text).map_err(|e| format!("{e:#}"))
@@ -488,6 +586,9 @@ mod tests {
             light: "sepia".into(),
             dark: "unit-01".into(),
             language: Language::Chinese,
+            background: Some("hills.jpg".into()),
+            panel: 80,
+            show_panel: false,
         };
         save_at(&path, &chosen).unwrap();
         assert_eq!(read_chosen(&path), chosen);
@@ -509,6 +610,82 @@ mod tests {
         std::fs::write(&path, "mode = \"sideways\"\n").unwrap();
         assert_eq!(read_chosen(&path), Chosen::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_picture_is_kept_as_a_copy_and_the_one_before_it_goes() {
+        let dir = temp("picture");
+        let (from, kept) = (dir.join("from"), dir.join("backgrounds"));
+        std::fs::create_dir_all(&from).unwrap();
+        for name in ["hills.jpg", "Sea.PNG", "dunes.avif", "notes.txt"] {
+            std::fs::write(from.join(name), name).unwrap();
+        }
+        let chosen = |name: &str| Chosen {
+            background: Some(name.into()),
+            ..Chosen::default()
+        };
+        assert_eq!(background_in(&kept, &Chosen::default()), None);
+        assert_eq!(background_in(&kept, &chosen("hills.jpg")), None);
+
+        let name = keep_background_in(&kept, &from.join("hills.jpg"), None).unwrap();
+        assert_eq!(name, "hills.jpg");
+        assert_eq!(
+            background_in(&kept, &chosen(&name)),
+            Some(kept.join("hills.jpg"))
+        );
+        // The file it was copied from may go.
+        std::fs::remove_file(from.join("hills.jpg")).unwrap();
+        assert!(background_in(&kept, &chosen(&name)).is_some());
+
+        let next = keep_background_in(&kept, &from.join("Sea.PNG"), Some(&name)).unwrap();
+        assert_eq!(next, "Sea.PNG");
+        assert!(!kept.join("hills.jpg").exists());
+        // Picked from the folder itself, it is left as it is.
+        keep_background_in(&kept, &kept.join("Sea.PNG"), Some(&next)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(kept.join("Sea.PNG")).unwrap(),
+            "Sea.PNG"
+        );
+
+        let refused = keep_background_in(&kept, &from.join("notes.txt"), Some(&next));
+        assert!(refused.unwrap_err().contains("not a picture"));
+        assert!(kept.join("Sea.PNG").exists());
+        let next = keep_background_in(&kept, &from.join("dunes.avif"), Some(&next)).unwrap();
+        assert_eq!(next, "dunes.avif");
+
+        drop_background_in(&kept, &next).unwrap();
+        drop_background_in(&kept, &next).unwrap();
+        assert_eq!(background_in(&kept, &chosen(&next)), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_name_that_leaves_the_folder_names_no_picture() {
+        let dir = temp("outside");
+        let kept = dir.join("backgrounds");
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::write(dir.join("outside.png"), "").unwrap();
+        let chosen = Chosen {
+            background: Some("../outside.png".into()),
+            ..Chosen::default()
+        };
+        assert_eq!(background_in(&kept, &chosen), None);
+        drop_background_in(&kept, "../outside.png").unwrap();
+        assert!(dir.join("outside.png").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_panel_covers_at_least_half_of_what_is_behind_it() {
+        let covers = |panel| {
+            Chosen {
+                panel,
+                ..Chosen::default()
+            }
+            .panel()
+        };
+        assert_eq!(Chosen::default().panel(), 100);
+        assert_eq!((covers(0), covers(75), covers(255)), (PANEL_MIN, 75, 100));
     }
 
     #[test]

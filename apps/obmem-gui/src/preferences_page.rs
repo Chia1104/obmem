@@ -1,14 +1,16 @@
 //! The Preferences page of the settings: the window's language, its mode, the theme each
-//! appearance shows (picked in a dialog), and the user's own theme files.
+//! appearance shows (picked in a dialog), the picture behind the window's content and how much a
+//! page covers of it, and the user's own theme files.
 
 use crate::appearance::{self, Language, Mode, Scheme, ThemeFile};
 use crate::motion::{Eased, pressed};
 use crate::state::{self, Work};
 use crate::widgets::{
-    FirstRow, Level, about, action, card, check, choice, dialog_box, field, heading, muted, page,
-    page_bar, path_text, primary, select,
+    FirstRow, Level, WithHint, about, action, card, check, choice, dialog_box, field, heading,
+    muted, page, page_bar, path_text, primary, select, switch_control,
 };
-use crate::words::tr;
+use crate::words::{named, tr};
+use nsh_base::SliderValue;
 use nsh_base::theme;
 use nsh_core::prelude::*;
 
@@ -58,7 +60,21 @@ pub(crate) fn preferences_page() -> impl IntoElement {
                         .test_id("appearance-mode"),
                     )
                     .child(theme_row(Scheme::Light, picking))
-                    .child(theme_row(Scheme::Dark, picking)),
+                    .child(theme_row(Scheme::Dark, picking))
+                    .child(background_row())
+                    .child(
+                        field(
+                            tr!("background.show_panel"),
+                            tr!("background.show_panel_about"),
+                            switch_control(
+                                state::panel_shows,
+                                tr!("background.show_panel"),
+                                state::set_panel_shows,
+                            ),
+                        )
+                        .test_id("background-show-panel"),
+                    )
+                    .child(panel_row()),
             )
             // Rebuilt when the theme files change.
             .child(dynamic(move || own_themes(&state::themes())))
@@ -116,6 +132,105 @@ fn gone(scheme: Scheme) -> Option<View> {
             tr!("appearance.theme_gone_about"),
         )
     })
+}
+
+/// The picture behind the window's content, by its file's name, with the ways to pick one and to
+/// take it away.
+fn background_row() -> View {
+    // What the row is built from. The whole of what is chosen changes with every step of the
+    // panel's slider, and the row must not be built again for those.
+    let name = computed(state::chosen_background);
+    let gone = computed(|| state::background().is_none());
+    view()
+        .test_id("background-row")
+        .child(field(
+            tr!("background.picture"),
+            tr!("background.picture_about"),
+            dynamic(move || {
+                let name = name.get();
+                let mut controls = view().flex_row().items_center().gap_3();
+                if let Some(name) = &name {
+                    // Cut here, not by the text's own `truncate`: a row is laid out by the width
+                    // of the whole name, cut or not, and the controls then stand off its end.
+                    controls = controls.child(
+                        text(shortened(name))
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .with_hint(name.clone()),
+                    );
+                }
+                controls = controls.child(
+                    action(tr!("background.choose"), state::pick_background)
+                        .busy(state::running(Work::Background)),
+                );
+                if name.is_some() {
+                    controls =
+                        controls.child(action(tr!("common.remove"), state::remove_background));
+                }
+                controls
+            }),
+        ))
+        .child(dynamic(move || {
+            let name = name.get().filter(|_| gone.get())?;
+            Some(check(
+                Level::Warn,
+                tr!("background.gone", file = name),
+                tr!("background.gone_about"),
+            ))
+        }))
+}
+
+/// A file's name short enough to stand beside its buttons: a long one keeps its start and its
+/// end, where its kind is.
+fn shortened(name: &str) -> String {
+    const START: usize = 14;
+    const END: usize = 8;
+    let letters: Vec<char> = name.chars().collect();
+    if letters.len() <= START + END + 1 {
+        return name.to_owned();
+    }
+    let start: String = letters[..START].iter().collect();
+    let end: String = letters[letters.len() - END..].iter().collect();
+    format!("{start}…{end}")
+}
+
+/// How much a page's panel covers of what is behind it: a slider that shows its change at once.
+/// It waits while a page has no panel.
+fn panel_row() -> View {
+    let value = |value: &SliderValue| value.end().round() as u8;
+    field(
+        tr!("background.panel"),
+        tr!("background.panel_about"),
+        view()
+            .flex_row()
+            .items_center()
+            .gap_3()
+            .child(
+                nsh_base::slider()
+                    .value(|| Some(SliderValue::Single(f64::from(state::panel()))))
+                    .min(f64::from(appearance::PANEL_MIN))
+                    .max(100.0)
+                    .step(5.0)
+                    .accessibility_label(named("background.panel"))
+                    .disabled(|| !state::panel_shows())
+                    .on_change(move |v: &SliderValue| state::set_panel(value(v), false))
+                    .on_change_end(move |v: &SliderValue| state::set_panel(value(v), true))
+                    .w(px(160.0))
+                    .track_class(Some("h-5 justify-center disabled:opacity-50".into()))
+                    .indicator_class(Some("h-1.5 rounded-full bg-input".into()))
+                    .range_class(Some("rounded-full bg-primary".into()))
+                    .thumb_class(Some(
+                        "size-4 rounded-full bg-background border border-input shadow-xs".into(),
+                    )),
+            )
+            .child(
+                text(|| format!("{}%", state::panel()))
+                    .text_sm()
+                    .w(px(40.0))
+                    .text_color(move || theme().muted_foreground),
+            ),
+    )
+    .test_id("background-panel")
 }
 
 /// The themes to pick from for `scheme`, each drawn in its own colors. A pick shows at once, in
@@ -314,4 +429,27 @@ fn own_themes(themes: &[ThemeFile]) -> AnyElement {
         );
     }
     block.into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shortened;
+
+    #[test]
+    fn a_long_file_name_keeps_its_start_and_its_kind() {
+        assert_eq!(shortened("hills.jpg"), "hills.jpg");
+        assert_eq!(
+            shortened("a-name-of-23-letter.png"),
+            "a-name-of-23-letter.png"
+        );
+        assert_eq!(
+            shortened("the-ghost-in-the-shell-example-wallpaper-4k.avif"),
+            "the-ghost-in-t…-4k.avif"
+        );
+        // Letters, not bytes.
+        assert_eq!(
+            shortened("攻殼機動隊的桌布攻殼機動隊的桌布攻殼機動隊的桌布.avif"),
+            "攻殼機動隊的桌布攻殼機動隊的…的桌布.avif"
+        );
+    }
 }

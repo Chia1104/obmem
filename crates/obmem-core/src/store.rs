@@ -522,12 +522,14 @@ impl Store {
         }
     }
 
+    /// The vault-relative path of a note, `/`-separated on every OS like the catalog's and the
+    /// backends', so it can be compared with theirs.
     fn relative(&self, abs: &str) -> String {
         let (p, g) = self.roots();
         let ap = Path::new(abs);
         ap.strip_prefix(&p)
             .or_else(|_| ap.strip_prefix(&g))
-            .map(|r| r.to_string_lossy().into_owned())
+            .map(|r| r.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| abs.to_string())
     }
 
@@ -981,7 +983,7 @@ impl Store {
                 .strip_prefix(&root)
                 .unwrap_or(&path)
                 .to_string_lossy()
-                .into_owned();
+                .replace('\\', "/");
             if audit::suppress_finding(&root, &rel, &note.fm, &date)? {
                 suppressed_in = Some(root.join(audit::SUPPRESSIONS_FILE));
             }
@@ -1630,7 +1632,7 @@ mod tests {
             .strip_prefix(dir.join("global"))
             .unwrap()
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         let err = store
             .approve(
                 NoteRef::At {

@@ -759,7 +759,19 @@ pub(crate) fn linked_worktree(name: &str) -> (PathBuf, PathBuf) {
     git(&["init", "-q"]);
     git(&["commit", "-q", "--allow-empty", "-m", "one"]);
     git(&["worktree", "add", "-q", "../linked"]);
-    (dir.join("main"), dir.join("linked"))
+    // As git prints them: `canonicalize` gives `\\?\C:\…` on Windows, which git never prints.
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir.join("main"))
+        .args(["worktree", "list", "--porcelain", "-z"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    let mut listed = text
+        .split('\0')
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(|p| std::path::absolute(p).unwrap());
+    (listed.next().unwrap(), listed.next().unwrap())
 }
 
 #[cfg(test)]

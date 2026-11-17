@@ -30,7 +30,8 @@ What a library reports to a person about work that went through is a typed value
 ## Workflow
 
 - Before committing: `cargo fmt --all`, then `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass. CI (`.github/workflows/ci.yml`) runs the same three checks on every push to `main` and every pull request, and the pre-commit hook refuses staged Rust files that are not formatted.
-- `default-members` leaves out the GUI, so a plain `cargo build` stays free of Native Shell; `--workspace` includes it. CI also lints and tests the default members on Linux, where remote agents run obmem; the GUI does not build there.
+- `default-members` leaves out the GUI, so a plain `cargo build` stays free of Native Shell; `--workspace` includes it. CI runs the workspace on macOS and on Windows, and lints and tests the default members on Linux, where remote agents run obmem; the GUI does not build there.
+- Paths and line endings differ on Windows. A vault-relative path is `/`-separated on every OS, a path written into TOML or JSON goes through its serializer (a `\` in a basic string is an escape), and `.gitattributes` keeps files LF in every checkout.
 - Releasing a version, or changing the release workflow, the npm packages or the install scripts: load the `release` skill (`.agents/skills/`).
 - Commits that only reformat go in `.git-blame-ignore-revs`. Run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once so local `git blame` skips them.
 - This repo dogfoods obmem. `.mcp.json`, the agent hooks and `.githooks/pre-commit` (enabled with `git config core.hooksPath .githooks`) all run `obmem` from `PATH`. After a change you want the hooks to pick up, run `cargo install --path crates/obmem`. After a change to a skill in `crates/obmem-agents/skills/`, also run `obmem setup claude codex cursor amp` and commit the copies it rewrites.

@@ -585,10 +585,14 @@ mod tests {
         let theirs = root.join(".claude/skills/deploy/SKILL.md");
         std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
         std::fs::write(&theirs, "theirs").unwrap();
-        assert_eq!(
-            check(&c, Agent::Claude).unwrap().changed,
-            [skill.display().to_string()]
-        );
+        // Compared as paths: on Windows the report joins `.claude/skills` with `\`.
+        let changed: Vec<PathBuf> = check(&c, Agent::Claude)
+            .unwrap()
+            .changed
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(changed, std::slice::from_ref(&skill));
         setup(&c, Agent::Claude).unwrap();
         assert_eq!(std::fs::read_to_string(&skill).unwrap(), SKILLS[1].1);
         assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "theirs");

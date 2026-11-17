@@ -497,11 +497,8 @@ mod tests {
         let reg = dir.join("obsidian.json");
         // registered via a non-canonical spelling of the same folder
         let spelled = format!("{}/./v", dir.display());
-        std::fs::write(
-            &reg,
-            format!(r#"{{"vaults":{{"abc123":{{"path":"{spelled}","ts":1}}}}}}"#),
-        )
-        .unwrap();
+        let json = serde_json::json!({"vaults": {"abc123": {"path": spelled, "ts": 1}}});
+        std::fs::write(&reg, json.to_string()).unwrap();
         // SAFETY: tests touching this env var run in this single test only
         unsafe { std::env::set_var("OBMEM_OBSIDIAN_CONFIG", &reg) };
         assert_eq!(vault_id(&dir.join("v")).unwrap().as_deref(), Some("abc123"));

@@ -1,0 +1,3 @@
+# LF on every OS: files that obmem embeds (skills, rules) or reads (notes) must not change
+# with the checkout, or a Windows build would install CRLF copies of the skills.
+* text=auto eol=lf

@@ -104,6 +104,12 @@ fn template(ty: &str, extra: &str) -> String {
     )
 }
 
+/// `s` as a TOML string, quoted and escaped: a Windows path is full of backslashes, which a TOML
+/// basic string reads as escapes.
+fn toml_string(s: &str) -> String {
+    toml_edit::Value::from(s).to_string()
+}
+
 /// A new project's `.obmem.toml`. It says where the vault is in the repo, or that it is private:
 /// where a private vault is on a machine is for that user's config to say.
 fn project_file(cfg: &Config) -> String {
@@ -111,15 +117,25 @@ fn project_file(cfg: &Config) -> String {
         "private = true   # the vault is outside the repo: each user's own config says where"
             .to_string()
     } else {
+        // `/`-separated: the file is committed, and read on every OS.
         let pv = &cfg.project_vault;
+        let rel = pv.strip_prefix(&cfg.project_root).unwrap_or(pv);
         format!(
-            "vault = \"{}\"",
-            pv.strip_prefix(&cfg.project_root).unwrap_or(pv).display()
+            "vault = {}",
+            toml_string(&rel.to_string_lossy().replace('\\', "/"))
         )
     };
     format!(
-        "# obmem project config\n{vault}\nname = \"{}\"\n\n[secrets]\nmode = \"block\"   # or \"redact\"\nenv_files = [\".env\", \".env.local\", \".env.development\", \".env.production\"]\nscan_process_env = true\n",
-        cfg.project_name
+        "# obmem project config\n{vault}\nname = {}\n\n[secrets]\nmode = \"block\"   # or \"redact\"\nenv_files = [\".env\", \".env.local\", \".env.development\", \".env.production\"]\nscan_process_env = true\n",
+        toml_string(&cfg.project_name)
+    )
+}
+
+/// A new user's config, which names the personal vault.
+fn global_file(cfg: &Config) -> String {
+    format!(
+        "# obmem global config\nvault = {}\n",
+        toml_string(&cfg.global_vault.display().to_string())
     )
 }
 
@@ -142,20 +158,13 @@ pub fn run_beside_existing_vault(cfg: &Config) -> Result<Vec<String>> {
 }
 
 fn config_files(cfg: &Config, created: &mut Vec<String>) -> Result<()> {
-    let gv = &cfg.global_vault;
-
     put(
         Some(&cfg.project_root),
         &cfg.project_root.join(PROJECT_CONFIG_FILE),
         &project_file(cfg),
         created,
     )?;
-    put(
-        None,
-        &global_config_path(),
-        &format!("# obmem global config\nvault = \"{}\"\n", gv.display()),
-        created,
-    )
+    put(None, &global_config_path(), &global_file(cfg), created)
 }
 
 /// Project vault (shared with the team: in the repo, or a private folder outside it)
@@ -313,6 +322,32 @@ pub fn setup_snippets(bin: &str, cfg: &Config) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{GlobalFile, ProjectFile};
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_config_files_are_toml_with_windows_paths_too() {
+        let root = PathBuf::from("repo");
+        let cfg = Config {
+            project_vault: root.join("docs").join("kb"),
+            project_root: root.clone(),
+            main_root: root,
+            project_name: "my \"app\"".into(),
+            global_vault: PathBuf::from(r"C:\Users\20260011\Obsidian/AgentMemory"),
+            secrets: Default::default(),
+            audit: Default::default(),
+            auto_approve: false,
+            device: "test".into(),
+        };
+        let user: GlobalFile = toml::from_str(&global_file(&cfg)).unwrap();
+        assert_eq!(
+            user.vault.as_deref(),
+            Some(r"C:\Users\20260011\Obsidian/AgentMemory")
+        );
+        let project: ProjectFile = toml::from_str(&project_file(&cfg)).unwrap();
+        assert_eq!(project.vault.as_deref(), Some("docs/kb"));
+        assert_eq!(project.name.as_deref(), Some("my \"app\""));
+    }
 
     #[cfg(unix)]
     #[test]

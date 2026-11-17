@@ -267,6 +267,20 @@ fn attempt(
             .filter(|(n, _)| !included(n))
             .map(|(n, b)| (n.clone(), b.clone())),
     );
+    // Deletions first: on macOS and Windows a name that differs only in case opens the same file,
+    // so after a case-only rename elsewhere the new name is still the old file here until the old
+    // name is deleted.
+    for name in &plan.delete_local {
+        if current_blob(key, vault, name)?.as_ref() != local.get(name) {
+            defer(&mut report, &mut new_base, base, name);
+            continue;
+        }
+        let path = path_in(vault, name);
+        if std::fs::symlink_metadata(&path).is_ok() {
+            std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
+        }
+        report.deleted_local.push(name.clone());
+    }
     for (name, blob) in &plan.download {
         if current_blob(key, vault, name)?.as_ref() != local.get(name) {
             defer(&mut report, &mut new_base, base, name);
@@ -288,17 +302,6 @@ fn attempt(
         } else {
             report.downloaded.push(name.clone());
         }
-    }
-    for name in &plan.delete_local {
-        if current_blob(key, vault, name)?.as_ref() != local.get(name) {
-            defer(&mut report, &mut new_base, base, name);
-            continue;
-        }
-        let path = path_in(vault, name);
-        if std::fs::symlink_metadata(&path).is_ok() {
-            std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
-        }
-        report.deleted_local.push(name.clone());
     }
     report.uploaded = plan.uploaded;
     report.deleted_remote = plan.deleted_remote;
@@ -804,6 +807,34 @@ pub(crate) mod tests {
         assert!(r.deleted_remote.is_empty(), "{r:?}");
         win.sync().unwrap();
         assert_eq!(read(&win.vault, "Global/a.md").as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_rename_that_changes_only_case_reaches_the_other_device_in_one_sync() {
+        let names = |vault: &Path| -> Vec<String> {
+            std::fs::read_dir(vault.join("Global"))
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect()
+        };
+        let remote = remote::in_memory();
+        let (mac, win) = (device(&remote, "mac"), device(&remote, "win"));
+        put(&mac.vault, "Global/Note.md", "n");
+        mac.sync().unwrap();
+        win.sync().unwrap();
+        std::fs::rename(
+            mac.vault.join("Global/Note.md"),
+            mac.vault.join("Global/note.md"),
+        )
+        .unwrap();
+        mac.sync().unwrap();
+        // On macOS and Windows both names open one file: the old name must go before the new
+        // one is written, or the check that the file is unchanged stops the download and the
+        // deletion then removes the note until the next sync.
+        let r = win.sync().unwrap();
+        assert!(r.deferred.is_empty(), "{r:?}");
+        assert_eq!(names(&win.vault), ["note.md"]);
+        assert_eq!(read(&win.vault, "Global/note.md").as_deref(), Some("n"));
     }
 
     #[test]

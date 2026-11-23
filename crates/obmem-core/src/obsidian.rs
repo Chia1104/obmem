@@ -104,9 +104,16 @@ impl Backend {
     }
 }
 
-/// The Obsidian CLI command: `OBMEM_OBSIDIAN_BIN`, else `obsidian`.
+/// The Obsidian CLI command: `OBMEM_OBSIDIAN_BIN`, else `obsidian`, which is `obsidian.com` on
+/// Windows. There the CLI is the console program `Obsidian.com` next to the app, and a bare
+/// `obsidian` runs `Obsidian.exe`, the app itself, which prints nothing into a pipe.
 fn cli_bin() -> String {
-    std::env::var("OBMEM_OBSIDIAN_BIN").unwrap_or_else(|_| "obsidian".into())
+    let default = if cfg!(windows) {
+        "obsidian.com"
+    } else {
+        "obsidian"
+    };
+    std::env::var("OBMEM_OBSIDIAN_BIN").unwrap_or_else(|_| default.into())
 }
 
 pub struct Cli {

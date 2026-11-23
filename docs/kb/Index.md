@@ -39,7 +39,8 @@ author: human
 - [[rustfmt-check-exits-0-on-stdin-even-when-it-prints-a-diff]]: why the pre-commit hook compares hashes.
 - [[target-grows-because-p-obmem-gui-and-workspace-build-native-shell-with-different]]: prefer `--workspace` to `-p obmem-gui`.
 - [[a-new-npm-package-name-answers-404-for-minutes-after-its-first-publish]]: wait before calling a first publish failed.
-- [[vault-relative-paths-are-slash-separated-on-every-os-and-ci-does-not-run-on-wind]]: vault-relative paths use `/` on every OS, and Windows is tested only by hand.
+- [[vault-relative-paths-are-slash-separated-on-every-os-and-ci-does-not-run-on-wind]]: vault-relative paths use `/` on every OS, and the other Windows breakages found with them.
+- [[on-windows-cargo-install-cannot-replace-obmem-exe-while-an-agent-runs-obmem-serv]]: rename the running `obmem.exe` before `cargo install` on Windows.
 
 ## Runbooks
 - [[releasing-a-version-bump-last-then-tag-the-merged-commit]]: the order of merge, bump and tag.

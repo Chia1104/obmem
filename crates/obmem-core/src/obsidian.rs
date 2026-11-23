@@ -18,7 +18,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -187,16 +187,35 @@ pub fn not_registered(vault: &Path) -> anyhow::Error {
 
 /// Outcome of one CLI invocation.
 struct Output {
-    ok: bool,
+    status: ExitStatus,
     stdout: String,
     stderr: String,
+}
+
+/// Why a run that failed failed, from what the CLI printed. A program that prints nothing is
+/// named, because on Windows that is what `Obsidian.exe` does in place of the CLI.
+fn failure(bin: &str, o: &Output) -> String {
+    let said = if o.stderr.is_empty() {
+        &o.stdout
+    } else {
+        &o.stderr
+    };
+    if said.is_empty() {
+        format!(
+            "Obsidian CLI `{bin}` failed ({}) and printed nothing. Check that it is Obsidian's \
+             CLI: on Windows that is `Obsidian.com`, not `Obsidian.exe`.",
+            o.status
+        )
+    } else {
+        format!("Obsidian CLI failed: {said}")
+    }
 }
 
 /// The app is not running (the CLI talks to the running app; despite the docs it does not
 /// start it, verified on 1.14.5). Only a failed run counts: a successful search result can
 /// legitimately contain this very sentence (a note quoting the error).
 fn app_missing(o: &Output) -> bool {
-    !o.ok
+    !o.status.success()
         && (o.stderr.contains("unable to find Obsidian")
             || o.stdout.contains("unable to find Obsidian"))
 }
@@ -273,7 +292,7 @@ impl Cli {
             std::thread::sleep(Duration::from_millis(20));
         };
         Ok(Output {
-            ok: status.success(),
+            status,
             stdout: out_t.join().unwrap_or_default().trim().to_string(),
             stderr: err_t.join().unwrap_or_default().trim().to_string(),
         })
@@ -298,13 +317,8 @@ impl Cli {
                 );
             }
         }
-        if !o.ok {
-            let msg = if o.stderr.is_empty() {
-                &o.stdout
-            } else {
-                &o.stderr
-            };
-            bail!("Obsidian CLI failed: {msg}");
+        if !o.status.success() {
+            bail!("{}", failure(&self.bin, &o));
         }
         let out = o.stdout;
         if out == "Vault not found." {
@@ -523,10 +537,44 @@ mod tests {
         assert!(find_program("obmem-no-such-command").is_none());
     }
 
+    fn exited(code: u8) -> ExitStatus {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        #[cfg(unix)]
+        let raw = i32::from(code) << 8;
+        #[cfg(windows)]
+        let raw = u32::from(code);
+        ExitStatus::from_raw(raw)
+    }
+
+    #[test]
+    fn a_failure_says_why() {
+        let o = |out: &str, err: &str| Output {
+            status: exited(1),
+            stdout: out.into(),
+            stderr: err.into(),
+        };
+        assert_eq!(
+            failure("obsidian", &o("", "Vault is locked.")),
+            "Obsidian CLI failed: Vault is locked."
+        );
+        assert_eq!(
+            failure("obsidian", &o("Vault is locked.", "")),
+            "Obsidian CLI failed: Vault is locked."
+        );
+        // regression: `Obsidian.exe` run in place of the CLI on Windows printed nothing, and the
+        // error said nothing either
+        let silent = failure("obsidian", &o("", ""));
+        assert!(silent.contains("`obsidian`"), "{silent}");
+        assert!(silent.contains(&exited(1).to_string()), "{silent}");
+    }
+
     #[test]
     fn recognises_startup_states() {
         let o = |out: &str, err: &str| Output {
-            ok: false,
+            status: exited(1),
             stdout: out.into(),
             stderr: err.into(),
         };
@@ -536,7 +584,7 @@ mod tests {
         )));
         // regression: a successful search whose results quote that error is not "app missing"
         let hit = Output {
-            ok: true,
+            status: exited(0),
             stdout: r#"[{"file":"Knowledge/obsidian-cli-behaviour.md","matches":[{"line":9,"text":"It prints \"The CLI is unable to find Obsidian\""}]}]"#.into(),
             stderr: String::new(),
         };

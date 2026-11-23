@@ -5,19 +5,21 @@ status: active
 author: agent
 confidence: high
 created: 2026-11-09
-updated: 2026-11-14
-verified_commit: 21e8190
+updated: 2026-11-23
+verified_commit: '9955994'
 code_refs:
 - crates/obmem-core/src/obsidian.rs#vault_id
 - crates/obmem-core/src/obsidian.rs#is_empty_result
 - crates/obmem-core/src/obsidian.rs#app_missing
 - crates/obmem-core/src/obsidian.rs#parse_links
+- crates/obmem-core/src/obsidian.rs#cli_bin
 - crates/obmem-core/src/store.rs#search
 - crates/obmem-core/src/context.rs#recall
 tags:
 - obsidian
 - gotcha
-approved_at: 2026-11-14
+- windows
+approved_at: 2026-11-23
 approved_by: auto-approve
 verified_at: 2026-11-10
 verified_by: agent
@@ -45,5 +47,6 @@ Non-obvious behaviour of the official Obsidian CLI (verified on Obsidian 1.14.5)
 - **No relevance ranking** in search results.
 - **Speed:** a call takes about 5 ms while the app is running (2026-11-14), so a few calls per `memory_context` cost nothing a person notices.
 - **A new file may not be known yet:** seen once on 2026-11-14. Three seconds after a note was written, `links` answered `No links found.` and the next call, `links total`, counted its links. It did not happen again in three more tries, so the cause is not known.
+- **On Windows the CLI is `Obsidian.com`, not `Obsidian.exe`** (checked on 2026-11-23 with Obsidian 1.15.1). The install folder (`%LOCALAPPDATA%\Programs\Obsidian`) holds `Obsidian.exe`, `Obsidian.com` and an extensionless `obsidian`, which are all PE binaries. With its output piped, `Obsidian.exe vault=<id> search query=feedback` printed nothing, while `Obsidian.com` with the same arguments printed the matching paths. From a console both answer `version`. A bare `obsidian` in `Command::new` resolves to `obsidian.exe` on Windows, so before this was known every CLI call came back empty and obmem reported `Obsidian CLI failed: ` with no text. `cli_bin` therefore defaults to `obsidian.com` on Windows. With that, both backends gave the same answers on this repo's vaults: the same search results, the same `memory_context` answer for 3 tasks, the same links and backlinks of 3 notes, and the same 57 audit lines.
 
 Background: [[use-the-obsidian-cli-for-search-and-link-checks-instead-of-an-own-index]].

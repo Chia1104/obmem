@@ -53,7 +53,7 @@ obmem keeps no index of its own. Search, a note's links and backlinks, unresolve
 
 ## Without Obsidian (`headless.rs`, `query.rs`, `links.rs`)
 
-`obsidian::Api` has two implementations. `Backend::detect` picks one when a store opens: `Cli` when the Obsidian CLI command (`OBMEM_OBSIDIAN_BIN`, else `obsidian`) is on `PATH`, else `Headless`.
+`obsidian::Api` has two implementations. `Backend::detect` picks one when a store opens: `Cli` when the Obsidian CLI command (`OBMEM_OBSIDIAN_BIN`, else `obsidian`, which is `obsidian.com` on Windows) is on `PATH`, else `Headless`.
 - The choice holds for the life of the store. A failed CLI call never falls back to `Headless`: the two differ in details, and on a machine with Obsidian a problem with it must be reported.
 - Each vault of a store has its own backend, and they differ in one case (`Backend::for_project_vault`): in a linked git worktree on a machine with Obsidian, the repo's vault is a copy that Obsidian has not opened, and `Headless` reads it. This follows from where the vault is, when the store opens. It is not a fallback: a copy that Obsidian knows is asked there, and so are the main checkout's vault and a private vault.
 - `Headless` reads the vault on every call, like the catalog. Do not add an index.

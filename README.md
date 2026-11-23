@@ -35,7 +35,7 @@ If Obsidian is closed, obmem starts it in the background. If the app or a vault 
 
 ### Without Obsidian
 
-When no `obsidian` command is on `PATH`, obmem needs nothing from the list above. It reads the vault files itself for search, backlinks and link checks, and `obmem status` shows `search: built in`. The choice is made when obmem starts: on a machine that has the CLI, obmem never falls back to its own search.
+When no `obsidian` command (`obsidian.com` on Windows) is on `PATH`, obmem needs nothing from the list above. It reads the vault files itself for search, backlinks and link checks, and `obmem status` shows `search: built in`. The choice is made when obmem starts: on a machine that has the CLI, obmem never falls back to its own search.
 
 The built-in search differs from Obsidian in these ways:
 - It supports words, `"phrases"`, `OR`, `-exclusion`, `( )`, `file:`, `path:`, `content:`, `tag:`, `line:( )`, `[property]` and `[property:value]`. It refuses regular expressions and `block:`, `section:`, `task:`, `match-case:` and `ignore-case:` with an error.
